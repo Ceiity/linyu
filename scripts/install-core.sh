@@ -13,6 +13,7 @@ main(){
   : "${ASTRBOT_WEB_PORT:=$(find_free_port 6185)}"; : "${ASTRBOT_WS_PORT:=$(find_free_port 6199)}"; save_state_var ASTRBOT_WEB_PORT "$ASTRBOT_WEB_PORT"; save_state_var ASTRBOT_WS_PORT "$ASTRBOT_WS_PORT"
   local napcat_count; if [[ -n "${NAPCAT_COUNT:-}" ]]; then napcat_count="$NAPCAT_COUNT"; else read -r -p $'\u8bf7\u8f93\u5165 NapCat \u6570\u91cf\uff1a' napcat_count; fi; [[ -n "$napcat_count" ]] || napcat_count=1
   deploy_astrbot
+  apply_astrbot_default_config
   add_napcat_instances "$napcat_count"
   step "Running health checks"; retry 3 5 check_health || warn "Some health checks failed; inspect logs."
   write_deploy_info
