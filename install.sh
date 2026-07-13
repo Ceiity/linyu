@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ ! -f "$SCRIPT_DIR/scripts/install-core.sh" ]]; then
-  BOOTSTRAP_REPO="${ASTRBOT_DEPLOY_REPO:-https://github.com/astrbot-deploy/AstrBot-Deploy.git}"
+  BOOTSTRAP_REPO="${ASTRBOT_DEPLOY_REPO:-https://github.com/Ceiity/linyu.git}"
   PREFIX="${INSTALL_PREFIX:-/opt/astrbot}"
   command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y git curl ca-certificates; }
   mkdir -p "$PREFIX"
