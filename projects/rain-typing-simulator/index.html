@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rain Typing Simulator</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; background: radial-gradient(circle at top, #25324d 0, #10131f 45%, #090b12 100%); color: #f5f7ff; display: flex; align-items: center; justify-content: center; padding: 28px; }
+    .card { width: min(760px, 100%); border: 1px solid rgba(255,255,255,.14); background: rgba(13, 18, 32, .78); border-radius: 24px; padding: 34px; box-shadow: 0 20px 60px rgba(0,0,0,.35); backdrop-filter: blur(16px); }
+    h1 { margin: 0 0 8px; font-size: clamp(32px, 7vw, 58px); letter-spacing: -.04em; }
+    .cn { color: #a9b8ff; margin-bottom: 22px; font-size: 18px; }
+    p { line-height: 1.8; color: #d8ddf4; }
+    .actions { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 28px; }
+    a.button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: #08111f; background: #b8c7ff; padding: 13px 18px; border-radius: 14px; font-weight: 700; }
+    a.secondary { background: rgba(255,255,255,.12); color: #f5f7ff; border: 1px solid rgba(255,255,255,.15); }
+    .note { margin-top: 22px; font-size: 14px; color: #9ba6c8; }
+    code { background: rgba(255,255,255,.1); padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Rain Typing Simulator</h1>
+    <div class="cn">淋雨模拟打字</div>
+    <p>这是一个 Windows 桌面小工具项目，包含可执行程序和完整源码。项目目录已经改成英文：<code>rain-typing-simulator</code>。</p>
+    <p>你可以直接下载程序运行，也可以查看源码自行编译。</p>
+    <div class="actions">
+      <a class="button" href="./RainTypingSimulator.exe" download>下载 RainTypingSimulator.exe</a>
+      <a class="button secondary" href="./source/">查看源码目录</a>
+      <a class="button secondary" href="https://github.com/Ceiity/linyu/tree/main/projects/rain-typing-simulator">GitHub 项目源码</a>
+    </div>
+    <div class="note">如果浏览器拦截 exe 下载，请在下载提示里选择保留；源码位于 <code>source/</code>。</div>
+  </main>
+</body>
+</html>
