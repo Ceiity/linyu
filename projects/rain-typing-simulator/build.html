@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rain Typing Simulator - &#x6253;&#x5305;&#x6559;&#x7A0B;</title>
+  <style>
+    body{margin:0;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;background:#10131f;color:#f7f8ff;padding:32px;line-height:1.8;}
+    main{max-width:900px;margin:0 auto;}
+    a{color:#b8c7ff;text-decoration:none;} a:hover{text-decoration:underline;}
+    h1{font-size:42px;margin:8px 0 18px;}
+    h2{margin-top:34px;color:#dfe6ff;}
+    pre{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:16px;overflow:auto;}
+    code{font-family:Consolas,Monaco,monospace;}
+    .back{display:inline-block;margin-bottom:18px;}
+    .card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:22px;}
+  </style>
+</head>
+<body>
+<main>
+  <a class="back" href="./">&#x2190; &#x8FD4;&#x56DE;&#x9879;&#x76EE;&#x9875;</a>
+  <h1>Rain Typing Simulator &#x6253;&#x5305;&#x6559;&#x7A0B;</h1>
+  <div class="card"><p>&#x8FD9;&#x4E2A;&#x9879;&#x76EE;&#x662F; Windows C++ &#x684C;&#x9762;&#x7A0B;&#x5E8F;&#xFF0C;&#x4F7F;&#x7528; <code>clang++</code> &#x548C; <code>windres</code> &#x7F16;&#x8BD1;&#x3002;&#x4E0B;&#x9762;&#x662F;&#x5B8C;&#x6574;&#x6253;&#x5305;&#x6B65;&#x9AA4;&#x3002;</p></div>
+  <h2>&#x4E00;&#x3001;&#x51C6;&#x5907;&#x73AF;&#x5883;</h2>
+  <p>&#x9700;&#x8981;&#x4E00;&#x53F0; Windows &#x7535;&#x8111;&#xFF0C;&#x6253;&#x5F00; PowerShell&#xFF0C;&#x5148;&#x5B89;&#x88C5; LLVM-MinGW&#xFF1A;</p>
+  <pre><code>winget install MartinStorsjo.LLVM-MinGW.UCRT</code></pre>
+  <p>&#x5B89;&#x88C5;&#x5B8C;&#x6210;&#x540E;&#xFF0C;&#x91CD;&#x65B0;&#x6253;&#x5F00; PowerShell&#x3002;</p>
+  <h2>&#x4E8C;&#x3001;&#x8FDB;&#x5165;&#x6E90;&#x7801;&#x76EE;&#x5F55;</h2>
+  <pre><code>cd projectsain-typing-simulator\source</code></pre>
+  <h2>&#x4E09;&#x3001;&#x5141;&#x8BB8;&#x5F53;&#x524D;&#x7A97;&#x53E3;&#x8FD0;&#x884C;&#x811A;&#x672C;</h2>
+  <pre><code>Set-ExecutionPolicy -Scope Process Bypass -Force</code></pre>
+  <h2>&#x56DB;&#x3001;&#x6267;&#x884C;&#x6253;&#x5305;&#x811A;&#x672C;</h2>
+  <pre><code>.uild_cpp.ps1</code></pre>
+  <h2>&#x4E94;&#x3001;&#x8F93;&#x51FA;&#x4F4D;&#x7F6E;</h2>
+  <p>&#x6210;&#x529F;&#x540E;&#x4F1A;&#x751F;&#x6210;&#xFF1A;</p>
+  <pre><code>projects/rain-typing-simulator/outputs/&#x6DCB;&#x96E8;.exe</code></pre>
+  <h2>&#x5E38;&#x89C1;&#x95EE;&#x9898;</h2>
+  <p><strong>&#x627E;&#x4E0D;&#x5230; clang++ &#x6216; windres&#xFF1A;</strong>&#x91CD;&#x65B0;&#x5B89;&#x88C5; LLVM-MinGW&#xFF0C;&#x7136;&#x540E;&#x91CD;&#x542F; PowerShell&#x3002;</p>
+  <p><strong>&#x7981;&#x6B62;&#x8FD0;&#x884C;&#x811A;&#x672C;&#xFF1A;</strong>&#x6267;&#x884C; <code>Set-ExecutionPolicy -Scope Process Bypass -Force</code>&#x3002;</p>
+  <p><strong>&#x4E0B;&#x8F7D; exe &#x88AB;&#x63D0;&#x793A;&#x98CE;&#x9669;&#xFF1A;</strong>&#x4E2A;&#x4EBA;&#x7F16;&#x8BD1;&#x7684; Windows &#x7A0B;&#x5E8F;&#x5E38;&#x89C1;&#x60C5;&#x51B5;&#xFF0C;&#x53EF;&#x4EE5;&#x9009;&#x62E9;&#x4FDD;&#x7559;&#xFF0C;&#x6216;&#x81EA;&#x884C;&#x7F16;&#x8BD1;&#x3002;</p>
+  <h2>&#x624B;&#x52A8;&#x7F16;&#x8BD1;&#x547D;&#x4EE4;</h2>
+  <pre><code>windres resource.rc -O coff -o resource.o
+clang++ -std=c++17 -O2 -municode -mwindows -static main.cpp resource.o -o ..\outputs\&#x6DCB;&#x96E8;.exe -lcomctl32 -lpsapi -lwinmm -lshell32 -lcomdlg32 -ldwmapi -lgdi32 -lgdiplus -lole32 -ladvapi32 -lwinhttp -liphlpapi -limm32</code></pre>
+</main>
+</body>
+</html>

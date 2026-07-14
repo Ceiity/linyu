@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = Split-Path -Parent $root
@@ -36,12 +36,12 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Built: $out"
 
-# ========== 自动签名 ==========
-Write-Host "Signing with self-signed certificate..."
-$cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -match "淋雨|Seagull" } | Select-Object -First 1
+# Optional code signing. If a matching local certificate exists, sign the generated exe.
+Write-Host "Signing with self-signed certificate if available..."
+$cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -match "$([char]0x6DCB)$([char]0x96E8)|Seagull" } | Select-Object -First 1
 if ($cert) {
     Set-AuthenticodeSignature -Certificate $cert -FilePath $out -TimestampServer "http://timestamp.digicert.com" | Out-Null
     Write-Host "Signed: $out"
 } else {
-    Write-Host "WARNING: No signing cert found. Build unsigned."
+    Write-Host "No signing cert found. Build unsigned."
 }
