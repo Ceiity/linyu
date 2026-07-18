@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$THIS_DIR/.." && pwd)"
-source "$PROJECT_DIR/lib/deploy_info.sh"
+source "$PROJECT_DIR/lib/ops.sh"
 trap trap_error ERR
 banner(){ printf '%s\n' "${C_MAGENTA}${C_BOLD}AstrBot-Deploy${C_RESET} - Docker one-click deployment for AstrBot + NapCat"; }
 main(){

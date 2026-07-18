@@ -1,7 +1,20 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
-install_dependencies(){ step "Installing system dependencies"; export DEBIAN_FRONTEND=noninteractive; apt-get update -y; apt-get install -y ca-certificates curl wget git gnupg lsb-release jq tar gzip coreutils iproute2 procps openssl; }
+wait_apt_locks(){
+  local i
+  for i in $(seq 1 90); do
+    if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1 || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then
+      warn "Waiting for apt/dpkg lock ${i}/90"
+      sleep 10
+    else
+      return 0
+    fi
+  done
+  fail "apt/dpkg lock wait timeout"
+  return 1
+}
+install_dependencies(){ step "Installing system dependencies"; export DEBIAN_FRONTEND=noninteractive; wait_apt_locks; apt-get update -y; wait_apt_locks; apt-get install -y ca-certificates curl wget git gnupg lsb-release jq tar gzip coreutils iproute2 procps openssl; }
 install_docker(){
   if have_cmd docker && docker version >/dev/null 2>&1; then success "Docker already installed: $(docker --version)"; else
     step "Installing Docker"; apt-get install -y docker.io || true; apt-get install -y docker-compose-plugin docker-compose || true; if ! have_cmd docker; then curl -fsSL https://get.docker.com | sh; fi

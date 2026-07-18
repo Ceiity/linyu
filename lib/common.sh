@@ -14,7 +14,13 @@ private_ip(){ hostname -I 2>/dev/null | awk '{print $1}' || ip route get 1.1.1.1
 os_pretty(){ if [[ -r /etc/os-release ]]; then . /etc/os-release; echo "${PRETTY_NAME:-$ID $VERSION_ID}"; else uname -a; fi; }
 validate_os(){ if [[ -r /etc/os-release ]]; then . /etc/os-release; case "${ID:-}" in ubuntu|debian) success "OS: ${PRETTY_NAME:-$ID}";; *) warn "OS ${PRETTY_NAME:-unknown}; Debian/Ubuntu are the primary targets; continuing.";; esac; fi; }
 validate_arch(){ local arch; arch="$(uname -m)"; case "$arch" in x86_64|amd64|aarch64|arm64) success "CPU architecture: $arch";; *) fail "Unsupported CPU architecture: $arch"; exit 1;; esac; }
-network_check(){ retry 3 2 curl -fsS --max-time 8 https://github.com >/dev/null && success "Network check passed" || { fail "Cannot reach GitHub/public network. Check DNS, firewall or proxy."; exit 1; }; }
+network_check(){
+  if retry 2 2 curl -fsS --max-time 8 https://github.com >/dev/null; then
+    success "Network check passed"
+  else
+    warn "GitHub connectivity is unstable; continuing because apt/Docker may still work."
+  fi
+}
 compose_cmd(){ if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; else return 1; fi; }
 port_in_use(){ local p="$1"; if have_cmd ss; then ss -ltnH "sport = :$p" 2>/dev/null | grep -q .; elif have_cmd netstat; then netstat -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]$p$"; else timeout 1 bash -c "</dev/tcp/127.0.0.1/$p" >/dev/null 2>&1; fi; }
 find_free_port(){ local p="$1" limit="${2:-2000}" i; for ((i=0;i<limit;i++)); do if ! port_in_use "$((p+i))"; then echo "$((p+i))"; return 0; fi; done; return 1; }
