@@ -13,6 +13,14 @@ setup_panel(){
   save_state_var WEB_ADMIN_HOST "${WEB_ADMIN_HOST:-0.0.0.0}"
   save_state_var PROJECT_DIR "$PROJECT_DIR"
   mkdir -p "$INSTALL_PREFIX/uploads" "$INSTALL_PREFIX/logs"
+  if ! python3 - <<'PY' >/dev/null 2>&1
+import qrcode
+PY
+  then
+    apt-get update -y >/dev/null
+    apt-get install -y python3-pip >/dev/null
+    python3 -m pip install --break-system-packages -r "$PROJECT_DIR/panel/requirements.txt" >/dev/null 2>&1 || python3 -m pip install -r "$PROJECT_DIR/panel/requirements.txt" >/dev/null
+  fi
   if systemctl list-unit-files astrbot-deploy-web.service >/dev/null 2>&1; then
     systemctl disable --now astrbot-deploy-web.service >/dev/null 2>&1 || true
   fi

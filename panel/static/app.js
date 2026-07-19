@@ -50,7 +50,39 @@ function tableNap(rows){return `<div class="table-wrap"><table class="table"><th
 function mobileNap(rows){return `<div class="mobile-list">${rows.map(r=>`<div class="card"><h3>${safeText(botName(r.name))} ${statusBadge(r.status)}</h3><p class="compact-url">内部容器：${r.name}</p><p><a class="link-pill" href="${safeHref(napLoginUrl(r))}" target="_blank" rel="noopener noreferrer">打开 ${safeText(botName(r.name))} WebUI</a></p><p class="compact-url">${safeText(r.url)}</p><div class="actions">${oneNapBtns(r)}</div></div>`).join("")||"<div class='card'>暂无机器人</div>"}</div>`}
 function qrIcon(){return `<svg class="qr-mini" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.8A.8.8 0 0 1 4.8 4h4.4a.8.8 0 0 1 .8.8v4.4a.8.8 0 0 1-.8.8H4.8A.8.8 0 0 1 4 9.2V4.8Z"/><path d="M14 4.8a.8.8 0 0 1 .8-.8h4.4a.8.8 0 0 1 .8.8v4.4a.8.8 0 0 1-.8.8h-4.4a.8.8 0 0 1-.8-.8V4.8Z"/><path d="M4 14.8a.8.8 0 0 1 .8-.8h4.4a.8.8 0 0 1 .8.8v4.4a.8.8 0 0 1-.8.8H4.8a.8.8 0 0 1-.8-.8v-4.4Z"/><path d="M14 14h2.5M19.5 14h.5M14 17h1M18 17h2M14 20h6M7 7h.01M17 7h.01M7 17h.01"/></svg>`}
 function oneNapBtns(r){const n=typeof r==="string"?r:r.name,u=typeof r==="string"?"":napLoginUrl(r);return `<button class="tiny scan" onclick="showQrLogin('${q(n)}','${q(u)}')">${qrIcon()}扫码登录</button><button class="tiny success" onclick="napAct('start','${q(n)}')">启动</button><button class="tiny" onclick="napAct('stop','${q(n)}')">停止</button><button class="tiny primary" onclick="napAct('restart','${q(n)}')">重启</button><button class="tiny" onclick="showLog('${q(n)}')">日志</button><button class="tiny danger" onclick="confirmDo('输入 ${n} 确认删除','${n}',()=>napAct('delete','${n}',{confirm:'${n}',keep_data:true}))">删除</button>`}
-function showQrLogin(name,url){const title=`${botName(name)} 扫码登录`;openModal(`<h3>${safeText(title)}</h3><p class="muted scan-tip">按 NapCat 官方流程：进入 WebUI 后点击 QQ 登录里的 QRCode。下面只保留登录区域，看到二维码后直接扫码。</p><div class="scan-frame-wrap single"><iframe class="scan-frame" src="${safeHref(url)}" title="${q(title)}"></iframe></div><div class="toolbar scan-actions"><a class="link-pill" href="${safeHref(url)}" target="_blank" rel="noopener noreferrer">新窗口打开</a><button onclick="copy('${q(url)}')">复制链接</button></div>`,null)}
+async function showQrLogin(name,url){
+  if(state.qrTimer){clearInterval(state.qrTimer);state.qrTimer=null}
+  const title=`${botName(name)} ????`;
+  openModal(`<div class="qr-login"><div class="qr-login-head"><div class="scan-art">${qrIcon()}</div><div><h3>${safeText(title)}</h3><p class="muted">??? NapCat ?? QQ ?????...</p></div></div><div id="qrLoginBody" class="qr-login-body"><div class="qr-skeleton"></div></div><div class="qr-status muted" id="qrLoginStatus">???</div><div class="toolbar scan-actions"><button class="primary" onclick="refreshNapQr('${q(name)}')">?????</button><a class="link-pill" href="${safeHref(url)}" target="_blank" rel="noopener noreferrer">?? NapCat WebUI</a></div></div>`,null);
+  await loadNapQr(name);
+  state.qrTimer=setInterval(()=>pollNapQr(name),3000);
+}
+async function loadNapQr(name){
+  const box=$("#qrLoginBody"),st=$("#qrLoginStatus");
+  try{
+    const d=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"qrcode"})});
+    if(box)box.innerHTML=`<div class="qr-card"><div class="qr-svg">${d.svg}</div></div><div class="qr-help">???? QQ ???????</div>`;
+    if(st)st.textContent="??????";
+  }catch(e){
+    if(box)box.innerHTML=`<div class="qr-error">${safeText(e.message||e)}</div>`;
+    if(st)st.textContent="???????????????";
+  }
+}
+async function refreshNapQr(name){
+  const st=$("#qrLoginStatus"); if(st)st.textContent="???????...";
+  await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"refresh"})}).catch(()=>{});
+  setTimeout(()=>loadNapQr(name),900);
+}
+async function pollNapQr(name){
+  if($("#modal")?.classList.contains("hidden")){clearInterval(state.qrTimer);state.qrTimer=null;return}
+  try{
+    const r=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"status"})});
+    const data=r.data||{}; const st=$("#qrLoginStatus");
+    if(data.isLogin){if(st)st.textContent="????";toast("QQ ????");clearInterval(state.qrTimer);state.qrTimer=null;refresh();return}
+    if(data.isOffline){if(st)st.textContent="??????????";return}
+    if(data.loginError){if(st)st.textContent=data.loginError}
+  }catch(e){}
+}
 async function napAdd(){const count=Number($("#napCount").value||1);const t=await req("/api/napcat/action",{method:"POST",body:JSON.stringify({action:"add",count})});toast("任务已创建");showTask(t.id)}
 async function napAct(action,name,extra={}){const res=await req("/api/napcat/action",{method:"POST",body:JSON.stringify(Object.assign({action,name},extra))});if(res&&res.id){toast("任务已创建，正在等待服务器完成");showTask(res.id);return}toast("操作已执行，正在刷新");setTimeout(refresh,900)}
 function showLog(n){state.page="logs";renderNav();logs(n)}
@@ -82,7 +114,7 @@ function taskPanel(){return `<div class="card span12"><h3>任务进度</h3><div 
 async function loadTasks(){try{state.tasks=await req("/api/tasks");const el=$("#tasks");if(el)el.innerHTML=state.tasks.slice(-8).reverse().map(t=>`<div class="file-card"><div><b>${safeText(t.title)}</b><div class="muted">${taskStatusText(t.status)} / ${safeText(t.updated_at)}</div><div class="progress"><span style="width:${t.progress}%"></span></div></div><button class="tiny" onclick="showTask('${q(t.id)}')">查看</button></div>`).join("")||"暂无任务"}catch{}}
 async function showTask(id){const draw=async()=>{const t=await req(`/api/tasks/${id}`);openModal(`<h3>${safeText(t.title)}</h3><p class="muted">状态: ${taskStatusText(t.status)} / 进度: ${t.progress}%</p><div class="progress"><span style="width:${t.progress}%"></span></div><pre class="code">${esc((t.logs||[]).join("\n"))}</pre>`,null);const box=$("#modal .code");if(box)box.scrollTop=box.scrollHeight;if(t.status==="success"){toast("任务完成");refresh();return true}if(t.status==="failed"){toast("任务失败，请看输出");return true}return false};if(await draw())return;const timer=setInterval(async()=>{try{if(await draw())clearInterval(timer)}catch{clearInterval(timer)}},2000)}
 function openModal(html,ok){$("#modalBody").innerHTML=html;$("#modal").classList.remove("hidden");$("#modalOk").style.display=ok?"":"none";$("#modalOk").onclick=ok||(()=>{})}
-function closeModal(){$("#modal").classList.add("hidden")}
+function closeModal(){if(state.qrTimer){clearInterval(state.qrTimer);state.qrTimer=null}$("#modal").classList.add("hidden")}
 function confirmDo(msg,word,fn){openModal(`<h3>二次确认</h3><p>${safeText(msg)}</p><input id="confirmInput" placeholder="${q(word)}">`,async()=>{if($("#confirmInput").value!==word)return toast("确认文字不匹配");closeModal();await fn()})}
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}
 

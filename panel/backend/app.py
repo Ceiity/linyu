@@ -22,6 +22,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
+from urllib import request as urlrequest
 
 APP_VERSION = "2.0.0"
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", "/opt/astrbot/AstrBot-Deploy"))
@@ -321,6 +322,51 @@ def parse_napcat_index() -> list[dict]:
             status = container_status(p[0])
             rows.append({"name": p[0], "webui_port": p[1], "ws_port": p[2], "http_port": p[3], "token": p[4], "url": "%s:%s/webui" % (origin, p[1]), "login_url": "%s:%s/webui?token=%s" % (origin, p[1], quote(p[4])), "status": status.get("status"), "running": status.get("running"), "directory": str(Path(st.get("NAPCAT_BASE_DIR", str(INSTALL_PREFIX / "napcat"))) / p[0])})
     return rows
+
+
+def napcat_row(name: str) -> dict:
+    safe = safe_name(name)
+    for row in parse_napcat_index():
+        if row.get("name") == safe:
+            return row
+    raise ValueError("???????%s" % safe)
+
+
+def http_json_post(url: str, payload: dict | None = None, headers: dict | None = None, timeout: int = 10) -> dict:
+    data = json.dumps(payload or {}).encode("utf-8")
+    req = urlrequest.Request(url, data=data, method="POST", headers={"Content-Type": "application/json", **(headers or {})})
+    with urlrequest.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    return json.loads(raw)
+
+
+def napcat_webui_credential(row: dict) -> str:
+    token = str(row.get("token") or "")
+    token_hash = hashlib.sha256((token + ".napcat").encode("utf-8")).hexdigest()
+    port = str(row["webui_port"])
+    res = http_json_post("http://127.0.0.1:%s/api/auth/login" % port, {"hash": token_hash})
+    if int(res.get("code", -1)) != 0:
+        raise RuntimeError("NapCat WebUI ?????%s" % res.get("message", "unknown"))
+    cred = (res.get("data") or {}).get("Credential")
+    if not cred:
+        raise RuntimeError("NapCat WebUI ???? Credential")
+    return cred
+
+
+def napcat_webui_call(row: dict, path: str, payload: dict | None = None) -> dict:
+    cred = napcat_webui_credential(row)
+    port = str(row["webui_port"])
+    return http_json_post("http://127.0.0.1:%s/api/%s" % (port, path.lstrip("/")), payload or {}, {"Authorization": "Bearer " + cred})
+
+
+def qr_svg_for_text(text_value: str) -> str:
+    try:
+        import qrcode
+        import qrcode.image.svg
+    except Exception as e:
+        raise RuntimeError("????????????? python3-qrcode ? pip install qrcode?????????%s" % text_value) from e
+    img = qrcode.make(text_value, image_factory=qrcode.image.svg.SvgPathImage, box_size=10, border=2)
+    return img.to_string(encoding="unicode")
 
 
 def system_metrics() -> dict:
@@ -673,6 +719,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_api(api(True, t.to_dict()))
             if p.path == "/api/napcat/action":
                 return self.napcat_action(user)
+            if p.path == "/api/napcat/qq-login":
+                return self.napcat_qq_login(user)
             if p.path == "/api/deploy/start":
                 return self.deploy_start(user)
             if p.path == "/api/backup/create":
@@ -766,6 +814,31 @@ class Handler(BaseHTTPRequestHandler):
         code, out = docker(mapping[action], timeout=120)
         audit(user, "astrbot." + action, {}, code == 0)
         self.send_api(api(code == 0, {"output": out}, "完成" if code == 0 else out))
+
+    def napcat_qq_login(self, user: str):
+        data = self.read_json()
+        name = safe_name(str(data.get("name", "")))
+        action = str(data.get("action", "qrcode"))
+        row = napcat_row(name)
+        if action == "refresh":
+            res = napcat_webui_call(row, "/QQLogin/RefreshQRcode")
+            audit(user, "napcat.qq.refresh", {"name": name}, int(res.get("code", -1)) == 0)
+            return self.send_api(api(int(res.get("code", -1)) == 0, res, res.get("message", "")))
+        if action == "status":
+            res = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
+            audit(user, "napcat.qq.status", {"name": name}, int(res.get("code", -1)) == 0)
+            return self.send_api(api(int(res.get("code", -1)) == 0, res, res.get("message", "")))
+        if action == "qrcode":
+            res = napcat_webui_call(row, "/QQLogin/GetQQLoginQrcode")
+            if int(res.get("code", -1)) != 0:
+                return self.send_api(api(False, res, res.get("message", "???????")))
+            qrcode_url = (res.get("data") or {}).get("qrcode") or ""
+            if not qrcode_url:
+                return self.send_api(api(False, res, "NapCat ????????????????????????"))
+            svg = qr_svg_for_text(qrcode_url)
+            audit(user, "napcat.qq.qrcode", {"name": name}, True)
+            return self.send_api(api(True, {"name": name, "qrcode_url": qrcode_url, "svg": svg, "status": res}))
+        raise ValueError("QQ ???????")
 
     def napcat_action(self, user: str):
         data = self.read_json()

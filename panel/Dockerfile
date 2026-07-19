@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt/astrbot/AstrBot-Deploy
 COPY . /opt/astrbot/AstrBot-Deploy
+RUN pip install --no-cache-dir -r panel/requirements.txt
 
 EXPOSE 7070
 CMD ["python3", "panel/backend/app.py", "--host", "0.0.0.0", "--port", "7070"]
