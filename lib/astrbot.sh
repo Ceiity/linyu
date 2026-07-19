@@ -33,6 +33,10 @@ deploy_astrbot(){ step "Deploying AstrBot with official image ${ASTRBOT_IMAGE}";
 wait_astrbot_web(){ local timeout="$1" i; for ((i=1;i<=timeout;i++)); do curl -fsS --max-time 2 "http://127.0.0.1:${ASTRBOT_WEB_PORT}/" >/dev/null 2>&1 && return 0; sleep 1; done; return 1; }
 get_astrbot_password(){
   local pass="" logs
+  if [[ -f "$DATA_DIR/cmd_config.json" ]] && jq -e '.dashboard.password_change_required == false' "$DATA_DIR/cmd_config.json" >/dev/null 2>&1; then
+    echo "初始密码已被更改"
+    return 0
+  fi
   logs="$(docker logs "$ASTRBOT_CONTAINER" 2>&1 || true)"
   pass="$(printf '%s\n' "$logs" | sed -nE 's/.*Initial password:[[:space:]]*([A-Za-z0-9._@#%+=:-]{6,}).*/\1/p' | tail -n1 || true)"
   if [[ -z "$pass" ]]; then

@@ -491,6 +491,11 @@ def container_status_many(names: list[str]) -> dict[str, dict]:
 
 def current_astrbot_password() -> str:
     st = shell_state()
+    cfg_path = INSTALL_PREFIX / "data" / "cmd_config.json"
+    cfg = read_json(cfg_path, {})
+    dashboard = cfg.get("dashboard") if isinstance(cfg, dict) else {}
+    if isinstance(dashboard, dict) and dashboard.get("password_change_required") is False:
+        return "初始密码已被更改"
     name = st.get("ASTRBOT_CONTAINER", "astrbot")
     code, out = docker(["logs", "--tail", "1200", name], timeout=20)
     if code == 0 and out:
