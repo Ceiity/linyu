@@ -31,7 +31,18 @@ EOF
 }
 deploy_astrbot(){ step "Deploying AstrBot with official image ${ASTRBOT_IMAGE}"; local file; file="$(generate_astrbot_compose)"; compose_pull "$file" || warn "Image pull failed; trying to start with local image/cache."; compose_up "$file"; wait_container "$ASTRBOT_CONTAINER" 180 || { docker logs "$ASTRBOT_CONTAINER" --tail 120 || true; fail "AstrBot container did not become running."; exit 1; }; wait_astrbot_web 180 || warn "AstrBot WebUI did not return HTTP success yet; container is running."; success "AstrBot started: http://$(private_ip):${ASTRBOT_WEB_PORT}"; }
 wait_astrbot_web(){ local timeout="$1" i; for ((i=1;i<=timeout;i++)); do curl -fsS --max-time 2 "http://127.0.0.1:${ASTRBOT_WEB_PORT}/" >/dev/null 2>&1 && return 0; sleep 1; done; return 1; }
-get_astrbot_password(){ local pass="" zh1 zh2; zh1=$'\345\210\235\345\247\213\345\257\206\347\240\201'; zh2=$'\351\232\217\346\234\272\345\210\235\345\247\213\345\257\206\347\240\201'; pass="$(docker logs "$ASTRBOT_CONTAINER" 2>&1 | grep -Ei "$zh1|$zh2|password|passwd" | sed -nE 's/.*[^A-Za-z0-9._@#%+=:-]([A-Za-z0-9._@#%+=:-]{6,}).*/\1/p' | tail -n1 || true)"; if [[ -z "$pass" ]]; then pass="$(grep -RIEho '"?(password|passwd|initial_password)"?[[:space:]]*[:=][[:space:]]*"?[A-Za-z0-9._@#%+=:-]{6,}' "$DATA_DIR" 2>/dev/null | sed -nE 's/.*[:=][[:space:]]*"?([^"[:space:]]+).*/\1/p' | tail -n1 || true)"; fi; [[ -n "$pass" ]] && echo "$pass" || echo "Not parsed automatically; inspect docker logs ${ASTRBOT_CONTAINER}"; }
+get_astrbot_password(){
+  local pass="" logs
+  logs="$(docker logs "$ASTRBOT_CONTAINER" 2>&1 || true)"
+  pass="$(printf '%s\n' "$logs" | sed -nE 's/.*Initial password:[[:space:]]*([A-Za-z0-9._@#%+=:-]{6,}).*/\1/p' | tail -n1 || true)"
+  if [[ -z "$pass" ]]; then
+    pass="$(printf '%s\n' "$logs" | sed -nE 's/.*(初始密码|随机初始密码)[^A-Za-z0-9._@#%+=:-]*([A-Za-z0-9._@#%+=:-]{6,}).*/\2/p' | tail -n1 || true)"
+  fi
+  if [[ -z "$pass" ]]; then
+    pass="$(grep -RIEho '"?(password|passwd|initial_password)"?[[:space:]]*[:=][[:space:]]*"?[A-Za-z0-9._@#%+=:-]{6,}' "$DATA_DIR" 2>/dev/null | sed -nE 's/.*[:=][[:space:]]*"?([^"[:space:]]+).*/\1/p' | tail -n1 || true)"
+  fi
+  [[ -n "$pass" ]] && echo "$pass" || echo "Not parsed automatically; inspect docker logs ${ASTRBOT_CONTAINER}"
+}
 get_astrbot_token(){ echo "${ASTRBOT_REVERSE_WS_TOKEN}"; }
 
 astrbot_common_jq_filter(){

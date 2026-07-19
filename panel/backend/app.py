@@ -489,6 +489,21 @@ def container_status_many(names: list[str]) -> dict[str, dict]:
     return result
 
 
+def current_astrbot_password() -> str:
+    st = shell_state()
+    name = st.get("ASTRBOT_CONTAINER", "astrbot")
+    code, out = docker(["logs", "--tail", "1200", name], timeout=20)
+    if code == 0 and out:
+        matches = re.findall(r"Initial password:\s*([A-Za-z0-9._@#%+=:-]{6,})", out)
+        if matches:
+            return matches[-1]
+        matches = re.findall(r"(?:初始密码|随机初始密码)[^A-Za-z0-9._@#%+=:-]*([A-Za-z0-9._@#%+=:-]{6,})", out)
+        if matches:
+            return matches[-1]
+    deploy = Path(st.get("DEPLOY_INFO_FILE", str(INSTALL_PREFIX / "deploy_info.txt")))
+    return parse_deploy_line(deploy, "AstrBot initial random password")
+
+
 def recovery_status() -> dict:
     paths = [INSTALL_PREFIX / "napcat_recovery_status.json", INSTALL_PREFIX / "logs" / "napcat-watchdog-status.json"]
     for path in paths:
@@ -643,7 +658,7 @@ def astrbot_data(origin: str | None = None) -> dict:
     st = shell_state()
     origin = origin or public_origin()
     deploy = Path(st.get("DEPLOY_INFO_FILE", str(INSTALL_PREFIX / "deploy_info.txt")))
-    return {"status": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "url": url_for_port(origin, st.get("ASTRBOT_WEB_PORT", "6185")), "username": st.get("ASTRBOT_USERNAME", "astrbot"), "password": parse_deploy_line(deploy, "AstrBot initial random password"), "token": st.get("ASTRBOT_REVERSE_WS_TOKEN", "yuyu521521"), "config_path": str(INSTALL_PREFIX / "data" / "cmd_config.json"), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署"}
+    return {"status": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "url": url_for_port(origin, st.get("ASTRBOT_WEB_PORT", "6185")), "username": st.get("ASTRBOT_USERNAME", "astrbot"), "password": current_astrbot_password(), "token": st.get("ASTRBOT_REVERSE_WS_TOKEN", "yuyu521521"), "config_path": str(INSTALL_PREFIX / "data" / "cmd_config.json"), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署"}
 
 
 def get_logs(target: str, lines: int) -> str:
