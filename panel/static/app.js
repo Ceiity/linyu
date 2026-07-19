@@ -52,8 +52,8 @@ function qrIcon(){return `<svg class="qr-mini" viewBox="0 0 24 24" fill="none" s
 function oneNapBtns(r){const n=typeof r==="string"?r:r.name,u=typeof r==="string"?"":napLoginUrl(r);return `<button class="tiny scan" onclick="showQrLogin('${q(n)}','${q(u)}')">${qrIcon()}扫码登录</button><button class="tiny success" onclick="napAct('start','${q(n)}')">启动</button><button class="tiny" onclick="napAct('stop','${q(n)}')">停止</button><button class="tiny primary" onclick="napAct('restart','${q(n)}')">重启</button><button class="tiny" onclick="showLog('${q(n)}')">日志</button><button class="tiny danger" onclick="confirmDo('输入 ${n} 确认删除','${n}',()=>napAct('delete','${n}',{confirm:'${n}',keep_data:true}))">删除</button>`}
 async function showQrLogin(name,url){
   if(state.qrTimer){clearInterval(state.qrTimer);state.qrTimer=null}
-  const title=`${botName(name)} ????`;
-  openModal(`<div class="qr-login"><div class="qr-login-head"><div class="scan-art">${qrIcon()}</div><div><h3>${safeText(title)}</h3><p class="muted">??? NapCat ?? QQ ?????...</p></div></div><div id="qrLoginBody" class="qr-login-body"><div class="qr-skeleton"></div></div><div class="qr-status muted" id="qrLoginStatus">???</div><div class="toolbar scan-actions"><button class="primary" onclick="refreshNapQr('${q(name)}')">?????</button><a class="link-pill" href="${safeHref(url)}" target="_blank" rel="noopener noreferrer">?? NapCat WebUI</a></div></div>`,null);
+  const title=`${botName(name)} 扫码登录`;
+  openModal(`<div class="qr-login"><div class="qr-login-head"><div class="scan-art">${qrIcon()}</div><div><h3>${safeText(title)}</h3><p class="muted">正在向 NapCat 获取 QQ 登录二维码...</p></div></div><div id="qrLoginBody" class="qr-login-body"><div class="qr-skeleton"></div></div><div class="qr-status muted" id="qrLoginStatus">准备中</div><div class="toolbar scan-actions"><button class="primary" onclick="refreshNapQr('${q(name)}')">刷新二维码</button><a class="link-pill" href="${safeHref(url)}" target="_blank" rel="noopener noreferrer">打开 NapCat WebUI</a></div></div>`,null);
   await loadNapQr(name);
   state.qrTimer=setInterval(()=>pollNapQr(name),3000);
 }
@@ -61,15 +61,15 @@ async function loadNapQr(name){
   const box=$("#qrLoginBody"),st=$("#qrLoginStatus");
   try{
     const d=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"qrcode"})});
-    if(box)box.innerHTML=`<div class="qr-card"><div class="qr-svg">${d.svg}</div></div><div class="qr-help">???? QQ ???????</div>`;
-    if(st)st.textContent="??????";
+    if(box)box.innerHTML=`<div class="qr-card"><div class="qr-svg">${d.svg}</div></div><div class="qr-help">请用手机 QQ 扫描二维码登录</div>`;
+    if(st)st.textContent="等待扫码确认";
   }catch(e){
     if(box)box.innerHTML=`<div class="qr-error">${safeText(e.message||e)}</div>`;
-    if(st)st.textContent="???????????????";
+    if(st)st.textContent="获取失败，可以点刷新二维码再试";
   }
 }
 async function refreshNapQr(name){
-  const st=$("#qrLoginStatus"); if(st)st.textContent="???????...";
+  const st=$("#qrLoginStatus"); if(st)st.textContent="正在刷新二维码...";
   await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"refresh"})}).catch(()=>{});
   setTimeout(()=>loadNapQr(name),900);
 }
@@ -78,8 +78,8 @@ async function pollNapQr(name){
   try{
     const r=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"status"})});
     const data=r.data||{}; const st=$("#qrLoginStatus");
-    if(data.isLogin){if(st)st.textContent="????";toast("QQ ????");clearInterval(state.qrTimer);state.qrTimer=null;refresh();return}
-    if(data.isOffline){if(st)st.textContent="??????????";return}
+    if(data.isLogin){if(st)st.textContent="登录成功";toast("QQ 登录成功");clearInterval(state.qrTimer);state.qrTimer=null;refresh();return}
+    if(data.isOffline){if(st)st.textContent="账号离线，请重新扫码";return}
     if(data.loginError){if(st)st.textContent=data.loginError}
   }catch(e){}
 }

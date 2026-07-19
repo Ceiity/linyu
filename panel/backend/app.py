@@ -329,7 +329,7 @@ def napcat_row(name: str) -> dict:
     for row in parse_napcat_index():
         if row.get("name") == safe:
             return row
-    raise ValueError("???????%s" % safe)
+    raise ValueError("机器人不存在：%s" % safe)
 
 
 def http_json_post(url: str, payload: dict | None = None, headers: dict | None = None, timeout: int = 10) -> dict:
@@ -346,10 +346,10 @@ def napcat_webui_credential(row: dict) -> str:
     port = str(row["webui_port"])
     res = http_json_post("http://127.0.0.1:%s/api/auth/login" % port, {"hash": token_hash})
     if int(res.get("code", -1)) != 0:
-        raise RuntimeError("NapCat WebUI ?????%s" % res.get("message", "unknown"))
+        raise RuntimeError("NapCat WebUI 鉴权失败：%s" % res.get("message", "unknown"))
     cred = (res.get("data") or {}).get("Credential")
     if not cred:
-        raise RuntimeError("NapCat WebUI ???? Credential")
+        raise RuntimeError("NapCat WebUI 没有返回 Credential")
     return cred
 
 
@@ -364,7 +364,7 @@ def qr_svg_for_text(text_value: str) -> str:
         import qrcode
         import qrcode.image.svg
     except Exception as e:
-        raise RuntimeError("????????????? python3-qrcode ? pip install qrcode?????????%s" % text_value) from e
+        raise RuntimeError("服务器缺少二维码库：请安装 python3-qrcode 或 pip install qrcode?原始二维码内容：%s" % text_value) from e
     img = qrcode.make(text_value, image_factory=qrcode.image.svg.SvgPathImage, box_size=10, border=2)
     return img.to_string(encoding="unicode")
 
@@ -831,14 +831,14 @@ class Handler(BaseHTTPRequestHandler):
         if action == "qrcode":
             res = napcat_webui_call(row, "/QQLogin/GetQQLoginQrcode")
             if int(res.get("code", -1)) != 0:
-                return self.send_api(api(False, res, res.get("message", "???????")))
+                return self.send_api(api(False, res, res.get("message", "获取二维码失败")))
             qrcode_url = (res.get("data") or {}).get("qrcode") or ""
             if not qrcode_url:
-                return self.send_api(api(False, res, "NapCat ????????????????????????"))
+                return self.send_api(api(False, res, "NapCat 没有返回二维码链接，可能已经登录或二维码还没生成"))
             svg = qr_svg_for_text(qrcode_url)
             audit(user, "napcat.qq.qrcode", {"name": name}, True)
             return self.send_api(api(True, {"name": name, "qrcode_url": qrcode_url, "svg": svg, "status": res}))
-        raise ValueError("QQ ???????")
+        raise ValueError("QQ 登录操作不支持")
 
     def napcat_action(self, user: str):
         data = self.read_json()
