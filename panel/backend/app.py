@@ -15,6 +15,7 @@ import subprocess
 import threading
 import time
 import traceback
+import zipfile
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -92,6 +93,8 @@ def default_config() -> dict:
         "install_prefix": str(INSTALL_PREFIX),
         "project_dir": str(PROJECT_DIR),
         "upload_dir": str(INSTALL_PREFIX / "uploads"),
+        "astrbot_plugin_dir": str(INSTALL_PREFIX / "data" / "plugins"),
+        "napcat_watchdog_enabled": True,
         "max_upload_mb": 256,
         "network_name": "astrbot_network",
         "default_reverse_ws_token": "yuyu521521",
@@ -114,7 +117,7 @@ def load_config() -> dict:
 
 def save_config_patch(patch: dict) -> dict:
     cfg = load_config()
-    allowed = {"install_prefix", "network_name", "default_reverse_ws_token", "upload_dir", "max_upload_mb", "public_base_url", "allow_dangerous", "theme_color", "username"}
+    allowed = {"install_prefix", "network_name", "default_reverse_ws_token", "upload_dir", "astrbot_plugin_dir", "napcat_watchdog_enabled", "max_upload_mb", "public_base_url", "allow_dangerous", "theme_color", "username"}
     for k, v in patch.items():
         if k in allowed:
             cfg[k] = v
@@ -390,6 +393,71 @@ def https_status() -> dict:
     }
 
 
+def safe_extract_zip(zip_path: Path, dest: Path) -> list[str]:
+    dest.mkdir(parents=True, exist_ok=True)
+    extracted: list[str] = []
+    with zipfile.ZipFile(zip_path) as z:
+        members = [m for m in z.infolist() if not m.is_dir()]
+        if not members:
+            raise ValueError("插件压缩包为空")
+        root_names = {Path(m.filename).parts[0] for m in members if Path(m.filename).parts and not Path(m.filename).parts[0].startswith("__MACOSX")}
+        backup_suffix = ".bak." + time.strftime("%Y%m%d_%H%M%S")
+        for info in z.infolist():
+            name = info.filename.replace("\\", "/")
+            if not name or name.startswith("/") or ".." in Path(name).parts:
+                raise ValueError("插件压缩包包含不安全路径：" + name)
+        for root in sorted(root_names):
+            target = (dest / root).resolve()
+            if target.exists():
+                shutil.move(str(target), str(target) + backup_suffix)
+        for info in z.infolist():
+            name = info.filename.replace("\\", "/")
+            if not name or name.startswith("__MACOSX/"):
+                continue
+            target = (dest / name).resolve()
+            if dest.resolve() != target and dest.resolve() not in target.parents:
+                raise ValueError("插件解压路径越界")
+            if info.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with z.open(info) as src, target.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+            extracted.append(str(target))
+    return extracted
+
+
+def plugins_data() -> dict:
+    cfg = load_config()
+    base = Path(cfg.get("astrbot_plugin_dir") or (INSTALL_PREFIX / "data" / "plugins"))
+    base.mkdir(parents=True, exist_ok=True)
+    plugins = []
+    for item in sorted(base.iterdir(), key=lambda x: x.name.lower()):
+        try:
+            st = item.stat()
+            plugins.append({"name": item.name, "path": str(item), "is_dir": item.is_dir(), "size": st.st_size, "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))})
+        except FileNotFoundError:
+            continue
+    return {"base": str(base), "plugins": plugins}
+
+
+def task_install_plugin(task: Task, src: str, restart: bool) -> dict:
+    cfg = load_config()
+    source = path_under(Path(cfg["upload_dir"]), src)
+    if source.suffix.lower() != ".zip":
+        raise ValueError("只支持安装 .zip 插件包")
+    plugin_dir = Path(cfg.get("astrbot_plugin_dir") or (INSTALL_PREFIX / "data" / "plugins"))
+    task.line("正在解压插件到：%s" % plugin_dir, 25)
+    extracted = safe_extract_zip(source, plugin_dir)
+    task.line("已解压 %d 个文件" % len(extracted), 70)
+    out = ""
+    if restart:
+        task.line("正在重启 AstrBot 让插件生效", 85)
+        _, out = docker(["restart", "astrbot"], timeout=120)
+        task.line(out, 95)
+    return {"ok": True, "plugin_dir": str(plugin_dir), "files": len(extracted), "output": out}
+
+
 def list_files(base: Path) -> list[dict]:
     base.mkdir(parents=True, exist_ok=True)
     out = []
@@ -499,6 +567,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_api(api(True, dashboard_data()))
             if p.path == "/api/astrbot":
                 return self.send_api(api(True, astrbot_data()))
+            if p.path == "/api/plugins/astrbot":
+                return self.send_api(api(True, plugins_data()))
             if p.path == "/api/napcat":
                 return self.send_api(api(True, parse_napcat_index()))
             if p.path == "/api/tasks":
@@ -578,6 +648,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.delete_file(user)
             if p.path == "/api/files/apply":
                 return self.apply_file(user)
+            if p.path == "/api/plugins/install":
+                return self.install_plugin(user)
+            if p.path == "/api/watchdog/restart":
+                return self.watchdog_restart(user)
             if p.path == "/api/settings":
                 cfg = save_config_patch(self.read_json())
                 audit(user, "settings.save", {}, True)
@@ -844,8 +918,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def apply_file(self, user: str):
         data = self.read_json()
+        kind = data.get("kind")
         f = path_under(Path(load_config()["upload_dir"]), data.get("path", ""))
-        if data.get("kind") != "astrbot_config":
+        if kind == "astrbot_plugin":
+            t = create_task("安装 AstrBot 插件", "plugin.install", task_install_plugin, user, data.get("path", ""), bool(data.get("restart", True)))
+            return self.send_api(api(True, t.to_dict()))
+        if kind != "astrbot_config":
             raise ValueError("应用类型不支持")
         obj = json.loads(f.read_text(encoding="utf-8"))
         dest = INSTALL_PREFIX / "data" / "cmd_config.json"
@@ -855,6 +933,19 @@ class Handler(BaseHTTPRequestHandler):
         dest.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
         audit(user, "files.apply_astrbot_config", {"file": f.name}, True)
         self.send_api(api(True, message="已应用 AstrBot 配置"))
+
+    def install_plugin(self, user: str):
+        data = self.read_json()
+        source = str(data.get("path", ""))
+        if not source:
+            raise ValueError("请选择已上传的插件 zip")
+        t = create_task("安装 AstrBot 插件", "plugin.install", task_install_plugin, user, source, bool(data.get("restart", True)))
+        self.send_api(api(True, t.to_dict()))
+
+    def watchdog_restart(self, user: str):
+        code, out = run_process(["bash", "-lc", "systemctl daemon-reload; systemctl enable --now astrbot-napcat-watchdog.service; systemctl restart astrbot-napcat-watchdog.service; systemctl is-active astrbot-napcat-watchdog.service"], timeout=120)
+        audit(user, "watchdog.restart", {}, code == 0)
+        self.send_api(api(code == 0, {"output": out}, "已启动自动守护" if code == 0 else out))
 
     def handle_astrbot_config(self):
         path = INSTALL_PREFIX / "data" / "cmd_config.json"

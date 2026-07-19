@@ -29,3 +29,10 @@ a{color:var(--text);text-decoration:none}.link-pill{display:inline-flex;align-it
 input[type=color]{width:64px!important;min-width:64px;height:44px;padding:4px;border-radius:999px;background:var(--panel2);cursor:pointer}input[type=color]::-webkit-color-swatch-wrapper{padding:0}input[type=color]::-webkit-color-swatch{border:0;border-radius:999px}input[type=color]::-moz-color-swatch{border:0;border-radius:999px}.code{scroll-behavior:smooth}.sidebar.open:after{content:"";position:fixed;inset:0;left:100%;background:transparent}@media(max-width:720px){.sidebar.open{transform:translateX(0)!important}.topbar:has(+ .content){} }
 /* NapCat and drawer polish */
 @media(max-width:720px){.sidebar{width:min(42vw,178px)!important;min-width:158px!important}.sidebar .nav-item{padding:10px 10px}.sidebar .nav-text{font-size:12px}.sidebar .brand-mark.small{width:32px;height:32px}.sidebar .side-brand b{font-size:14px}}
+/* Light sidebar balance: keep left side clean instead of looking dark or stained */
+:root:not([data-theme=dark]) .sidebar,
+:root:not([data-theme=dark]) .topbar{background:#fff!important;backdrop-filter:none!important}
+:root:not([data-theme=dark]) .sidebar{box-shadow:8px 0 30px rgba(17,17,17,.035)}
+:root:not([data-theme=dark]) body{background:#f7f7f5!important}
+:root:not([data-theme=dark]) .nav-item.active{background:#f1f1ef!important;box-shadow:none!important}
+:root:not([data-theme=dark]) .nav-item:hover{background:#f6f6f4!important}

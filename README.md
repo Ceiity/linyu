@@ -228,3 +228,10 @@ bash scripts/validate.sh
 ## 许可证
 
 MIT License
+
+## Web 面板新增能力
+
+- AstrBot 插件上传：进入「文件中心」上传 `.zip` 插件包，上传完成后点击「安装为 AstrBot 插件」，面板会自动解压到 `/opt/astrbot/data/plugins` 并重启 AstrBot 让插件生效。
+- 插件列表：进入「AstrBot」页面可查看当前插件目录和已安装插件。
+- NapCat 掉线自动守护：安装面板时会自动启用 `astrbot-napcat-watchdog.service`，检测到机器人容器停止、QQ 被踢下线、登录过期、二维码过期等日志关键词时，会自动重启对应机器人容器。
+- 系统设置：可调整 AstrBot 插件目录，并可手动启动或重启掉线自动守护。

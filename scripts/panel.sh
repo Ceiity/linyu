@@ -37,9 +37,30 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 EOF
+  local watchdog_unit="/etc/systemd/system/astrbot-napcat-watchdog.service"
+  cat > "$watchdog_unit" <<EOF
+[Unit]
+Description=AstrBot-Deploy NapCat Auto Restart Watchdog
+After=docker.service astrbot-deploy-panel.service
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=${PROJECT_DIR}
+Environment=PROJECT_DIR=${PROJECT_DIR}
+Environment=INSTALL_PREFIX=${INSTALL_PREFIX}
+Environment=STATE_FILE=${STATE_FILE}
+ExecStart=/usr/bin/env bash ${PROJECT_DIR}/scripts/napcat-watchdog.sh loop
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
   systemctl daemon-reload
   systemctl enable --now astrbot-deploy-panel.service >/dev/null
   systemctl restart astrbot-deploy-panel.service
+  systemctl enable --now astrbot-napcat-watchdog.service >/dev/null 2>&1 || true
   local pub; pub="$(public_ip)"
   printf '\033[32m[OK]\033[0m Web 控制台：http://%s:%s/\n' "$pub" "$WEB_ADMIN_PORT"
   if [[ -f "$INSTALL_PREFIX/panel_config.json" ]]; then
