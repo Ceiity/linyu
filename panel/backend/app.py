@@ -53,7 +53,7 @@ def ensure_parent(path: Path) -> None:
 def read_json(path: Path, default):
     try:
         if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))
+            return json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception:
         pass
     return default
