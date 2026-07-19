@@ -3,6 +3,24 @@ set -Eeuo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$PROJECT_DIR/lib/ops.sh"
 
+stop_legacy_panel(){
+  local port="${WEB_ADMIN_PORT:-7070}" pids=""
+  if command -v ss >/dev/null 2>&1; then
+    pids="$(ss -ltnp 2>/dev/null | awk -v port=":${port}" '$4 ~ port {print $0}' | sed -nE 's/.*pid=([0-9]+).*//p' | sort -u || true)"
+  fi
+  if [[ -n "$pids" ]]; then
+    while read -r pid; do
+      [[ -n "$pid" ]] || continue
+      if ps -p "$pid" -o args= 2>/dev/null | grep -F "$PROJECT_DIR/panel/backend/app.py" >/dev/null 2>&1; then
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+        kill -9 "$pid" 2>/dev/null || true
+      fi
+    done <<< "$pids"
+  fi
+}
+
+
 setup_panel(){
   ensure_dirs
   load_state
@@ -65,6 +83,7 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
+  stop_legacy_panel
   systemctl daemon-reload
   systemctl enable --now astrbot-deploy-panel.service >/dev/null
   systemctl restart astrbot-deploy-panel.service
@@ -85,8 +104,8 @@ PY
 
 case "${1:-setup}" in
   setup|start) setup_panel ;;
-  restart) systemctl restart astrbot-deploy-panel.service ;;
-  stop) systemctl stop astrbot-deploy-panel.service ;;
+  restart) load_state || true; stop_legacy_panel; systemctl restart astrbot-deploy-panel.service 2>/dev/null || setup_panel ;;
+  stop) load_state || true; systemctl stop astrbot-deploy-panel.service 2>/dev/null || true; stop_legacy_panel ;;
   status) systemctl status astrbot-deploy-panel.service --no-pager || true ;;
   password) python3 - <<PY
 import json

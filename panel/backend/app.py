@@ -295,8 +295,20 @@ def path_under(base: Path, rel: str) -> Path:
     base = base.resolve()
     target = (base / rel.lstrip("/")).resolve()
     if base != target and base not in target.parents:
-        raise ValueError("路径不合法")
+        raise ValueError("\u8def\u5f84\u4e0d\u5408\u6cd5")
     return target
+
+
+def ensure_server_file_allowed(path: Path) -> Path:
+    target = path.expanduser().resolve()
+    cfg = load_config()
+    if bool(cfg.get("allow_dangerous")):
+        return target
+    allowed_roots = [INSTALL_PREFIX.resolve(), PROJECT_DIR.resolve()]
+    for root in allowed_roots:
+        if target == root or root in target.parents:
+            return target
+    raise PermissionError("\u5df2\u542f\u7528\u5b89\u5168\u6a21\u5f0f\uff1a\u53ea\u80fd\u6d4f\u89c8 /opt/astrbot \u548c\u9879\u76ee\u76ee\u5f55\u3002\u5982\u9700\u5168\u76d8\u8bbf\u95ee\uff0c\u8bf7\u5728\u7cfb\u7edf\u8bbe\u7f6e\u4e2d\u5f00\u542f\u201c\u5141\u8bb8\u5371\u9669\u64cd\u4f5c\u201d\u3002")
 
 
 def container_status(name: str) -> dict:
@@ -354,11 +366,11 @@ def napcat_webui_credential(row: dict, force_refresh: bool = False) -> str:
     if int(res.get("code", -1)) != 0:
         msg = str(res.get("message", "unknown"))
         if "rate" in msg.lower():
-            raise RuntimeError("NapCat WebUI 登录太频繁，已触发限流。面板已修复为缓存鉴权；当前实例需要稍等 1-3 分钟，或重启该机器人后再点扫码登录?")
-        raise RuntimeError("NapCat WebUI 鉴权失败：%s" % msg)
+            raise RuntimeError("NapCat WebUI \u767b\u5f55\u592a\u9891\u7e41\uff0c\u5df2\u89e6\u53d1\u9650\u6d41\u3002\u5f53\u524d\u5b9e\u4f8b\u9700\u8981\u7a0d\u7b49 1-3 \u5206\u949f\uff0c\u6216\u91cd\u542f\u8be5\u673a\u5668\u4eba\u540e\u518d\u70b9\u626b\u7801\u767b\u5f55\u3002")
+        raise RuntimeError("NapCat WebUI \u9274\u6743\u5931\u8d25\uff1a%s" % msg)
     cred = (res.get("data") or {}).get("Credential")
     if not cred:
-        raise RuntimeError("NapCat WebUI 没有返回 Credential")
+        raise RuntimeError("NapCat WebUI \u6ca1\u6709\u8fd4\u56de Credential")
     NAPCAT_CREDENTIAL_CACHE[name] = {"credential": cred, "hash": token_hash, "expires": now_ts + 3300}
     return cred
 
@@ -372,7 +384,7 @@ def napcat_webui_call(row: dict, path: str, payload: dict | None = None) -> dict
         if int(last.get("code", -1)) != -1 or "Unauthorized" not in str(last.get("message", "")):
             return last
         NAPCAT_CREDENTIAL_CACHE.pop(str(row.get("name") or row.get("webui_port") or "napcat"), None)
-    return last or {"code": -1, "message": "NapCat WebUI 调用失败"}
+    return last or {"code": -1, "message": "NapCat WebUI \u8c03\u7528\u5931\u8d25"}
 
 
 def qr_svg_for_text(text_value: str) -> str:
@@ -380,7 +392,7 @@ def qr_svg_for_text(text_value: str) -> str:
         import qrcode
         import qrcode.image.svg
     except Exception as e:
-        raise RuntimeError("服务器缺少二维码库：请安装 python3-qrcode 或 pip install qrcode?原始二维码内容：%s" % text_value) from e
+        raise RuntimeError("\u670d\u52a1\u5668\u7f3a\u5c11\u4e8c\u7ef4\u7801\u5e93\uff1a\u8bf7\u5b89\u88c5 python3-qrcode \u6216 pip install qrcode\u3002\u539f\u59cb\u4e8c\u7ef4\u7801\u5185\u5bb9\uff1a%s" % text_value) from e
     img = qrcode.make(text_value, image_factory=qrcode.image.svg.SvgPathImage, box_size=10, border=2)
     return img.to_string(encoding="unicode")
 
@@ -471,16 +483,26 @@ def https_status() -> dict:
 def safe_extract_zip(zip_path: Path, dest: Path) -> list[str]:
     dest.mkdir(parents=True, exist_ok=True)
     extracted: list[str] = []
+    max_files = 300
+    max_total = 120 * 1024 * 1024
+    max_one = 50 * 1024 * 1024
     with zipfile.ZipFile(zip_path) as z:
         members = [m for m in z.infolist() if not m.is_dir()]
         if not members:
-            raise ValueError("插件压缩包为空")
-        root_names = {Path(m.filename).parts[0] for m in members if Path(m.filename).parts and not Path(m.filename).parts[0].startswith("__MACOSX")}
+            raise ValueError("\u63d2\u4ef6\u538b\u7f29\u5305\u4e3a\u7a7a")
+        if len(members) > max_files:
+            raise ValueError("\u63d2\u4ef6\u6587\u4ef6\u6570\u8fc7\u591a\uff0c\u8bf7\u63a7\u5236\u5728 300 \u4e2a\u4ee5\u5185")
+        total_size = sum(max(0, m.file_size) for m in members)
+        if total_size > max_total:
+            raise ValueError("\u63d2\u4ef6\u89e3\u538b\u540e\u8fc7\u5927\uff0c\u8bf7\u63a7\u5236\u5728 120MB \u4ee5\u5185")
+        root_names = {Path(m.filename.replace("\\", "/")).parts[0] for m in members if Path(m.filename.replace("\\", "/")).parts and not Path(m.filename.replace("\\", "/")).parts[0].startswith("__MACOSX")}
         backup_suffix = ".bak." + time.strftime("%Y%m%d_%H%M%S")
         for info in z.infolist():
             name = info.filename.replace("\\", "/")
+            if info.file_size > max_one:
+                raise ValueError("\u63d2\u4ef6\u5355\u4e2a\u6587\u4ef6\u8fc7\u5927\uff1a" + name)
             if not name or name.startswith("/") or ".." in Path(name).parts:
-                raise ValueError("插件压缩包包含不安全路径：" + name)
+                raise ValueError("\u63d2\u4ef6\u538b\u7f29\u5305\u5305\u542b\u4e0d\u5b89\u5168\u8def\u5f84\uff1a" + name)
         for root in sorted(root_names):
             target = (dest / root).resolve()
             if target.exists():
@@ -491,7 +513,7 @@ def safe_extract_zip(zip_path: Path, dest: Path) -> list[str]:
                 continue
             target = (dest / name).resolve()
             if dest.resolve() != target and dest.resolve() not in target.parents:
-                raise ValueError("插件解压路径越界")
+                raise ValueError("\u63d2\u4ef6\u89e3\u538b\u8def\u5f84\u8d8a\u754c")
             if info.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
                 continue
@@ -500,7 +522,6 @@ def safe_extract_zip(zip_path: Path, dest: Path) -> list[str]:
                 shutil.copyfileobj(src, dst)
             extracted.append(str(target))
     return extracted
-
 
 def plugins_data() -> dict:
     cfg = load_config()
@@ -661,7 +682,7 @@ class Handler(BaseHTTPRequestHandler):
     def require_auth(self) -> str | None:
         user = self.current_user()
         if not user:
-            self.send_api(api(False, message="未登录", code="UNAUTHORIZED"), HTTPStatus.UNAUTHORIZED)
+            self.send_api(api(False, message="\u672a\u767b\u5f55", code="UNAUTHORIZED"), HTTPStatus.UNAUTHORIZED)
         return user
 
     def do_GET(self):
@@ -717,6 +738,10 @@ class Handler(BaseHTTPRequestHandler):
             if p.path == "/api/server-files/download":
                 return self.handle_server_file_download(p)
             self.send_error(404)
+        except PermissionError as e:
+            self.send_api(api(False, message=str(e), code="FORBIDDEN"), 403)
+        except ValueError as e:
+            self.send_api(api(False, message=str(e), code="BAD_REQUEST"), 400)
         except Exception as e:
             self.send_api(api(False, message=str(e), code="SERVER_ERROR"), 500)
 
@@ -779,6 +804,10 @@ class Handler(BaseHTTPRequestHandler):
             if p.path == "/api/config/astrbot":
                 return self.save_astrbot_config(user)
             self.send_error(404)
+        except PermissionError as e:
+            self.send_api(api(False, message=str(e), code="FORBIDDEN"), 403)
+        except ValueError as e:
+            self.send_api(api(False, message=str(e), code="BAD_REQUEST"), 400)
         except Exception as e:
             self.send_api(api(False, message=str(e), code="SERVER_ERROR"), 500)
 
@@ -805,7 +834,7 @@ class Handler(BaseHTTPRequestHandler):
         now_ts = time.time()
         LOGIN_FAILS[ip] = [t for t in LOGIN_FAILS.get(ip, []) if now_ts - t < 600]
         if len(LOGIN_FAILS[ip]) >= 8:
-            return self.send_api(api(False, message="?????????? 10 ?????", code="RATE_LIMIT"), 429)
+            return self.send_api(api(False, message="\u767b\u5f55\u5931\u8d25\u6b21\u6570\u8fc7\u591a\uff0c\u8bf7 10 \u5206\u949f\u540e\u518d\u8bd5", code="RATE_LIMIT"), 429)
         if data.get("username") == cfg["username"] and verify_password(str(data.get("password", "")), cfg["password_hash"]):
             LOGIN_FAILS.pop(ip, None)
             token = self.make_session(cfg["username"])
@@ -820,7 +849,7 @@ class Handler(BaseHTTPRequestHandler):
             audit(cfg["username"], "login", {}, True)
             return
         audit(str(data.get("username", "")), "login", {}, False)
-        self.send_api(api(False, message="???????", code="BAD_LOGIN"), 401)
+        self.send_api(api(False, message="\u8d26\u53f7\u6216\u5bc6\u7801\u9519\u8bef", code="BAD_LOGIN"), 401)
 
     def astrbot_action(self, user: str):
         action = self.read_json().get("action")
@@ -974,15 +1003,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def server_path(self, raw: str) -> Path:
         if not raw:
-            raw = "/"
-        p = Path(raw).expanduser().resolve()
-        return p
+            raw = str(INSTALL_PREFIX)
+        return ensure_server_file_allowed(Path(raw))
 
     def handle_server_files(self, p):
         qs = parse_qs(p.query)
         current = self.server_path(qs.get("path", ["/"])[0])
         if not current.exists():
-            return self.send_api(api(False, message="路径不存在", code="NOT_FOUND"), 404)
+            return self.send_api(api(False, message="\u8def\u5f84\u4e0d\u5b58\u5728", code="NOT_FOUND"), 404)
         if current.is_file():
             current = current.parent
         items = []
@@ -999,7 +1027,7 @@ class Handler(BaseHTTPRequestHandler):
                     "type": mimetypes.guess_type(str(item))[0] or "application/octet-stream",
                 })
             except PermissionError:
-                items.append({"name": item.name, "path": str(item), "is_dir": item.is_dir(), "size": 0, "mtime": "无权限", "type": "permission-denied"})
+                items.append({"name": item.name, "path": str(item), "is_dir": item.is_dir(), "size": 0, "mtime": "\u65e0\u6743\u9650", "type": "permission-denied"})
             except FileNotFoundError:
                 continue
         self.send_api(api(True, {"path": str(current), "parent": parent, "items": items}))
@@ -1007,9 +1035,9 @@ class Handler(BaseHTTPRequestHandler):
     def handle_server_file_view(self, p):
         path = self.server_path(parse_qs(p.query).get("path", [""])[0])
         if not path.is_file():
-            return self.send_api(api(False, message="不是文件", code="NOT_FILE"), 400)
+            return self.send_api(api(False, message="\u4e0d\u662f\u6587\u4ef6", code="NOT_FILE"), 400)
         if path.stat().st_size > 1024 * 1024:
-            return self.send_api(api(False, message="文件超过 1MB，请下载查看", code="TOO_LARGE"), 400)
+            return self.send_api(api(False, message="\u6587\u4ef6\u8d85\u8fc7 1MB\uff0c\u8bf7\u4e0b\u8f7d\u67e5\u770b", code="TOO_LARGE"), 400)
         text = path.read_text(encoding="utf-8", errors="replace")
         parsed = None
         if path.suffix.lower() == ".json":
@@ -1019,7 +1047,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_server_file_download(self, p):
         path = self.server_path(parse_qs(p.query).get("path", [""])[0])
         if not path.is_file():
-            return self.send_api(api(False, message="不是文件", code="NOT_FILE"), 400)
+            return self.send_api(api(False, message="\u4e0d\u662f\u6587\u4ef6", code="NOT_FILE"), 400)
         body = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
