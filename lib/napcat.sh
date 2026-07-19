@@ -25,6 +25,35 @@ max_napcat_id(){
   done < <(docker ps -a --format '{{.Names}}' 2>/dev/null || true)
   echo "$m"
 }
+port_state_init(){
+  mkdir -p "$(dirname "$PORT_STATE_FILE")"
+  [[ -s "$PORT_STATE_FILE" ]] || printf '{"version":1,"allocations":{}}\n' > "$PORT_STATE_FILE"
+}
+port_state_values(){
+  port_state_init
+  jq -r '.allocations // {} | to_entries[] | .value | [.webui,.ws,.http,.astrbot_ws] | .[]? | select(.!=null)' "$PORT_STATE_FILE" 2>/dev/null || true
+}
+port_state_put(){
+  local name="$1" webui="$2" ws="$3" http="$4" astrbot_ws="$5" tmp="${PORT_STATE_FILE}.tmp"
+  port_state_init
+  jq --arg name "$name" --argjson webui "$webui" --argjson ws "$ws" --argjson http "$http" --argjson astrbot_ws "$astrbot_ws" \
+    '.version=1 | .allocations = (.allocations // {}) | .allocations[$name] = {"webui":$webui,"ws":$ws,"http":$http,"astrbot_ws":$astrbot_ws,"updated_at":(now|todate)}' \
+    "$PORT_STATE_FILE" > "$tmp" && mv "$tmp" "$PORT_STATE_FILE"
+}
+port_state_remove(){
+  local name="$1" tmp="${PORT_STATE_FILE}.tmp"
+  port_state_init
+  jq --arg name "$name" '.allocations = (.allocations // {}) | del(.allocations[$name])' "$PORT_STATE_FILE" > "$tmp" && mv "$tmp" "$PORT_STATE_FILE"
+}
+build_reserved_ports(){
+  local reserved=""
+  if [[ -f "$NAPCAT_INDEX_FILE" ]]; then
+    reserved+=" $(awk -F'\t' 'NF>=4{printf " %s %s %s",$2,$3,$4}' "$NAPCAT_INDEX_FILE")"
+  fi
+  reserved+=" $(port_state_values | tr '\n' ' ')"
+  reserved+=" $(docker ps --format '{{.Ports}}' 2>/dev/null | grep -Eo '0\.0\.0\.0:[0-9]+|:::[0-9]+' | grep -Eo '[0-9]+$' | tr '\n' ' ' || true)"
+  printf '%s\n' "$reserved"
+}
 generate_napcat_config(){
   local name="$1" token="$2" astrbot_ws_port="$3" dir
   dir="$NAPCAT_BASE_DIR/$name"
@@ -120,9 +149,8 @@ sync_napcat_reverse_configs(){
 add_napcat_instances(){
   local count="$1" start max width i id name token webui ws http file total astrbot_ws_port reserved_ports=""
   [[ "$count" =~ ^[0-9]+$ ]] && (( count > 0 )) || { fail "NapCat count must be a positive integer."; return 1; }
-  if [[ -f "$NAPCAT_INDEX_FILE" ]]; then
-    reserved_ports="$(awk -F'\t' 'NF>=4{printf " %s %s %s",$2,$3,$4}' "$NAPCAT_INDEX_FILE")"
-  fi
+  port_state_init
+  reserved_ports="$(build_reserved_ports)"
   next_free_unreserved(){
     local base="$1" limit="${2:-3000}" n p
     for ((n=0;n<limit;n++)); do
@@ -143,6 +171,7 @@ add_napcat_instances(){
     http="$(next_free_unreserved $((3000+(id-1)*2)))" || { fail "No free HTTP port for ${name}"; return 1; }
     ws="$(next_free_unreserved $((3001+(id-1)*2)))" || { fail "No free WS port for ${name}"; return 1; }
     astrbot_ws_port="$((ASTRBOT_INTERNAL_WS_PORT + id - 1))"
+    port_state_put "$name" "$webui" "$ws" "$http" "$astrbot_ws_port"
     step "Creating ${name}"
     generate_napcat_config "$name" "$token" "$astrbot_ws_port"
     file="$(generate_napcat_compose "$name" "$webui" "$ws" "$http")"
@@ -152,7 +181,7 @@ add_napcat_instances(){
       compose_pull "$file" || warn "${name} image pull failed or timed out; trying local cache."
     fi
     compose_up "$file"
-    verify_napcat_instance "$name" "$webui" || return 1
+    verify_napcat_instance "$name" "$webui" || { port_state_remove "$name"; return 1; }
     append_napcat_index "$name" "$webui" "$ws" "$http" "$token"
     success "${name}: WebUI http://$(public_ip):${webui}/webui?token=${token} reverse_ws=ws://astrbot:${astrbot_ws_port}/ws reverse_token=${ASTRBOT_REVERSE_WS_TOKEN}"
   done
@@ -172,6 +201,7 @@ delete_napcat_instance(){
   [[ "$ans" =~ ^[Yy]$ ]] && rm -rf -- "$dir"
   awk -F'\t' -v n="$name" '$1 != n' "$NAPCAT_INDEX_FILE" > "${NAPCAT_INDEX_FILE}.tmp" || true
   mv "${NAPCAT_INDEX_FILE}.tmp" "$NAPCAT_INDEX_FILE"
+  port_state_remove "$name"
   sync_napcat_reverse_configs
   sync_astrbot_platforms
   success "Deleted ${name}"

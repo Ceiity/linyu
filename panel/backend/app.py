@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import mimetypes
+import ipaddress
 import os
 import secrets
 import re
@@ -18,6 +19,7 @@ import time
 import traceback
 import zipfile
 from dataclasses import dataclass, field
+from collections import deque
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -99,6 +101,11 @@ def default_config() -> dict:
         "upload_dir": str(INSTALL_PREFIX / "uploads"),
         "astrbot_plugin_dir": str(INSTALL_PREFIX / "data" / "plugins"),
         "napcat_watchdog_enabled": True,
+        "napcat_watchdog_interval": 60,
+        "napcat_watchdog_abnormal_threshold": 2,
+        "napcat_recovery_max": 3,
+        "napcat_recovery_window": 600,
+        "napcat_recovery_wait": 25,
         "max_upload_mb": 256,
         "network_name": "astrbot_network",
         "default_reverse_ws_token": "yuyu521521",
@@ -121,9 +128,25 @@ def load_config() -> dict:
 
 def save_config_patch(patch: dict) -> dict:
     cfg = load_config()
-    allowed = {"install_prefix", "network_name", "default_reverse_ws_token", "upload_dir", "astrbot_plugin_dir", "napcat_watchdog_enabled", "max_upload_mb", "public_base_url", "allow_dangerous", "theme_color", "username"}
+    allowed = {"install_prefix", "network_name", "default_reverse_ws_token", "upload_dir", "astrbot_plugin_dir", "napcat_watchdog_enabled", "napcat_watchdog_interval", "napcat_watchdog_abnormal_threshold", "napcat_recovery_max", "napcat_recovery_window", "napcat_recovery_wait", "max_upload_mb", "public_base_url", "allow_dangerous", "theme_color", "username"}
+    numeric_limits = {
+        "max_upload_mb": (1, 2048),
+        "napcat_watchdog_interval": (30, 3600),
+        "napcat_watchdog_abnormal_threshold": (1, 10),
+        "napcat_recovery_max": (0, 20),
+        "napcat_recovery_window": (60, 86400),
+        "napcat_recovery_wait": (5, 600),
+    }
     for k, v in patch.items():
         if k in allowed:
+            if k in numeric_limits:
+                lo, hi = numeric_limits[k]
+                try:
+                    v = int(v)
+                except Exception:
+                    raise ValueError("%s \u5fc5\u987b\u662f\u6570\u5b57" % k)
+                if v < lo or v > hi:
+                    raise ValueError("%s \u5fc5\u987b\u5728 %s-%s \u4e4b\u95f4" % (k, lo, hi))
             cfg[k] = v
     if patch.get("password"):
         cfg["password_hash"] = hash_password(str(patch["password"]))
@@ -261,15 +284,88 @@ def private_ip() -> str:
         return "127.0.0.1"
 
 
-def public_origin() -> str:
+def _first_header(value: str) -> str:
+    return (value or "").split(",", 1)[0].strip()
+
+
+def _clean_host(host: str) -> str:
+    host = _first_header(host).strip().strip('"').strip()
+    if not host or any(c in host for c in "\r\n/@") or len(host) > 255:
+        return ""
+    if host.startswith("[") and "]" in host:
+        return host
+    if not re.match(r"^[A-Za-z0-9.:-]+$", host):
+        return ""
+    return host
+
+
+def _split_forwarded(value: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    first = _first_header(value)
+    for part in first.split(";"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            out[k.strip().lower()] = v.strip().strip('"')
+    return out
+
+
+def _host_without_port(host: str) -> str:
+    host = _clean_host(host)
+    if not host:
+        return ""
+    if host.startswith("["):
+        return host.split("]", 1)[0] + "]"
+    if host.count(":") == 1:
+        return host.rsplit(":", 1)[0]
+    return host
+
+
+def origin_from_headers(headers=None, fallback_port: int | None = None) -> str:
     cfg = load_config()
     base = str(cfg.get("public_base_url") or "").strip().rstrip("/")
-    if base.startswith(("http://", "https://")):
+    if headers is None and base.startswith(("http://", "https://")):
         return base
-    ip = public_ip()
-    if ip and ip != "unknown":
-        return "http://" + ip
-    return "http://127.0.0.1"
+    headers = headers or {}
+    fwd = _split_forwarded(headers.get("Forwarded", "")) if hasattr(headers, "get") else {}
+    proto = _first_header(fwd.get("proto") or headers.get("X-Forwarded-Proto", ""))
+    host = _clean_host(fwd.get("host") or headers.get("X-Forwarded-Host", "") or headers.get("Host", ""))
+    if not proto:
+        cf_visitor = headers.get("CF-Visitor", "") if hasattr(headers, "get") else ""
+        try:
+            proto = json.loads(cf_visitor).get("scheme", "") if cf_visitor else ""
+        except Exception:
+            proto = ""
+    if not proto and str(headers.get("X-Forwarded-Ssl", "")).lower() == "on":
+        proto = "https"
+    proto = proto.lower() if proto.lower() in {"http", "https"} else "http"
+    xf_port = _first_header(headers.get("X-Forwarded-Port", "") if hasattr(headers, "get") else "")
+    if host and ":" not in host.strip("[]") and xf_port.isdigit():
+        if not ((proto == "http" and xf_port == "80") or (proto == "https" and xf_port == "443")):
+            host = f"{host}:{xf_port}"
+    if not host:
+        if base.startswith(("http://", "https://")):
+            return base
+        ip = public_ip()
+        host = ip if ip and ip != "unknown" else private_ip()
+        if fallback_port:
+            host = f"{host}:{fallback_port}"
+    return f"{proto}://{host}".rstrip("/")
+
+
+def public_origin() -> str:
+    return origin_from_headers(None)
+
+
+def url_for_port(origin: str, port: str | int, path: str = "") -> str:
+    port = str(port)
+    try:
+        from urllib.parse import urlsplit, urlunsplit
+        u = urlsplit(origin)
+        host = _host_without_port(u.netloc) or u.hostname or public_ip()
+        netloc = f"{host}:{port}"
+        return urlunsplit((u.scheme or "http", netloc, "/" + path.lstrip("/"), "", ""))
+    except Exception:
+        return f"{origin.rstrip('/')}:{port}/{path.lstrip('/')}"
 
 
 def audit(user: str, action: str, detail: dict | None = None, ok: bool = True) -> None:
@@ -372,18 +468,77 @@ def container_status(name: str) -> dict:
     return {"name": name, "exists": True, "status": state.get("Status", "unknown"), "running": state.get("Running", False), "health": state.get("Health", {}).get("Status", "")}
 
 
-def parse_napcat_index() -> list[dict]:
+def container_status_many(names: list[str]) -> dict[str, dict]:
+    names = [safe_name(n) for n in names if n]
+    if not names:
+        return {}
+    code, out = docker(["inspect", "-f", "{{.Name}}\t{{json .State}}"] + names, timeout=20)
+    result: dict[str, dict] = {}
+    for line in out.splitlines():
+        if "\t" not in line:
+            continue
+        raw_name, raw_state = line.split("\t", 1)
+        name = raw_name.strip().lstrip("/")
+        try:
+            state = json.loads(raw_state)
+        except Exception:
+            state = {}
+        result[name] = {"name": name, "exists": True, "status": state.get("Status", "unknown"), "running": state.get("Running", False), "health": state.get("Health", {}).get("Status", "")}
+    for name in names:
+        result.setdefault(name, {"name": name, "exists": False, "status": "missing", "running": False})
+    return result
+
+
+def recovery_status() -> dict:
+    paths = [INSTALL_PREFIX / "napcat_recovery_status.json", INSTALL_PREFIX / "logs" / "napcat-watchdog-status.json"]
+    for path in paths:
+        data = read_json(path, {})
+        if isinstance(data, dict):
+            bots = data.get("bots", data)
+            if isinstance(bots, dict):
+                return bots
+    return {}
+
+
+def watchdog_status() -> dict:
+    cfg = load_config()
+    status_file = INSTALL_PREFIX / "napcat_recovery_status.json"
+    data = read_json(status_file, {})
+    code, active = run_process(["bash", "-lc", "systemctl is-active astrbot-napcat-watchdog.service 2>/dev/null || true"], timeout=10)
+    return {
+        "enabled": bool(cfg.get("napcat_watchdog_enabled", True)),
+        "service": active.strip(),
+        "config": {
+            "interval": int(cfg.get("napcat_watchdog_interval", 60) or 60),
+            "abnormal_threshold": int(cfg.get("napcat_watchdog_abnormal_threshold", 2) or 2),
+            "max_recovery": int(cfg.get("napcat_recovery_max", 3) or 3),
+            "recovery_window": int(cfg.get("napcat_recovery_window", 600) or 600),
+            "recovery_wait": int(cfg.get("napcat_recovery_wait", 25) or 25),
+        },
+        "status": data,
+        "status_file": str(status_file),
+    }
+
+
+def parse_napcat_index(origin: str | None = None) -> list[dict]:
     st = shell_state()
-    origin = public_origin()
+    origin = origin or public_origin()
+    recovery = recovery_status()
     idx = Path(st.get("NAPCAT_INDEX_FILE", str(INSTALL_PREFIX / "napcat_index.tsv")))
-    rows = []
+    entries: list[list[str]] = []
     if not idx.exists():
-        return rows
+        return []
     for line in idx.read_text(encoding="utf-8", errors="replace").splitlines():
         p = line.split("\t")
         if len(p) >= 5 and p[0]:
-            status = container_status(p[0])
-            rows.append({"name": p[0], "webui_port": p[1], "ws_port": p[2], "http_port": p[3], "token": p[4], "url": "%s:%s/webui" % (origin, p[1]), "login_url": "%s:%s/webui?token=%s" % (origin, p[1], quote(p[4])), "status": status.get("status"), "running": status.get("running"), "directory": str(Path(st.get("NAPCAT_BASE_DIR", str(INSTALL_PREFIX / "napcat"))) / p[0])})
+            entries.append(p)
+    statuses = container_status_many([p[0] for p in entries])
+    rows = []
+    base_dir = Path(st.get("NAPCAT_BASE_DIR", str(INSTALL_PREFIX / "napcat")))
+    for p in entries:
+        status = statuses.get(p[0]) or {"status":"missing","running":False}
+        url = url_for_port(origin, p[1], "webui")
+        rows.append({"name": p[0], "webui_port": p[1], "ws_port": p[2], "http_port": p[3], "token": p[4], "url": url, "login_url": url + "?token=" + quote(p[4]), "status": status.get("status"), "running": status.get("running"), "recovery": recovery.get(p[0], {}), "directory": str(base_dir / p[0])})
     return rows
 
 
@@ -474,21 +629,21 @@ def parse_deploy_line(path: Path, key: str) -> str:
     return ""
 
 
-def dashboard_data() -> dict:
+def dashboard_data(origin: str | None = None) -> dict:
     st = shell_state()
     deploy = Path(st.get("DEPLOY_INFO_FILE", str(INSTALL_PREFIX / "deploy_info.txt")))
     astr = container_status(st.get("ASTRBOT_CONTAINER", "astrbot"))
     code, docker_ps = docker(["ps", "-a", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"], timeout=20)
     _, ports = run_process(["bash", "-lc", "ss -ltnp 2>/dev/null | head -n 80 || true"], timeout=20)
     recent = AUDIT_LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-20:] if AUDIT_LOG.exists() else []
-    return {"deployed": bool(astr.get("exists")), "public_ip": public_ip(), "private_ip": private_ip(), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署", "astrbot": astr, "napcats": parse_napcat_index(), "docker": {"ok": code == 0, "containers": docker_ps}, "system": system_metrics(), "ports": ports, "recent": recent, "network": st.get("NETWORK_NAME", "astrbot_network")}
+    return {"deployed": bool(astr.get("exists")), "public_ip": public_ip(), "private_ip": private_ip(), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署", "astrbot": astr, "napcats": parse_napcat_index(origin), "docker": {"ok": code == 0, "containers": docker_ps}, "system": system_metrics(), "ports": ports, "recent": recent, "network": st.get("NETWORK_NAME", "astrbot_network")}
 
 
-def astrbot_data() -> dict:
+def astrbot_data(origin: str | None = None) -> dict:
     st = shell_state()
-    origin = public_origin()
+    origin = origin or public_origin()
     deploy = Path(st.get("DEPLOY_INFO_FILE", str(INSTALL_PREFIX / "deploy_info.txt")))
-    return {"status": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "url": "%s:%s" % (origin, st.get("ASTRBOT_WEB_PORT", "6185")), "username": st.get("ASTRBOT_USERNAME", "astrbot"), "password": parse_deploy_line(deploy, "AstrBot initial random password"), "token": st.get("ASTRBOT_REVERSE_WS_TOKEN", "yuyu521521"), "config_path": str(INSTALL_PREFIX / "data" / "cmd_config.json"), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署"}
+    return {"status": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "url": url_for_port(origin, st.get("ASTRBOT_WEB_PORT", "6185")), "username": st.get("ASTRBOT_USERNAME", "astrbot"), "password": parse_deploy_line(deploy, "AstrBot initial random password"), "token": st.get("ASTRBOT_REVERSE_WS_TOKEN", "yuyu521521"), "config_path": str(INSTALL_PREFIX / "data" / "cmd_config.json"), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署"}
 
 
 def get_logs(target: str, lines: int) -> str:
@@ -503,8 +658,13 @@ def get_logs(target: str, lines: int) -> str:
 
 def tail_file(path: Path, lines: int) -> str:
     if not path.exists():
-        return "日志文件不存在"
-    return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:])
+        return "\u65e5\u5fd7\u6587\u4ef6\u4e0d\u5b58\u5728"
+    lines = max(1, min(int(lines or 300), 5000))
+    buf: deque[str] = deque(maxlen=lines)
+    with path.open("r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            buf.append(line.rstrip("\n"))
+    return "\n".join(buf)
 
 
 def backups_data() -> list[dict]:
@@ -675,7 +835,7 @@ def delete_napcat(name: str, keep_data: bool) -> tuple[int, str]:
     if idx.exists():
         rows = [x for x in idx.read_text(encoding="utf-8", errors="replace").splitlines() if not x.startswith(name + "\t")]
         idx.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
-    code, out = bash("sync_napcat_reverse_configs; sync_astrbot_platforms; write_deploy_info", timeout=420)
+    code, out = bash("port_state_remove %s || true; sync_napcat_reverse_configs; sync_astrbot_platforms; write_deploy_info" % sh_quote(name), timeout=420)
     output.append(out)
     return code, "\n".join(output)
 
@@ -713,7 +873,13 @@ class Handler(BaseHTTPRequestHandler):
         self.security_headers()
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
+    def request_origin(self) -> str:
+        return origin_from_headers(self.headers, getattr(self.server, "server_port", None))
 
     def read_body(self) -> bytes:
         n = int(self.headers.get("Content-Length", "0") or 0)
@@ -769,13 +935,13 @@ class Handler(BaseHTTPRequestHandler):
             if p.path == "/api/me":
                 return self.send_api(api(True, {"user": user, "config": sanitize_config(load_config())}))
             if p.path == "/api/dashboard":
-                return self.send_api(api(True, dashboard_data()))
+                return self.send_api(api(True, dashboard_data(self.request_origin())))
             if p.path == "/api/astrbot":
-                return self.send_api(api(True, astrbot_data()))
+                return self.send_api(api(True, astrbot_data(self.request_origin())))
             if p.path == "/api/plugins/astrbot":
                 return self.send_api(api(True, plugins_data()))
             if p.path == "/api/napcat":
-                return self.send_api(api(True, parse_napcat_index()))
+                return self.send_api(api(True, parse_napcat_index(self.request_origin())))
             if p.path == "/api/tasks":
                 return self.send_api(api(True, [t.to_dict() for t in list(TASKS.values())[-50:]]))
             if p.path.startswith("/api/tasks/"):
@@ -800,6 +966,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_api(api(True, sanitize_config(load_config())))
             if p.path == "/api/https/status":
                 return self.send_api(api(True, https_status()))
+            if p.path == "/api/watchdog/status":
+                return self.send_api(api(True, watchdog_status()))
             if p.path == "/api/config/astrbot":
                 return self.handle_astrbot_config()
             if p.path == "/api/server-files":
@@ -896,7 +1064,10 @@ class Handler(BaseHTTPRequestHandler):
         self.security_headers()
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def login(self):
         data = self.read_json()
@@ -1039,20 +1210,33 @@ class Handler(BaseHTTPRequestHandler):
         self.send_api(api(True, {"target": target, "content": text}))
 
     def handle_log_stream(self, p):
-        target = parse_qs(p.query).get("target", ["astrbot"])[0]
+        qs = parse_qs(p.query)
+        target = qs.get("target", ["astrbot"])[0]
+        keyword = qs.get("keyword", [""])[0].lower()
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Accel-Buffering", "no")
         self.security_headers()
         self.end_headers()
-        last = ""
-        for _ in range(120):
-            text = get_logs(target, 120)
-            if text != last:
-                self.wfile.write(("data: %s\n\n" % json.dumps({"content": text}, ensure_ascii=False)).encode("utf-8"))
-                self.wfile.flush()
-                last = text
-            time.sleep(2)
+        try:
+            self.wfile.write(b"retry: 2500\n\n")
+            last = ""
+            for _ in range(1800):
+                text = get_logs(target, 220)
+                if keyword:
+                    text = "\n".join([x for x in text.splitlines() if keyword in x.lower()])
+                if text != last:
+                    payload = json.dumps({"target": target, "content": text, "ts": now()}, ensure_ascii=False)
+                    self.wfile.write(("data: %s\n\n" % payload).encode("utf-8"))
+                    self.wfile.flush()
+                    last = text
+                else:
+                    self.wfile.write(b": keepalive\n\n")
+                    self.wfile.flush()
+                time.sleep(1)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def handle_file_view(self, p):
         qs = parse_qs(p.query)
@@ -1070,7 +1254,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(f.name))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def server_path(self, raw: str) -> Path:
         if not raw:
@@ -1126,7 +1313,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(path.name))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def handle_backup_download(self, p):
         f = path_under(INSTALL_PREFIX / "backups", parse_qs(p.query).get("file", [""])[0])
@@ -1137,7 +1327,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(f.name))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def safe_upload_filename(self, raw: str) -> str:
         name = Path(raw).name.strip().replace("\x00", "")
@@ -1257,6 +1450,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_api(api(True, message="密码已修改，请重新登录"))
 
 
+class PanelServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -1270,7 +1468,7 @@ def main():
     print("Panel account: %s" % cfg["username"])
     if cfg.get("initial_password"):
         print("Panel initial password: %s" % cfg["initial_password"])
-    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+    PanelServer((args.host, args.port), Handler).serve_forever()
 
 
 if __name__ == "__main__":

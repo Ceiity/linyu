@@ -42,8 +42,10 @@ ensure_https_deps(){
 }
 
 write_nginx_panel(){
-  local domain="$1" file="/etc/nginx/sites-available/astrbot-deploy-panel.conf"
+  local domain="$1" file="/etc/nginx/sites-available/astrbot-deploy-panel.conf" upstream_host upstream_port
   load_state
+  upstream_host="${WEB_ADMIN_UPSTREAM_HOST:-${PANEL_UPSTREAM_HOST:-127.0.0.1}}"
+  upstream_port="${WEB_ADMIN_PORT:-7070}"
   cat > "$file" <<EOF
 server {
     listen 80;
@@ -52,12 +54,15 @@ server {
     client_max_body_size 512m;
 
     location / {
-        proxy_pass http://127.0.0.1:${WEB_ADMIN_PORT:-7070};
+        proxy_pass http://${upstream_host}:${upstream_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-Port \$server_port;
+        proxy_set_header X-Forwarded-Ssl on;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_read_timeout 3600;

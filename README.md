@@ -241,3 +241,56 @@ MIT License
 ## 项目商标
 
 Web 控制台内置了全新的“淋雨机器人” SVG 商标，文件位置：`panel/static/linyu-robot.svg`。它会自动用于登录页、侧边栏品牌区和浏览器图标，风格是黑白极简机器人头 + 蓝色雨滴高光，适合浅色/深色模式和手机端显示。
+
+## 企业级维护能力
+
+### 动态 HTTPS / 反向代理地址
+
+Web 控制台不会写死 IP、域名或 localhost。后端会根据当前请求自动识别访问地址，优先使用标准代理头：
+
+- `Host`
+- `Forwarded`
+- `X-Forwarded-Proto`
+- `X-Forwarded-Host`
+- `X-Forwarded-Port`
+- `X-Forwarded-Ssl`
+- `CF-Visitor`
+
+因此同一套代码可以同时兼容 IP 访问、域名访问、HTTP、HTTPS、Nginx、Caddy 和 Cloudflare Proxy。用户后续绑定域名后，通常无需修改代码。
+
+### NapCat 自动恢复
+
+`astrbot-napcat-watchdog.service` 是统一调度的后台守护服务，用于检测所有 NapCat 机器人实例，不会为每个机器人创建一个死循环线程。
+
+综合检测内容包括：
+
+- Docker 容器状态
+- NapCat WebUI 可达性
+- NapCat WebUI 登录状态 API
+- QQ 是否在线
+- 最近日志中的踢下线、二维码过期、登录过期等异常关键词
+
+连续异常达到阈值后，守护服务会自动重启对应 NapCat 容器，等待恢复并请求新的二维码。默认 10 分钟最多恢复 3 次，超过次数会暂停自动恢复并在日志和面板中提示需要人工处理。
+
+可在「系统设置」中配置：
+
+- 是否开启自动恢复
+- 检测间隔：30 / 60 / 120 / 300 秒或自定义
+- 连续异常次数
+- 最大恢复次数
+- 恢复统计窗口
+- 恢复等待时间
+
+### 统一端口管理
+
+新增统一端口状态文件：
+
+```bash
+/opt/astrbot/ports.json
+```
+
+创建机器人时会综合检查系统监听端口、Docker 已映射端口、NapCat 索引文件和端口状态文件，自动分配 WebUI、HTTP、WebSocket、AstrBot 反向 WebSocket 相关端口。删除机器人后端口会自动释放，避免机器人越来越多时端口管理混乱。
+
+### 实时日志
+
+日志中心使用 SSE 长连接实时推送新增日志，支持自动滚动、暂停滚动、关键词过滤、错误高亮、断线重连和全屏查看，不再依赖疯狂轮询。
