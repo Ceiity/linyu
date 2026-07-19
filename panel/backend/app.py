@@ -327,10 +327,11 @@ def parse_deploy_line(path: Path, key: str) -> str:
 def dashboard_data() -> dict:
     st = shell_state()
     deploy = Path(st.get("DEPLOY_INFO_FILE", str(INSTALL_PREFIX / "deploy_info.txt")))
+    astr = container_status(st.get("ASTRBOT_CONTAINER", "astrbot"))
     code, docker_ps = docker(["ps", "-a", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"], timeout=20)
     _, ports = run_process(["bash", "-lc", "ss -ltnp 2>/dev/null | head -n 80 || true"], timeout=20)
     recent = AUDIT_LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-20:] if AUDIT_LOG.exists() else []
-    return {"deployed": deploy.exists(), "public_ip": public_ip(), "private_ip": private_ip(), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署", "astrbot": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "napcats": parse_napcat_index(), "docker": {"ok": code == 0, "containers": docker_ps}, "system": system_metrics(), "ports": ports, "recent": recent, "network": st.get("NETWORK_NAME", "astrbot_network")}
+    return {"deployed": bool(astr.get("exists")), "public_ip": public_ip(), "private_ip": private_ip(), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署", "astrbot": astr, "napcats": parse_napcat_index(), "docker": {"ok": code == 0, "containers": docker_ps}, "system": system_metrics(), "ports": ports, "recent": recent, "network": st.get("NETWORK_NAME", "astrbot_network")}
 
 
 def astrbot_data() -> dict:
@@ -513,6 +514,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.astrbot_action(user)
             if p.path == "/api/napcat/action":
                 return self.napcat_action(user)
+            if p.path == "/api/deploy/start":
+                return self.deploy_start(user)
             if p.path == "/api/backup/create":
                 t = create_task("一键备份", "backup", task_shell, user, "开始备份", "backup_all", 900)
                 return self.send_api(api(True, t.to_dict()))
@@ -615,6 +618,32 @@ class Handler(BaseHTTPRequestHandler):
             audit(user, "napcat.delete", {"name": name}, code == 0)
             return self.send_api(api(code == 0, {"output": out}))
         raise ValueError("操作不支持")
+
+    def deploy_start(self, user: str):
+        data = self.read_json()
+        count = int(data.get("napcat_count", 1))
+        if count < 0 or count > 999:
+            raise ValueError("NapCat 数量必须是 0-999")
+        token = str(data.get("reverse_token", "")).strip() or "yuyu521521"
+        if not all(c.isalnum() or c in "._-+=" for c in token) or len(token) < 4:
+            raise ValueError("连接 Token 格式不合法")
+        cfg = load_config()
+        cfg["default_reverse_ws_token"] = token
+        write_json(PANEL_CONFIG, cfg)
+        script = (
+            "save_state_var ASTRBOT_REVERSE_WS_TOKEN %s; "
+            ": \"${ASTRBOT_WEB_PORT:=$(find_free_port 6185)}\"; "
+            ": \"${ASTRBOT_WS_PORT:=$(find_free_port 6199)}\"; "
+            "save_state_var ASTRBOT_WEB_PORT \"$ASTRBOT_WEB_PORT\"; "
+            "save_state_var ASTRBOT_WS_PORT \"$ASTRBOT_WS_PORT\"; "
+            "ensure_network; deploy_astrbot; apply_astrbot_default_config; "
+            % sh_quote(token)
+        )
+        if count > 0:
+            script += "add_napcat_instances %d; " % count
+        script += "write_deploy_info"
+        t = create_task("初始化部署 AstrBot + NapCat", "deploy.start", task_shell, user, "开始初始化部署", script, 2400)
+        self.send_api(api(True, t.to_dict()))
 
     def handle_logs(self, p):
         qs = parse_qs(p.query)

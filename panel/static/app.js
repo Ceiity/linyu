@@ -19,6 +19,7 @@ function statusBadge(s){let c=s==="running"?"green":s==="exited"?"grey":s==="mis
 function copy(t){navigator.clipboard?.writeText(t);toast("已复制")}
 function render(){const p=pages.find(x=>x[0]===state.page)||pages[0];title(p[2],p[3]);({dashboard,astrbot,napcat,logs,files,backup,update,settings}[state.page]||dashboard)()}
 function dashboard(){const d=state.data||{};$("#content").innerHTML=`<section class="grid">
+${!d.deployed?deployWizard():""}
 ${kpi("🤖","AstrBot",d.astrbot?.running?"运行中":"异常",d.astrbot?.running?"i-green":"i-red")}
 ${kpi("🐱","NapCat 实例",String(d.napcats?.length||0),"i-blue")}
 ${kpi("🐳","Docker",d.docker?.ok?"正常":"异常",d.docker?.ok?"i-green":"i-red")}
@@ -28,6 +29,8 @@ ${kpi("💾","磁盘占用",(d.system?.disk?.used_percent||0)+"%","i-orange")}
 <div class="card span7"><h3>端口占用</h3><pre class="code">${esc(d.ports||"暂无")}</pre></div>
 <div class="card span5"><h3>最近操作记录</h3><pre class="code">${esc((d.recent||[]).join("\\n")||"暂无操作")}</pre></div>
 </section>`}
+function deployWizard(){return `<div class="card span12" style="background:linear-gradient(135deg,#2563eb22,#a855f722)"><h3>初始化部署向导</h3><p class="muted">当前还没有检测到完整部署信息。你可以在这里直接部署 AstrBot + NapCat，不需要再进 SSH 敲命令。</p><div class="toolbar"><label style="max-width:180px">NapCat 数量<input id="initNapCount" type="number" min="0" max="999" value="1"></label><label style="max-width:240px">连接 Token<input id="initToken" value="yuyu521521"></label><button class="primary" onclick="startDeploy()">开始自动部署</button></div><div class="muted">会自动创建 Docker Network、AstrBot、NapCat 实例、反向 WebSocket 配置和 deploy_info.txt。</div></div>`}
+async function startDeploy(){const napcat_count=Number($("#initNapCount").value||1),reverse_token=$("#initToken").value||"yuyu521521";const t=await req("/api/deploy/start",{method:"POST",body:JSON.stringify({napcat_count,reverse_token})});toast("初始化部署任务已开始");showTask(t.id)}
 function kpi(icon,label,value,cls){return `<div class="card span3 kpi"><div><div class="muted">${label}</div><strong>${value}</strong></div><div class="icon ${cls}">${icon}</div></div>`}
 function healthRows(d){return `<div class="file-cards"><div class="file-card"><b>AstrBot</b>${statusBadge(d.astrbot?.status)}</div><div class="file-card"><b>Docker Network</b><span class="copyable">${d.network}</span></div><div class="file-card"><b>公网 IP</b><span onclick="copy('${d.public_ip}')">${d.public_ip}</span></div><div class="file-card"><b>内网 IP</b><span>${d.private_ip}</span></div></div>`}
 function metric(d){let m=d.system?.memory||{},disk=d.system?.disk||{},load=(d.system?.load?.[0]||0);let cpu=Math.min(100,Math.round(load*25));return `<div class="chart-row"><div class="ring" style="--p:${cpu}"><b>${cpu}%</b></div><div class="ring" style="--p:${m.used_percent||0}"><b>${m.used_percent||0}%</b></div><div class="ring" style="--p:${disk.used_percent||0}"><b>${disk.used_percent||0}%</b></div><div class="file-cards" style="flex:1;min-width:220px"><div>CPU 负载估算：${load}</div><div>内存：${fmtBytes((m.total||0)-(m.available||0))} / ${fmtBytes(m.total||0)}</div><div>磁盘：${fmtBytes(disk.used||0)} / ${fmtBytes(disk.total||0)}</div><div class="mini-bars">${Array.from({length:18},(_,i)=>`<span style="height:${20+Math.abs(Math.sin(i+(m.used_percent||0)/20))*58}px"></span>`).join("")}</div></div></div>`}

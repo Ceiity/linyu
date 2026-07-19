@@ -4,6 +4,7 @@
 
 ## 功能
 
+- 初始化部署向导：网页里填写 NapCat 数量和连接 Token，一键异步部署 AstrBot + NapCat。
 - 仪表盘：AstrBot、NapCat、Docker、CPU、内存、磁盘、端口、最近操作。
 - AstrBot 管理：启动、停止、重启、查看地址、账号、密码、Token、日志。
 - NapCat 管理：实例列表、端口、Token、状态、新增、删除、启动、停止、重启、批量重启。
@@ -27,6 +28,14 @@
 cd /opt/astrbot/AstrBot-Deploy
 bash scripts/panel.sh setup
 ```
+
+一键安装脚本默认也是先启动本面板：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Ceiity/linyu/main/install.sh)
+```
+
+打开面板后，在仪表盘点击“初始化部署向导”即可继续部署 AstrBot 和 NapCat。
 
 查看状态：
 
