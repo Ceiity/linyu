@@ -842,19 +842,28 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_api(api(int(res.get("code", -1)) == 0, res, res.get("message", "")))
         if action == "status":
             res = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
+            if int(res.get("code", -1)) == 0 and (res.get("data") or {}).get("isLogin"):
+                info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
+                if int(info.get("code", -1)) == 0:
+                    res.setdefault("data", {})["loginInfo"] = info.get("data") or {}
             audit(user, "napcat.qq.status", {"name": name}, int(res.get("code", -1)) == 0)
             return self.send_api(api(int(res.get("code", -1)) == 0, res, res.get("message", "")))
         if action == "qrcode":
+            status = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
+            if int(status.get("code", -1)) == 0 and (status.get("data") or {}).get("isLogin"):
+                info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
+                audit(user, "napcat.qq.already_login", {"name": name}, True)
+                return self.send_api(api(True, {"name": name, "already_login": True, "status": status, "login_info": (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {}}))
             res = napcat_webui_call(row, "/QQLogin/GetQQLoginQrcode")
             if int(res.get("code", -1)) != 0:
-                return self.send_api(api(False, res, res.get("message", "获取二维码失败")))
+                return self.send_api(api(False, res, res.get("message", "???????")))
             qrcode_url = (res.get("data") or {}).get("qrcode") or ""
             if not qrcode_url:
-                return self.send_api(api(False, res, "NapCat 没有返回二维码链接，可能已经登录或二维码还没生成"))
+                return self.send_api(api(False, res, "NapCat ????????????????????????"))
             svg = qr_svg_for_text(qrcode_url)
             audit(user, "napcat.qq.qrcode", {"name": name}, True)
-            return self.send_api(api(True, {"name": name, "qrcode_url": qrcode_url, "svg": svg, "status": res}))
-        raise ValueError("QQ 登录操作不支持")
+            return self.send_api(api(True, {"name": name, "already_login": False, "qrcode_url": qrcode_url, "svg": svg, "status": res}))
+        raise ValueError("QQ ???????")
 
     def napcat_action(self, user: str):
         data = self.read_json()
