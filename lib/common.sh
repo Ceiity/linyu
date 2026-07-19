@@ -9,7 +9,7 @@ load_state(){ [[ -f "$STATE_FILE" ]] && set -a && source "$STATE_FILE" && set +a
 save_state_var(){ local key="$1" val="$2" tmp="${STATE_FILE}.tmp"; touch "$STATE_FILE"; grep -vE "^${key}=" "$STATE_FILE" > "$tmp" || true; printf '%s=%q\n' "$key" "$val" >> "$tmp"; mv "$tmp" "$STATE_FILE"; }
 have_cmd(){ command -v "$1" >/dev/null 2>&1; }
 retry(){ local attempts="$1" delay="$2"; shift 2; local i; for ((i=1;i<=attempts;i++)); do if "$@"; then return 0; fi; warn "Attempt $i/$attempts failed; retrying in ${delay}s: $*"; sleep "$delay"; done; return 1; }
-public_ip(){ curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || curl -fsS --max-time 5 https://ifconfig.me 2>/dev/null || echo "unknown"; }
+public_ip(){ curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || curl -fsS --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1"; }
 private_ip(){ hostname -I 2>/dev/null | awk '{print $1}' || ip route get 1.1.1.1 2>/dev/null | awk '/src/{print $7; exit}' || echo "unknown"; }
 os_pretty(){ if [[ -r /etc/os-release ]]; then . /etc/os-release; echo "${PRETTY_NAME:-$ID $VERSION_ID}"; else uname -a; fi; }
 validate_os(){ if [[ -r /etc/os-release ]]; then . /etc/os-release; case "${ID:-}" in ubuntu|debian) success "OS: ${PRETTY_NAME:-$ID}";; *) warn "OS ${PRETTY_NAME:-unknown}; Debian/Ubuntu are the primary targets; continuing.";; esac; fi; }
