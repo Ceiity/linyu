@@ -98,6 +98,7 @@ napcat20
 - 备份恢复：一键备份、备份列表、下载备份、恢复备份
 - 更新中心：更新 AstrBot、更新 NapCat、更新全部
 - 系统设置：安装目录、Docker 网络、默认 Token、账号密码、上传目录、危险操作
+- HTTPS：支持 Nginx + Certbot + Let's Encrypt 自动申请证书
 - 查看所有 NapCat WebUI 地址和 Token
 - 一键新增 NapCat，输入几个就创建几个
 
@@ -115,6 +116,25 @@ bash scripts/panel.sh setup
 ```
 
 重新生成或启动 Web 控制台。
+
+## HTTPS / Let's Encrypt
+
+如果你有自己的域名，可以在 Web 控制台的「系统设置」里配置 HTTPS。
+
+前提：
+
+- 域名 A 记录已经解析到服务器公网 IP。
+- 云服务器安全组开放 `80` 和 `443`。
+- 服务器本机没有其它服务占用 Nginx 的 `80/443`。
+
+也可以命令行执行：
+
+```bash
+cd /opt/astrbot/AstrBot-Deploy
+HTTPS_DOMAIN=panel.example.com HTTPS_EMAIL=admin@example.com bash scripts/https.sh
+```
+
+脚本会自动安装 Nginx、Certbot，配置反向代理到 Web 控制台，并申请 Let's Encrypt 证书。
 
 详细说明见：
 

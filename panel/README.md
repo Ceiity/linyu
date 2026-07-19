@@ -13,6 +13,7 @@
 - 备份恢复：一键备份、备份列表、下载、恢复指定备份。
 - 更新中心：更新 AstrBot 镜像、NapCat 镜像、全部更新、异步任务进度。
 - 系统设置：安装目录、Docker 网络名、默认 Token、登录账号密码、上传目录、危险操作、公网地址、主题色。
+- HTTPS：输入域名和邮箱，一键配置 Nginx + Certbot + Let's Encrypt。
 
 ## 响应式适配
 
@@ -78,3 +79,19 @@ python3 panel/backend/app.py --host 0.0.0.0 --port 7070
 - 危险操作还需要在系统设置里开启。
 - 所有操作写入 `/opt/astrbot/logs/panel-audit.log`。
 - API 返回结构统一为 `ok/data/message/code/time/version`。
+
+## HTTPS
+
+Web 控制台内置 Let's Encrypt 自动配置入口。
+
+要求：
+
+- 域名已经解析到服务器公网 IP。
+- 80/443 端口已在安全组开放。
+- 使用 HTTP-01 校验，不能只用裸 IP 申请证书。
+
+命令行：
+
+```bash
+HTTPS_DOMAIN=panel.example.com HTTPS_EMAIL=admin@example.com bash scripts/https.sh
+```

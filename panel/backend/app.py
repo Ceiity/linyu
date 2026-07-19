@@ -373,6 +373,23 @@ def backups_data() -> list[dict]:
     return [{"name": p.name, "size": p.stat().st_size, "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(p.stat().st_mtime))} for p in sorted(base.glob("*.tar.gz"), key=lambda x: x.stat().st_mtime, reverse=True)]
 
 
+def https_status() -> dict:
+    st = shell_state()
+    domain = st.get("HTTPS_DOMAIN", "")
+    url = st.get("HTTPS_PANEL_URL", "https://" + domain if domain else "")
+    cert_path = Path("/etc/letsencrypt/live") / domain / "fullchain.pem" if domain else Path("")
+    code, nginx = run_process(["bash", "-lc", "systemctl is-active nginx 2>/dev/null || true"], timeout=10)
+    code2, certbot = run_process(["bash", "-lc", "command -v certbot >/dev/null 2>&1 && certbot --version || true"], timeout=10)
+    return {
+        "enabled": bool(domain and cert_path.exists()),
+        "domain": domain,
+        "url": url,
+        "certificate": str(cert_path) if domain else "",
+        "nginx": nginx.strip(),
+        "certbot": certbot.strip(),
+    }
+
+
 def list_files(base: Path) -> list[dict]:
     base.mkdir(parents=True, exist_ok=True)
     out = []
@@ -506,6 +523,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.handle_backup_download(p)
             if p.path == "/api/settings":
                 return self.send_api(api(True, sanitize_config(load_config())))
+            if p.path == "/api/https/status":
+                return self.send_api(api(True, https_status()))
             if p.path == "/api/config/astrbot":
                 return self.handle_astrbot_config()
             if p.path == "/api/server-files":
@@ -551,6 +570,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("更新目标不支持")
                 t = create_task("更新 " + target, "update." + target, task_shell, user, "开始更新", mapping[target], 1800)
                 return self.send_api(api(True, t.to_dict()))
+            if p.path == "/api/https/setup":
+                return self.https_setup(user)
             if p.path == "/api/files/upload":
                 return self.upload(user)
             if p.path == "/api/files/delete":
@@ -662,6 +683,16 @@ class Handler(BaseHTTPRequestHandler):
             script += "add_napcat_instances %d; " % count
         script += "write_deploy_info"
         t = create_task("初始化部署 AstrBot + NapCat", "deploy.start", task_shell, user, "开始初始化部署", script, 2400)
+        self.send_api(api(True, t.to_dict()))
+
+    def https_setup(self, user: str):
+        data = self.read_json()
+        domain = str(data.get("domain", "")).strip()
+        email = str(data.get("email", "")).strip()
+        if not domain or "." not in domain or "/" in domain:
+            raise ValueError("请输入正确域名，例如 panel.example.com")
+        script = "HTTPS_DOMAIN=%s HTTPS_EMAIL=%s bash scripts/https.sh" % (sh_quote(domain), sh_quote(email))
+        t = create_task("自动配置 HTTPS", "https.setup", task_shell, user, "开始安装 Nginx / Certbot 并申请证书", script, 2400)
         self.send_api(api(True, t.to_dict()))
 
     def handle_logs(self, p):
