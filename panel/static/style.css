@@ -50,3 +50,23 @@ input[type=color]{width:64px!important;min-width:64px;height:44px;padding:4px;bo
 [data-theme=dark] .bottom-nav{background:#111!important}
 .modal-actions{background:var(--panel2)!important}
 .already-modal{display:grid;place-items:center;text-align:center;gap:12px;padding:18px 8px 6px}.already-modal h3{margin:4px 0 0;font-size:26px;letter-spacing:-.03em}.already-modal p{margin:0;max-width:330px;line-height:1.65;color:var(--muted)}.already-meta{max-width:100%;word-break:break-all;border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:8px 12px;font-size:12px;color:var(--muted)}.ok-doodle.big{width:118px;height:118px;border-radius:38px}.ok-doodle.big svg{width:78px;height:78px}@media(max-width:720px){.bottom-nav{background:#fff!important}.already-modal{padding:10px 4px 0}.already-modal h3{font-size:24px}[data-theme=dark] .bottom-nav{background:#111!important}}
+
+/* QR login modal polish: remove bottom cancel bar, prevent visual split on scroll */
+.modal-card:has(.qr-login){width:min(460px,94vw);position:relative;overflow:hidden;padding:0;background:var(--panel2);border:1px solid var(--line)}
+.modal-card:has(.qr-login) #modalBody{padding:0;background:var(--panel2)}
+.modal-card:has(.qr-login)>.modal-actions{display:none!important}
+.qr-login{position:relative;display:grid;gap:16px;max-height:min(86vh,720px);overflow:auto;padding:20px;background:var(--panel2);scrollbar-gutter:stable}
+.qr-close{position:absolute;right:14px;top:14px;width:38px;height:38px;min-height:38px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:22px;line-height:1;display:grid;place-items:center;z-index:2;box-shadow:none}
+.qr-close:hover{background:var(--bg)}
+.qr-login-head{padding-right:44px}
+.modal-card:has(.qr-login) .scan-actions{position:static!important;margin:0!important;padding:0!important;background:transparent!important;display:flex;justify-content:center;gap:10px;border:0!important;box-shadow:none!important}
+.modal-card:has(.qr-login) .scan-actions button,.modal-card:has(.qr-login) .scan-actions .link-pill{min-height:44px;border-radius:999px}
+.modal-card:has(.qr-login) .qr-login-body{background:linear-gradient(180deg,var(--panel2),var(--bg));box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}
+@media(max-width:720px){
+  .modal-card:has(.qr-login){width:100%;max-height:92vh;border-radius:26px 26px 0 0}
+  .qr-login{max-height:92vh;padding:18px 14px calc(16px + env(safe-area-inset-bottom));gap:14px}
+  .qr-close{right:12px;top:12px;width:36px;height:36px;min-height:36px}
+  .qr-login-head{gap:12px;padding-right:40px}
+  .modal-card:has(.qr-login) .scan-actions{display:grid;grid-template-columns:1fr;gap:8px}
+  .modal-card:has(.qr-login) .scan-actions>*{width:100%;justify-content:center}
+}

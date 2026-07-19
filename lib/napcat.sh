@@ -141,7 +141,8 @@ delete_napcat_instance(){
   file="$dir/docker-compose.yml"
   [[ -f "$file" ]] || { fail "Instance not found: ${name}"; return 1; }
   $(compose_cmd) -f "$file" down || true
-  read -r -p $'???????? '"${dir}"$'?[y/N]?' ans || ans="n"
+  printf $'\u662f\u5426\u5220\u9664\u6570\u636e\u76ee\u5f55 %s\uff1f[y/N]\uff1a' "$dir"
+  read -r ans || ans="n"
   [[ "$ans" =~ ^[Yy]$ ]] && rm -rf -- "$dir"
   awk -F'\t' -v n="$name" '$1 != n' "$NAPCAT_INDEX_FILE" > "${NAPCAT_INDEX_FILE}.tmp" || true
   mv "${NAPCAT_INDEX_FILE}.tmp" "$NAPCAT_INDEX_FILE"

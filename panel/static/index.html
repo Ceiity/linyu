@@ -13,7 +13,7 @@
       <h1>AstrBot-Deploy</h1>
       <p>登录企业级 Web 控制台，统一管理 AstrBot 与 NapCat。</p>
       <label>账号<input id="loginUser" autocomplete="username" value="linyu"></label>
-      <label>密码<input id="loginPass" type="password" autocomplete="current-password" placeholder="首次密码在 /opt/astrbot/panel_config.json"></label>
+      <label>密码<input id="loginPass" type="password" autocomplete="current-password" placeholder="默认密码 yuyu521521"></label>
       <button class="primary wide" onclick="login()">进入控制台</button>
       <div id="loginMsg" class="muted"></div>
     </div>
@@ -25,8 +25,8 @@
       <nav id="nav"></nav>
     </aside>
     <header class="topbar">
-      <button class="icon-btn mobile-only" onclick="toggleDrawer()">☰</button>
-      <div><h2 id="pageTitle">Dashboard</h2><span id="pageSub">系统总览</span></div>
+      <button class="icon-btn mobile-only" onclick="toggleDrawer()" aria-label="打开菜单">☰</button>
+      <div><h2 id="pageTitle">仪表盘</h2><span id="pageSub">系统总览</span></div>
       <div class="top-actions">
         <span id="globalStatus" class="status-pill grey">检测中</span>
         <button class="ghost" onclick="refresh()">刷新</button>

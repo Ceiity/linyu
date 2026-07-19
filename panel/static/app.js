@@ -54,13 +54,13 @@ function oneNapBtns(r){const n=typeof r==="string"?r:r.name,u=typeof r==="string
 async function showQrLogin(name,url){
   if(state.qrTimer){clearInterval(state.qrTimer);state.qrTimer=null}
   const title=`${botName(name)} 扫码登录`;
-  openModal(`<div class="qr-login"><div class="qr-login-head"><div class="scan-art">${qrIcon()}</div><div><h3>${safeText(title)}</h3><p class="muted">正在向 NapCat 获取 QQ 登录二维码...</p></div></div><div id="qrLoginBody" class="qr-login-body"><div class="qr-skeleton"></div></div><div class="qr-status muted" id="qrLoginStatus">准备中</div><div class="toolbar scan-actions"><button class="primary" onclick="refreshNapQr('${q(name)}')">刷新二维码</button><a class="link-pill" href="${safeHref(url)}" target="_blank" rel="noopener noreferrer">打开 NapCat WebUI</a></div></div>`,null);
+  openModal(`<div class="qr-login"><button class="qr-close" onclick="closeModal()" aria-label="\u5173\u95ed">&times;</button><div class="qr-login-head"><div class="scan-art">${qrIcon()}</div><div><h3>${safeText(title)}</h3><p class="muted">\u6b63\u5728\u5411 NapCat \u83b7\u53d6 QQ \u767b\u5f55\u4e8c\u7ef4\u7801...</p></div></div><div id="qrLoginBody" class="qr-login-body"><div class="qr-skeleton"></div></div><div class="qr-status muted" id="qrLoginStatus">\u51c6\u5907\u4e2d</div><div class="toolbar scan-actions"><button class="primary" onclick="refreshNapQr('${q(name)}')">\u5237\u65b0\u4e8c\u7ef4\u7801</button><a class="link-pill" href="${safeHref(url)}" target="_blank" rel="noopener noreferrer">\u6253\u5f00 NapCat WebUI</a></div></div>`,null);
   await loadNapQr(name);
   state.qrTimer=setInterval(()=>pollNapQr(name),3000);
 }
 function showAlreadyLogin(name, info={}){
   const nick=info.nick||info.nickname||info.uin||"QQ 已登录";
-  const html=`<div class="already-modal"><div class="ok-doodle big">${okIcon()}</div><h3>已经登录</h3><p>${safeText(botName(name))} 当前已经连接 QQ?不需要重复扫码?</p><div class="already-meta">${safeText(nick)}</div><button class="primary wide" onclick="closeModal()">知道了</button></div>`;
+  const html=`<div class="already-modal"><div class="ok-doodle big">${okIcon()}</div><h3>已经登录</h3><p>${safeText(botName(name))} 当前已经连接 QQ，不需要重复扫码。</p><div class="already-meta">${safeText(nick)}</div><button class="primary wide" onclick="closeModal()">知道了</button></div>`;
   openModal(html,null);
   setTimeout(()=>{if(!$("#modal")?.classList.contains("hidden"))closeModal()},1600);
 }
@@ -71,7 +71,7 @@ async function loadNapQr(name){
     const d=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"qrcode"})});
     if(d.already_login){
       const info=d.login_info||{}, nick=info.nick||info.nickname||info.uin||"QQ 已登录";
-      if(box)box.innerHTML=`<div class="login-ok-card"><div class="ok-doodle">${okIcon()}</div><h3>已经登录</h3><p>${safeText(botName(name))} 当前已连接 QQ?无需再次扫码?</p><div class="compact-url">${safeText(nick)}</div></div>`;
+      if(box)box.innerHTML=`<div class="login-ok-card"><div class="ok-doodle">${okIcon()}</div><h3>已经登录</h3><p>${safeText(botName(name))} 当前已连接 QQ，无需再次扫码。</p><div class="compact-url">${safeText(nick)}</div></div>`;
       if(st)st.textContent="机器人在线，可以直接使用，窗口即将关闭";
       setTimeout(()=>closeModal(),1200);
       return;
@@ -95,7 +95,7 @@ async function pollNapQr(name){
     const data=r.data||{}; const st=$("#qrLoginStatus");
     if(data.isLogin){
       const box=$("#qrLoginBody"),info=data.loginInfo||{},nick=info.nick||info.nickname||info.uin||"QQ 已登录";
-      if(box)box.innerHTML=`<div class="login-ok-card"><div class="ok-doodle">${okIcon()}</div><h3>登录成功</h3><p>${safeText(botName(name))} 已经连接 QQ?</p><div class="compact-url">${safeText(nick)}</div></div>`;
+      if(box)box.innerHTML=`<div class="login-ok-card"><div class="ok-doodle">${okIcon()}</div><h3>登录成功</h3><p>${safeText(botName(name))} 已经连接 QQ。</p><div class="compact-url">${safeText(nick)}</div></div>`;
       if(st)st.textContent="机器人在线，可以直接使用，窗口即将关闭";
       toast("QQ 登录成功");
       clearInterval(state.qrTimer);state.qrTimer=null;
