@@ -1,16 +1,17 @@
 const $ = s => document.querySelector(s);
-const state = {page:"dashboard", data:null, user:null, tasks:[], theme:localStorage.theme||"", logStream:null};
+const state = {page:(location.hash||"#dashboard").slice(1), data:null, user:null, tasks:[], theme:localStorage.theme||"", logStream:null};
 const pages = [
-  ["dashboard","📊","仪表盘","系统总览"],["astrbot","🤖","AstrBot","机器人主服务"],["napcat","🐱","NapCat","多实例管理"],
-  ["logs","📜","日志中心","实时日志"],["files","📁","文件中心","上传与配置"],["backup","🧰","备份恢复","数据保护"],["update","⬆️","更新中心","镜像升级"],["settings","⚙️","系统设置","面板配置"]
+  ["dashboard","dashboard","仪表盘","系统总览"],["astrbot","bot","AstrBot","机器人主服务"],["napcat","nodes","NapCat","多实例管理"],
+  ["logs","logs","日志中心","实时日志"],["files","files","文件中心","上传与配置"],["backup","archive","备份恢复","数据保护"],["update","upload","更新中心","镜像升级"],["settings","settings","系统设置","面板配置"]
 ];
 if(state.theme) document.documentElement.dataset.theme=state.theme;
 function toast(t){const e=$("#toast");e.textContent=t;e.classList.add("show");setTimeout(()=>e.classList.remove("show"),1800)}
 async function req(url,opt={}){opt.headers=Object.assign({"Content-Type":"application/json"},opt.headers||{});const r=await fetch(url,opt);if(r.status===401){$("#login").classList.remove("hidden");$("#app").classList.add("hidden");throw new Error("未登录")}const j=await r.json();if(!j.ok)throw new Error(j.message||"操作失败");return j.data}
 async function login(){try{const data=await req("/api/login",{method:"POST",body:JSON.stringify({username:$("#loginUser").value,password:$("#loginPass").value})});state.user=data.user;$("#login").classList.add("hidden");$("#app").classList.remove("hidden");toast("登录成功");await init()}catch(e){$("#loginMsg").textContent=e.message}}
 async function init(){renderNav();await refresh();setInterval(refresh,8000);setInterval(loadTasks,2500)}
-function renderNav(){const html=pages.map(p=>`<div class="nav-item ${state.page===p[0]?"active":""}" onclick="go('${p[0]}')"><span>${p[1]}</span><span class="nav-text">${p[2]}</span></div>`).join("");$("#nav").innerHTML=html;$("#bottomNav").innerHTML=pages.slice(0,5).map(p=>`<div class="nav-item ${state.page===p[0]?"active":""}" onclick="go('${p[0]}')"><span>${p[1]}</span><span class="nav-text">${p[2]}</span></div>`).join("")}
-function go(p){state.page=p;$(".sidebar").classList.remove("open");renderNav();render()}
+function renderNav(){const html=pages.map(p=>`<div class="nav-item ${state.page===p[0]?"active":""}" onclick="go('${p[0]}')">${icon(p[1])}<span class="nav-text">${p[2]}</span></div>`).join("");$("#nav").innerHTML=html;$("#bottomNav").innerHTML=pages.slice(0,5).map(p=>`<div class="nav-item ${state.page===p[0]?"active":""}" onclick="go('${p[0]}')">${icon(p[1])}<span class="nav-text">${p[2]}</span></div>`).join("")}
+function go(p){state.page=p;location.hash=p;$(".sidebar").classList.remove("open");renderNav();render()}
+window.addEventListener("hashchange",()=>{state.page=(location.hash||"#dashboard").slice(1);renderNav();render()});
 function toggleDrawer(){$(".sidebar").classList.toggle("open")}function toggleTheme(){state.theme=state.theme==="dark"?"light":"dark";document.documentElement.dataset.theme=state.theme;localStorage.theme=state.theme}
 async function refresh(){try{state.data=await req("/api/dashboard");const ok=state.data.astrbot.running;$("#globalStatus").className="status-pill "+(ok?"green":"red");$("#globalStatus").textContent=ok?"运行中":"异常";render()}catch(e){console.log(e)}}
 function title(t,s){$("#pageTitle").textContent=t;$("#pageSub").textContent=s}
@@ -20,10 +21,10 @@ function copy(t){navigator.clipboard?.writeText(t);toast("已复制")}
 function render(){const p=pages.find(x=>x[0]===state.page)||pages[0];title(p[2],p[3]);({dashboard,astrbot,napcat,logs,files,backup,update,settings}[state.page]||dashboard)()}
 function dashboard(){const d=state.data||{};$("#content").innerHTML=`<section class="grid">
 ${!d.deployed?deployWizard():""}
-${kpi("🤖","AstrBot",d.astrbot?.running?"运行中":"异常",d.astrbot?.running?"i-green":"i-red")}
-${kpi("🐱","NapCat 实例",String(d.napcats?.length||0),"i-blue")}
-${kpi("🐳","Docker",d.docker?.ok?"正常":"异常",d.docker?.ok?"i-green":"i-red")}
-${kpi("💾","磁盘占用",(d.system?.disk?.used_percent||0)+"%","i-orange")}
+${kpi("bot","AstrBot",d.astrbot?.running?"运行中":"异常",d.astrbot?.running?"i-green":"i-red")}
+${kpi("nodes","NapCat 实例",String(d.napcats?.length||0),"i-blue")}
+${kpi("docker","Docker",d.docker?.ok?"正常":"异常",d.docker?.ok?"i-green":"i-red")}
+${kpi("disk","磁盘占用",(d.system?.disk?.used_percent||0)+"%","i-orange")}
 <div class="card span6"><h3>服务健康状态</h3>${healthRows(d)}</div>
 <div class="card span6"><h3>资源图表</h3>${metric(d)}</div>
 <div class="card span7"><h3>端口占用</h3><pre class="code">${esc(d.ports||"暂无")}</pre></div>
@@ -31,7 +32,7 @@ ${kpi("💾","磁盘占用",(d.system?.disk?.used_percent||0)+"%","i-orange")}
 </section>`}
 function deployWizard(){return `<div class="card span12" style="background:linear-gradient(135deg,#2563eb22,#a855f722)"><h3>初始化部署向导</h3><p class="muted">当前还没有检测到完整部署信息。你可以在这里直接部署 AstrBot + NapCat，不需要再进 SSH 敲命令。</p><div class="toolbar"><label style="max-width:180px">NapCat 数量<input id="initNapCount" type="number" min="0" max="999" value="1"></label><label style="max-width:240px">连接 Token<input id="initToken" value="yuyu521521"></label><button class="primary" onclick="startDeploy()">开始自动部署</button></div><div class="muted">会自动创建 Docker Network、AstrBot、NapCat 实例、反向 WebSocket 配置和 deploy_info.txt。</div></div>`}
 async function startDeploy(){const napcat_count=Number($("#initNapCount").value||1),reverse_token=$("#initToken").value||"yuyu521521";const t=await req("/api/deploy/start",{method:"POST",body:JSON.stringify({napcat_count,reverse_token})});toast("初始化部署任务已开始");showTask(t.id)}
-function kpi(icon,label,value,cls){return `<div class="card span3 kpi"><div><div class="muted">${label}</div><strong>${value}</strong></div><div class="icon ${cls}">${icon}</div></div>`}
+function kpi(ic,label,value,cls){return `<div class="card span3 kpi"><div><div class="muted">${label}</div><strong>${value}</strong></div><div class="icon ${cls}">${icon(ic)}</div></div>`}
 function healthRows(d){return `<div class="file-cards"><div class="file-card"><b>AstrBot</b>${statusBadge(d.astrbot?.status)}</div><div class="file-card"><b>Docker Network</b><span class="copyable">${d.network}</span></div><div class="file-card"><b>公网 IP</b><span onclick="copy('${d.public_ip}')">${d.public_ip}</span></div><div class="file-card"><b>内网 IP</b><span>${d.private_ip}</span></div></div>`}
 function metric(d){let m=d.system?.memory||{},disk=d.system?.disk||{},load=(d.system?.load?.[0]||0);let cpu=Math.min(100,Math.round(load*25));return `<div class="chart-row"><div class="ring" style="--p:${cpu}"><b>${cpu}%</b></div><div class="ring" style="--p:${m.used_percent||0}"><b>${m.used_percent||0}%</b></div><div class="ring" style="--p:${disk.used_percent||0}"><b>${disk.used_percent||0}%</b></div><div class="file-cards" style="flex:1;min-width:220px"><div>CPU 负载估算：${load}</div><div>内存：${fmtBytes((m.total||0)-(m.available||0))} / ${fmtBytes(m.total||0)}</div><div>磁盘：${fmtBytes(disk.used||0)} / ${fmtBytes(disk.total||0)}</div><div class="mini-bars">${Array.from({length:18},(_,i)=>`<span style="height:${20+Math.abs(Math.sin(i+(m.used_percent||0)/20))*58}px"></span>`).join("")}</div></div></div>`}
 async function astrbot(){const a=await req("/api/astrbot");$("#content").innerHTML=`<section class="grid"><div class="card span4"><h3>AstrBot 状态</h3><div class="file-cards"><div class="file-card"><b>容器</b>${statusBadge(a.status.status)}</div><div class="file-card"><b>WebUI</b><a href="${a.url}" target="_blank">${a.url}</a></div><div class="file-card"><b>账号</b><span>${a.username}</span></div><div class="file-card"><b>初始密码</b><span class="copyable" onclick="copy('${a.password}')">${a.password||"未解析"}</span></div><div class="file-card"><b>连接 Token</b><span onclick="copy('${a.token}')">${a.token}</span></div></div></div><div class="card span8"><h3>操作</h3><div class="toolbar">${btn("启动","astrAct('start')","success")}${btn("停止","astrAct('stop')","")}${btn("重启","astrAct('restart')","primary")}${btn("刷新状态","astrbot()","")}${btn("编辑配置","editAstrConfig()","")}</div><h3>容器日志</h3><pre id="astrLog" class="code">加载中...</pre></div><div class="card span12"><h3>部署信息</h3><pre class="code">${esc(a.deploy_info)}</pre></div></section>`;loadLog("astrbot","#astrLog")}
@@ -68,4 +69,16 @@ function openModal(html,ok){$("#modalBody").innerHTML=html;$("#modal").classList
 function closeModal(){$("#modal").classList.add("hidden")}
 function confirmDo(msg,word,fn){openModal(`<h3>二次确认</h3><p>${msg}</p><input id="confirmInput" placeholder="${word}">`,async()=>{if($("#confirmInput").value!==word)return toast("确认文字不匹配");closeModal();await fn()})}
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}
+function icon(name){const path={
+dashboard:"M3 13h8V3H3v10Zm10 8h8V3h-8v18ZM3 21h8v-6H3v6Z",
+bot:"M12 2v3m-5 3h10a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-5a3 3 0 0 1 3-3Zm2 4h.01M15 12h.01M9 16h6",
+nodes:"M6 6h.01M18 6h.01M6 18h.01M18 18h.01M6 6h12M6 6v12M18 6v12M6 18h12",
+logs:"M5 4h14v16H5V4Zm4 5h6M9 13h6M9 17h4",
+files:"M4 4h6l2 3h8v13H4V4Zm4 8h8M8 16h5",
+archive:"M4 7h16M6 7v13h12V7M9 11h6",
+upload:"M12 16V4m0 0 5 5m-5-5-5 5M5 20h14",
+settings:"M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0-6v3m0 14v3M4.2 4.2l2.1 2.1m11.4 11.4 2.1 2.1M2 12h3m14 0h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1",
+docker:"M4 13h16l-2 5H7l-3-5Zm2-4h3v3H6V9Zm4 0h3v3h-3V9Zm4 0h3v3h-3V9Zm-4-4h3v3h-3V5Z",
+disk:"M5 5h14v14H5V5Zm3 10h8M8 9h8"
+}[name]||"M4 4h16v16H4V4Z";return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`}
 req("/api/me").then(d=>{state.user=d.user;$("#login").classList.add("hidden");$("#app").classList.remove("hidden");init()}).catch(()=>{})

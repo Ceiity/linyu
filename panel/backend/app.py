@@ -30,6 +30,7 @@ AUDIT_LOG = Path(os.environ.get("PANEL_AUDIT_LOG", str(INSTALL_PREFIX / "logs" /
 STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
 TASK_LOCK = threading.RLock()
 TASKS: dict[str, "Task"] = {}
+IP_CACHE = {"public": "", "ts": 0.0}
 
 
 def now() -> str:
@@ -173,12 +174,21 @@ def docker(args: list[str], timeout: int = 60) -> tuple[int, str]:
 
 
 def public_ip() -> str:
+    if IP_CACHE["public"] and time.time() - IP_CACHE["ts"] < 600:
+        return IP_CACHE["public"]
     st = shell_state()
     if st.get("PUBLIC_IP"):
+        IP_CACHE.update({"public": st["PUBLIC_IP"], "ts": time.time()})
         return st["PUBLIC_IP"]
+    deploy = Path(st.get("DEPLOY_INFO_FILE", str(INSTALL_PREFIX / "deploy_info.txt")))
+    parsed = parse_deploy_line(deploy, "Public IP")
+    if parsed:
+        IP_CACHE.update({"public": parsed, "ts": time.time()})
+        return parsed
     for url in ["https://api.ipify.org", "https://ifconfig.me/ip"]:
         code, out = run_process(["curl", "-fsSL", "--max-time", "3", url], timeout=5)
         if code == 0 and out.strip():
+            IP_CACHE.update({"public": out.strip(), "ts": time.time()})
             return out.strip()
     return "127.0.0.1"
 
