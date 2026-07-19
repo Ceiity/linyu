@@ -15,6 +15,7 @@ main(){
   deploy_astrbot
   apply_astrbot_default_config
   add_napcat_instances "$napcat_count"
+  bash "$PROJECT_DIR/scripts/web-admin.sh" setup
   step "Running health checks"; retry 3 5 check_health || warn "Some health checks failed; inspect logs."
   write_deploy_info
   print_success_summary

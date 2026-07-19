@@ -29,6 +29,7 @@ menu(){
     "20) \u5065\u5eb7\u68c0\u67e5" \
     "21) \u4e00\u952e\u5347\u7ea7" \
     "22) \u5378\u8f7d" \
+    "23) Web \u63a7\u5236\u53f0" \
     "0) \u9000\u51fa"
 }
 while true; do
@@ -56,6 +57,7 @@ while true; do
     20) check_health;;
     21) update_all;;
     22) uninstall_all; exit 0;;
+    23) bash "$PROJECT_DIR/scripts/web-admin.sh" setup; load_state; printf 'Web 控制台：http://%s:%s/  Token：%s\n' "$(public_ip)" "${WEB_ADMIN_PORT:-7070}" "${WEB_ADMIN_TOKEN:-}";;
     0) exit 0;;
     *) warn $'\u65e0\u6548\u9009\u9879';;
   esac

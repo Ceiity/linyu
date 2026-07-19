@@ -18,6 +18,8 @@ AstrBot private URL: http://${priv}:${ASTRBOT_WEB_PORT:-6185}
 AstrBot username: ${ASTRBOT_USERNAME}
 AstrBot initial random password: ${pass}
 Token: ${token}
+Web admin URL: http://${pub}:${WEB_ADMIN_PORT:-7070}
+Web admin token: ${WEB_ADMIN_TOKEN:-not generated}
 NapCat count: ${count}
 Docker Network: ${NETWORK_NAME}
 Deploy time: ${now}
@@ -48,5 +50,6 @@ print_success_summary(){
   printf '%sAstrBot%s\nURL: http://%s:%s\nUsername: %s\nInitial random password: %s\nToken: %s\n' "$C_CYAN" "$C_RESET" "$pub" "${ASTRBOT_WEB_PORT:-6185}" "$ASTRBOT_USERNAME" "$pass" "$token"
   printf '\n%sNapCat%s\nCount: %s\n' "$C_CYAN" "$C_RESET" "$count"
   [[ -f "$NAPCAT_INDEX_FILE" ]] && awk -F'\t' -v ip="$pub" '{printf "%s WebUI: http://%s:%s/webui  token: %s\n",$1,ip,$2,$5}' "$NAPCAT_INDEX_FILE"
+  printf '\nWeb Admin: http://%s:%s/  token: %s\n' "$pub" "${WEB_ADMIN_PORT:-7070}" "${WEB_ADMIN_TOKEN:-not generated}"
   printf '\nInfo file: %s\nManager: bash %s/manager.sh\n' "$DEPLOY_INFO_FILE" "$PROJECT_DIR"
 }
