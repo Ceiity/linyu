@@ -58,6 +58,13 @@ async function showQrLogin(name,url){
   await loadNapQr(name);
   state.qrTimer=setInterval(()=>pollNapQr(name),3000);
 }
+function showAlreadyLogin(name, info={}){
+  const nick=info.nick||info.nickname||info.uin||"QQ 已登录";
+  const html=`<div class="already-modal"><div class="ok-doodle big">${okIcon()}</div><h3>已经登录</h3><p>${safeText(botName(name))} 当前已经连接 QQ?不需要重复扫码?</p><div class="already-meta">${safeText(nick)}</div><button class="primary wide" onclick="closeModal()">知道了</button></div>`;
+  openModal(html,null);
+  setTimeout(()=>{if(!$("#modal")?.classList.contains("hidden"))closeModal()},1600);
+}
+
 async function loadNapQr(name){
   const box=$("#qrLoginBody"),st=$("#qrLoginStatus");
   try{
