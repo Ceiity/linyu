@@ -508,6 +508,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_api(api(True, sanitize_config(load_config())))
             if p.path == "/api/config/astrbot":
                 return self.handle_astrbot_config()
+            if p.path == "/api/server-files":
+                return self.handle_server_files(p)
+            if p.path == "/api/server-files/view":
+                return self.handle_server_file_view(p)
+            if p.path == "/api/server-files/download":
+                return self.handle_server_file_download(p)
             self.send_error(404)
         except Exception as e:
             self.send_api(api(False, message=str(e), code="SERVER_ERROR"), 500)
@@ -555,6 +561,8 @@ class Handler(BaseHTTPRequestHandler):
                 cfg = save_config_patch(self.read_json())
                 audit(user, "settings.save", {}, True)
                 return self.send_api(api(True, sanitize_config(cfg)))
+            if p.path == "/api/account/password":
+                return self.change_password(user)
             if p.path == "/api/config/astrbot":
                 return self.save_astrbot_config(user)
             self.send_error(404)
@@ -697,6 +705,62 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def server_path(self, raw: str) -> Path:
+        if not raw:
+            raw = "/"
+        p = Path(raw).expanduser().resolve()
+        return p
+
+    def handle_server_files(self, p):
+        qs = parse_qs(p.query)
+        current = self.server_path(qs.get("path", ["/"])[0])
+        if not current.exists():
+            return self.send_api(api(False, message="路径不存在", code="NOT_FOUND"), 404)
+        if current.is_file():
+            current = current.parent
+        items = []
+        parent = str(current.parent) if current != current.parent else "/"
+        for item in sorted(current.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+            try:
+                st = item.stat()
+                items.append({
+                    "name": item.name,
+                    "path": str(item),
+                    "is_dir": item.is_dir(),
+                    "size": st.st_size,
+                    "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)),
+                    "type": mimetypes.guess_type(str(item))[0] or "application/octet-stream",
+                })
+            except PermissionError:
+                items.append({"name": item.name, "path": str(item), "is_dir": item.is_dir(), "size": 0, "mtime": "无权限", "type": "permission-denied"})
+            except FileNotFoundError:
+                continue
+        self.send_api(api(True, {"path": str(current), "parent": parent, "items": items}))
+
+    def handle_server_file_view(self, p):
+        path = self.server_path(parse_qs(p.query).get("path", [""])[0])
+        if not path.is_file():
+            return self.send_api(api(False, message="不是文件", code="NOT_FILE"), 400)
+        if path.stat().st_size > 1024 * 1024:
+            return self.send_api(api(False, message="文件超过 1MB，请下载查看", code="TOO_LARGE"), 400)
+        text = path.read_text(encoding="utf-8", errors="replace")
+        parsed = None
+        if path.suffix.lower() == ".json":
+            parsed = json.loads(text)
+        self.send_api(api(True, {"name": path.name, "path": str(path), "content": text, "json": parsed}))
+
+    def handle_server_file_download(self, p):
+        path = self.server_path(parse_qs(p.query).get("path", [""])[0])
+        if not path.is_file():
+            return self.send_api(api(False, message="不是文件", code="NOT_FILE"), 400)
+        body = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(path.name))
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def handle_backup_download(self, p):
         f = path_under(INSTALL_PREFIX / "backups", parse_qs(p.query).get("file", [""])[0])
         body = f.read_bytes()
@@ -783,6 +847,21 @@ class Handler(BaseHTTPRequestHandler):
             _, out = docker(["restart", "astrbot"], timeout=120)
         audit(user, "astrbot.config.save", {"restart": restart}, True)
         self.send_api(api(True, {"output": out}, "配置已保存"))
+
+    def change_password(self, user: str):
+        data = self.read_json()
+        old = str(data.get("old_password", ""))
+        new = str(data.get("new_password", ""))
+        if len(new) < 8:
+            raise ValueError("新密码至少 8 位")
+        cfg = load_config()
+        if not verify_password(old, cfg.get("password_hash", "")):
+            raise ValueError("当前密码不正确")
+        cfg["password_hash"] = hash_password(new)
+        cfg.pop("initial_password", None)
+        write_json(PANEL_CONFIG, cfg)
+        audit(user, "account.password.change", {}, True)
+        self.send_api(api(True, message="密码已修改，请重新登录"))
 
 
 def main():
