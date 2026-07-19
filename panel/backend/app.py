@@ -817,15 +817,20 @@ def task_shell(task: Task, title: str, script: str, timeout: int) -> dict:
 
 def task_add_napcat(task: Task, count: int) -> dict:
     task.line("\u6b63\u5728\u51c6\u5907\u521b\u5efa\u673a\u5668\u4eba\uff0c\u4f1a\u81ea\u52a8\u5206\u914d\u7aef\u53e3\u548c\u5bb9\u5668\u76ee\u5f55", 12)
-    script = "DOCKER_PULL_TIMEOUT=${DOCKER_PULL_TIMEOUT:-120} add_napcat_instances %d; write_deploy_info" % count
+    script = "DOCKER_PULL_TIMEOUT=${DOCKER_PULL_TIMEOUT:-120} add_napcat_instances %d; repair_astrbot_napcat_connection; write_deploy_info" % count
     return task_shell(task, "\u5f00\u59cb\u521b\u5efa NapCat x%d" % count, script, 1800)
 
 
 def task_apply_no_prefix(task: Task) -> dict:
     task.line("正在应用 AstrBot 群聊免 @ / 免前缀唤醒配置", 20)
-    code, out = bash("apply_astrbot_no_prefix_wake; sync_astrbot_platforms; write_deploy_info", timeout=600)
+    code, out = bash("apply_astrbot_no_prefix_wake; write_deploy_info", timeout=600)
     task.line(out, 90)
     return {"ok": code == 0, "output": out}
+
+
+def task_repair_connection(task: Task) -> dict:
+    task.line("正在执行一键配置：同步 AstrBot、NapCat、Token 与 Docker 网络", 15)
+    return task_shell(task, "开始一键配置连接", "repair_astrbot_napcat_connection", 900)
 
 
 def delete_napcat(name: str, keep_data: bool) -> tuple[int, str]:
@@ -1017,6 +1022,9 @@ class Handler(BaseHTTPRequestHandler):
             if p.path == "/api/astrbot/no-prefix":
                 t = create_task("应用免 @ / 免前缀配置", "astrbot.no_prefix", task_apply_no_prefix, user)
                 return self.send_api(api(True, t.to_dict()))
+            if p.path == "/api/connection/repair":
+                t = create_task("一键配置连接", "connection.repair", task_repair_connection, user)
+                return self.send_api(api(True, t.to_dict()))
             if p.path == "/api/napcat/action":
                 return self.napcat_action(user)
             if p.path == "/api/napcat/qq-login":
@@ -1205,7 +1213,7 @@ class Handler(BaseHTTPRequestHandler):
         )
         if count > 0:
             script += "add_napcat_instances %d; " % count
-        script += "write_deploy_info"
+        script += "repair_astrbot_napcat_connection; write_deploy_info"
         t = create_task("初始化部署 AstrBot + NapCat", "deploy.start", task_shell, user, "开始初始化部署", script, 2400)
         self.send_api(api(True, t.to_dict()))
 

@@ -1,6 +1,6 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
-  <title id="title">???????</title>
-  <desc id="desc">????????????????????? AstrBot-Deploy ???????</desc>
+  <title id="title">淋雨机器人</title>
+  <desc id="desc">一个带雨滴和闪电元素的机器人头像，用于 AstrBot-Deploy 控制台品牌标识。</desc>
   <defs>
     <linearGradient id="bg" x1="88" y1="54" x2="434" y2="464" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#0B0F19"/>

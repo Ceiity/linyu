@@ -30,7 +30,19 @@ EOF
   save_state_var ASTRBOT_WEB_PORT "$ASTRBOT_WEB_PORT"; save_state_var ASTRBOT_WS_PORT "$ASTRBOT_WS_PORT"; save_state_var ASTRBOT_IMAGE "$ASTRBOT_IMAGE"; echo "$file"
 }
 deploy_astrbot(){ step "Deploying AstrBot with official image ${ASTRBOT_IMAGE}"; local file; file="$(generate_astrbot_compose)"; compose_pull "$file" || warn "Image pull failed; trying to start with local image/cache."; compose_up "$file"; wait_container "$ASTRBOT_CONTAINER" 180 || { docker logs "$ASTRBOT_CONTAINER" --tail 120 || true; fail "AstrBot container did not become running."; exit 1; }; wait_astrbot_web 180 || warn "AstrBot WebUI did not return HTTP success yet; container is running."; success "AstrBot started: http://$(private_ip):${ASTRBOT_WEB_PORT}"; }
-wait_astrbot_web(){ local timeout="$1" i; for ((i=1;i<=timeout;i++)); do curl -fsS --max-time 2 "http://127.0.0.1:${ASTRBOT_WEB_PORT}/" >/dev/null 2>&1 && return 0; sleep 1; done; return 1; }
+wait_astrbot_web(){
+  local timeout="${1:-60}" i code
+  # AstrBot 新版根路径可能返回 405/403，这代表 Web 服务已经启动。
+  # 不能使用 curl -f，否则“免 @ / 免前缀”应用后会误判未就绪并等待到超时。
+  for ((i=1;i<=timeout;i++)); do
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${ASTRBOT_WEB_PORT}/" 2>/dev/null || true)"
+    [[ "$code" =~ ^[0-9]{3}$ && "$code" != "000" ]] && return 0
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${ASTRBOT_WEB_PORT}/dashboard" 2>/dev/null || true)"
+    [[ "$code" =~ ^[0-9]{3}$ && "$code" != "000" ]] && return 0
+    sleep 1
+  done
+  return 1
+}
 get_astrbot_password(){
   local pass="" logs
   if [[ -f "$DATA_DIR/cmd_config.json" ]] && jq -e '.dashboard.password_change_required == false' "$DATA_DIR/cmd_config.json" >/dev/null 2>&1; then
@@ -55,6 +67,10 @@ astrbot_common_jq_filter(){
 | .dashboard.host = "0.0.0.0"
 | .dashboard.port = 6185
 | .platform_settings = (.platform_settings // {})
+| .platform_settings.rate_limit = (.platform_settings.rate_limit // {})
+| .platform_settings.rate_limit.time = 0
+| .platform_settings.rate_limit.count = 9999999999
+| .platform_settings.rate_limit.strategy = "stall"
 | .platform_settings.enable_id_white_list = false
 | .platform_settings.id_whitelist = []
 | .platform_settings.id_whitelist_log = false
@@ -64,6 +80,7 @@ astrbot_common_jq_filter(){
 | .platform_settings.wake_prefix = ""
 | .platform_settings.reply_with_mention = false
 | .platform_settings.reply_with_quote = false
+| .platform_settings.group_message_needs_wake_prefix = false
 | .platform_settings.friend_message_needs_wake_prefix = false
 | .platform_settings.empty_mention_waiting = false
 | .platform_settings.empty_mention_waiting_need_reply = false
@@ -131,6 +148,33 @@ sync_astrbot_platforms(){
     wait_astrbot_web 180 || warn "AstrBot WebUI did not return HTTP success after platform sync; container is running."
   fi
   success "AstrBot reverse WebSocket platforms synced; token=${ASTRBOT_REVERSE_WS_TOKEN}"
+}
+
+repair_astrbot_napcat_connection(){
+  local name webui rest failed=0 restarted=0
+  step "一键配置 AstrBot 与 NapCat 连接"
+  ensure_network
+  if container_running "$ASTRBOT_CONTAINER"; then
+    docker network connect "$NETWORK_NAME" "$ASTRBOT_CONTAINER" >/dev/null 2>&1 || true
+  fi
+  sync_napcat_reverse_configs
+  sync_astrbot_platforms
+  if [[ -f "$NAPCAT_INDEX_FILE" ]]; then
+    while IFS=$'\t' read -r name webui rest; do
+      [[ -n "${name:-}" ]] || continue
+      docker network connect "$NETWORK_NAME" "$name" >/dev/null 2>&1 || true
+      if container_running "$name"; then
+        step "重启 ${name}，刷新反向 WebSocket 连接"
+        docker restart "$name" >/dev/null || { warn "${name} restart failed"; failed=$((failed+1)); continue; }
+        restarted=$((restarted+1))
+        wait_container "$name" 120 || { warn "${name} did not return running in time"; failed=$((failed+1)); }
+        [[ -n "${webui:-}" ]] && wait_napcat_webui "$webui" 60 || true
+      fi
+    done < "$NAPCAT_INDEX_FILE"
+  fi
+  write_deploy_info
+  (( failed == 0 )) || { warn "一键配置完成，但有 ${failed} 个机器人需要稍后再看状态"; return 1; }
+  success "一键配置完成：已同步免 @ / 免前缀、Token、反向 WebSocket，并刷新 ${restarted} 个机器人连接"
 }
 
 apply_astrbot_default_config(){

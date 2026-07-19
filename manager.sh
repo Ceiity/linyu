@@ -27,9 +27,10 @@ menu(){
     "18) \u5907\u4efd" \
     "19) \u6062\u590d" \
     "20) \u5065\u5eb7\u68c0\u67e5" \
-    "21) \u4e00\u952e\u5347\u7ea7" \
-    "22) \u5378\u8f7d" \
-    "23) Web \u63a7\u5236\u53f0" \
+    "21) \u4e00\u952e\u914d\u7f6e\u8fde\u63a5" \
+    "22) \u4e00\u952e\u5347\u7ea7" \
+    "23) \u5378\u8f7d" \
+    "24) Web \u63a7\u5236\u53f0" \
     "0) \u9000\u51fa"
 }
 while true; do
@@ -55,9 +56,10 @@ while true; do
     18) backup_all;;
     19) restore_backup;;
     20) check_health;;
-    21) update_all;;
-    22) uninstall_all; exit 0;;
-    23) bash "$PROJECT_DIR/scripts/panel.sh" setup;;
+    21) repair_astrbot_napcat_connection;;
+    22) update_all;;
+    23) uninstall_all; exit 0;;
+    24) bash "$PROJECT_DIR/scripts/panel.sh" setup;;
     0) exit 0;;
     *) warn $'\u65e0\u6548\u9009\u9879';;
   esac
