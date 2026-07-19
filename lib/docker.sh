@@ -26,7 +26,13 @@ install_docker(){
   success "Docker: $(docker --version)"; success "Compose: $($(compose_cmd) version 2>/dev/null | head -n1)"
 }
 ensure_network(){ step "Ensuring Docker network: $NETWORK_NAME"; if docker network inspect "$NETWORK_NAME" >/dev/null 2>&1; then success "Network exists: $NETWORK_NAME"; else docker network create --driver bridge "$NETWORK_NAME" >/dev/null; success "Network created: $NETWORK_NAME"; fi; }
-compose_up(){ local file="$1"; $(compose_cmd) -f "$file" up -d --remove-orphans; }
-compose_pull(){ local file="$1"; $(compose_cmd) -f "$file" pull; }
+compose_up(){
+  local file="$1" t="${DOCKER_COMPOSE_UP_TIMEOUT:-900}"
+  timeout "$t" $(compose_cmd) -f "$file" up -d --remove-orphans
+}
+compose_pull(){
+  local file="$1" t="${DOCKER_PULL_TIMEOUT:-120}"
+  timeout "$t" $(compose_cmd) -f "$file" pull
+}
 container_running(){ local name="$1"; [[ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || echo false)" == "true" ]]; }
 wait_container(){ local name="$1" timeout="${2:-180}" i; for ((i=1;i<=timeout;i++)); do if container_running "$name"; then return 0; fi; sleep 1; done; return 1; }

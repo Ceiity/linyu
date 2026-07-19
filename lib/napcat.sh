@@ -2,7 +2,29 @@
 set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/astrbot.sh"
 napcat_name(){ local n="$1" width="${NAPCAT_PAD_WIDTH:-2}"; printf "napcat%0${width}d" "$n"; }
-max_napcat_id(){ [[ -f "$NAPCAT_INDEX_FILE" ]] || { echo 0; return; }; awk -F'\t' 'BEGIN{m=0} $1 ~ /^napcat[0-9]+$/ {gsub(/^napcat0*/,"",$1); if($1+0>m)m=$1+0} END{print m}' "$NAPCAT_INDEX_FILE"; }
+max_napcat_id(){
+  local m=0 name n
+  if [[ -f "$NAPCAT_INDEX_FILE" ]]; then
+    while IFS=$'\t' read -r name _; do
+      [[ "$name" =~ ^napcat[0-9]+$ ]] || continue
+      n="${name#napcat}"; n="$((10#$n))"
+      (( n > m )) && m="$n"
+    done < "$NAPCAT_INDEX_FILE"
+  fi
+  shopt -s nullglob
+  for name in "$NAPCAT_BASE_DIR"/napcat[0-9]*; do
+    name="$(basename "$name")"
+    n="${name#napcat}"; n="$((10#$n))"
+    (( n > m )) && m="$n"
+  done
+  shopt -u nullglob
+  while IFS= read -r name; do
+    [[ "$name" =~ ^napcat[0-9]+$ ]] || continue
+    n="${name#napcat}"; n="$((10#$n))"
+    (( n > m )) && m="$n"
+  done < <(docker ps -a --format '{{.Names}}' 2>/dev/null || true)
+  echo "$m"
+}
 generate_napcat_config(){
   local name="$1" token="$2" astrbot_ws_port="$3" dir
   dir="$NAPCAT_BASE_DIR/$name"
@@ -124,7 +146,11 @@ add_napcat_instances(){
     step "Creating ${name}"
     generate_napcat_config "$name" "$token" "$astrbot_ws_port"
     file="$(generate_napcat_compose "$name" "$webui" "$ws" "$http")"
-    compose_pull "$file" || warn "${name} image pull failed; trying local cache."
+    if docker image inspect "$NAPCAT_IMAGE" >/dev/null 2>&1; then
+      warn "${name} image already exists locally; skipping pull to avoid slow registry wait."
+    else
+      compose_pull "$file" || warn "${name} image pull failed or timed out; trying local cache."
+    fi
     compose_up "$file"
     verify_napcat_instance "$name" "$webui" || return 1
     append_napcat_index "$name" "$webui" "$ws" "$http" "$token"

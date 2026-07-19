@@ -4,12 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>淋雨控制台</title>
+  <link rel="icon" href="/assets/linyu-robot.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#111111">
   <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
   <div id="login" class="login-screen">
     <div class="login-card">
-      <div class="brand-mark">雨</div>
+      <div class="brand-mark logo-mark"><img src="/assets/linyu-robot.svg" alt="淋雨机器人商标"></div>
       <h1>淋雨控制台</h1>
       <p>管理 AstrBot 与 NapCat 机器人，从这里开始。</p>
       <label>账号<input id="loginUser" autocomplete="off" spellcheck="false" placeholder="请输入面板账号"></label>
@@ -21,7 +23,7 @@
 
   <div id="app" class="app hidden">
     <aside class="sidebar">
-      <div class="side-brand" onclick="go('dashboard')"><div class="brand-mark small">雨</div><div><b>淋雨</b><span>AstrBot Panel</span></div></div>
+      <div class="side-brand" onclick="go('dashboard')"><div class="brand-mark small logo-mark"><img src="/assets/linyu-robot.svg" alt="淋雨"></div><div><b>淋雨</b><span>AstrBot Panel</span></div></div>
       <nav id="nav"></nav>
     </aside>
     <header class="topbar">

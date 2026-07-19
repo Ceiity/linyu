@@ -167,9 +167,59 @@ def run_process(args: list[str], timeout: int = 120, cwd: Path | None = None, in
         return 127, str(e)
 
 
+def run_process_stream(args: list[str], timeout: int = 120, cwd: Path | None = None, on_line=None) -> tuple[int, str]:
+    env = os.environ.copy()
+    env.update({"LC_ALL": "C.UTF-8", "LANG": "C.UTF-8"})
+    output: list[str] = []
+    try:
+        if os.name == "nt":
+            code, out = run_process(args, timeout=timeout, cwd=cwd)
+            if on_line and out:
+                for line in out.splitlines()[-80:]:
+                    on_line(line)
+            return code, out
+        import selectors
+        p = subprocess.Popen(args, cwd=str(cwd or PROJECT_DIR), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, start_new_session=True, bufsize=1)
+        assert p.stdout is not None
+        sel = selectors.DefaultSelector()
+        sel.register(p.stdout, selectors.EVENT_READ)
+        deadline = time.monotonic() + timeout
+        while True:
+            if time.monotonic() >= deadline:
+                try:
+                    os.killpg(p.pid, 15)
+                except Exception:
+                    p.kill()
+                output.append("\nTIMEOUT")
+                if on_line:
+                    on_line("TIMEOUT")
+                return 124, "".join(output)[-60000:]
+            for key, _ in sel.select(timeout=0.5):
+                line = key.fileobj.readline()
+                if line:
+                    output.append(line)
+                    if on_line:
+                        on_line(line.rstrip())
+            if p.poll() is not None:
+                rest = p.stdout.read()
+                if rest:
+                    output.append(rest)
+                    if on_line:
+                        for line in rest.splitlines()[-40:]:
+                            on_line(line)
+                return p.returncode, "".join(output)[-60000:]
+    except FileNotFoundError as e:
+        return 127, str(e)
+
+
 def bash(script: str, timeout: int = 120) -> tuple[int, str]:
     prefix = "set -Eeuo pipefail; cd %s; source lib/ops.sh; load_state || true; " % sh_quote(str(PROJECT_DIR))
     return run_process(["bash", "-lc", prefix + script], timeout=timeout, cwd=PROJECT_DIR)
+
+
+def bash_stream(script: str, timeout: int = 120, on_line=None) -> tuple[int, str]:
+    prefix = "set -Eeuo pipefail; cd %s; source lib/ops.sh; load_state || true; " % sh_quote(str(PROJECT_DIR))
+    return run_process_stream(["bash", "-lc", prefix + script], timeout=timeout, cwd=PROJECT_DIR, on_line=on_line)
 
 
 def sh_quote(s: str) -> str:
@@ -565,9 +615,30 @@ def list_files(base: Path) -> list[dict]:
 
 def task_shell(task: Task, title: str, script: str, timeout: int) -> dict:
     task.line(title, 15)
-    code, out = bash(script, timeout=timeout)
-    task.line(out, 90)
+    def on_line(line: str):
+        if not line:
+            return
+        progress = None
+        low = line.lower()
+        if "creating napcat" in low:
+            progress = 25
+        elif "pull" in low or "download" in low:
+            progress = max(task.progress, 35)
+        elif "started" in low or "running" in low or "webui" in low:
+            progress = max(task.progress, 70)
+        elif "deployment info saved" in low or "synced" in low:
+            progress = max(task.progress, 90)
+        task.line(line, progress)
+    code, out = bash_stream(script, timeout=timeout, on_line=on_line)
+    if out and (not task.logs or out.splitlines()[-1] not in task.logs[-1]):
+        task.line(out, 90)
     return {"ok": code == 0, "output": out}
+
+
+def task_add_napcat(task: Task, count: int) -> dict:
+    task.line("\u6b63\u5728\u51c6\u5907\u521b\u5efa\u673a\u5668\u4eba\uff0c\u4f1a\u81ea\u52a8\u5206\u914d\u7aef\u53e3\u548c\u5bb9\u5668\u76ee\u5f55", 12)
+    script = "DOCKER_PULL_TIMEOUT=${DOCKER_PULL_TIMEOUT:-120} add_napcat_instances %d; write_deploy_info" % count
+    return task_shell(task, "\u5f00\u59cb\u521b\u5efa NapCat x%d" % count, script, 1800)
 
 
 def task_apply_no_prefix(task: Task) -> dict:
@@ -901,7 +972,7 @@ class Handler(BaseHTTPRequestHandler):
             count = int(data.get("count", 1))
             if count < 1 or count > 999:
                 raise ValueError("数量必须是 1-999")
-            t = create_task("新增 NapCat x%d" % count, "napcat.add", task_shell, user, "开始创建", "add_napcat_instances %d; write_deploy_info" % count, 1800)
+            t = create_task("\u65b0\u589e NapCat x%d" % count, "napcat.add", task_add_napcat, user, count)
             return self.send_api(api(True, t.to_dict()))
         if action == "restart_all":
             code, out = bash("while IFS=$'\\t' read -r name _; do [[ -n \"$name\" ]] && docker restart \"$name\"; done < \"$NAPCAT_INDEX_FILE\"", timeout=300)
