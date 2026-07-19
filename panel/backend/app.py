@@ -35,6 +35,7 @@ TASK_LOCK = threading.RLock()
 TASKS: dict[str, "Task"] = {}
 IP_CACHE = {"public": "", "ts": 0.0}
 LOGIN_FAILS: dict[str, list[float]] = {}
+NAPCAT_CREDENTIAL_CACHE: dict[str, dict] = {}
 
 
 def now() -> str:
@@ -340,23 +341,38 @@ def http_json_post(url: str, payload: dict | None = None, headers: dict | None =
     return json.loads(raw)
 
 
-def napcat_webui_credential(row: dict) -> str:
+def napcat_webui_credential(row: dict, force_refresh: bool = False) -> str:
+    name = str(row.get("name") or row.get("webui_port") or "napcat")
     token = str(row.get("token") or "")
     token_hash = hashlib.sha256((token + ".napcat").encode("utf-8")).hexdigest()
+    cache = NAPCAT_CREDENTIAL_CACHE.get(name)
+    now_ts = time.time()
+    if not force_refresh and cache and cache.get("hash") == token_hash and cache.get("expires", 0) > now_ts + 60:
+        return str(cache["credential"])
     port = str(row["webui_port"])
     res = http_json_post("http://127.0.0.1:%s/api/auth/login" % port, {"hash": token_hash})
     if int(res.get("code", -1)) != 0:
-        raise RuntimeError("NapCat WebUI 鉴权失败：%s" % res.get("message", "unknown"))
+        msg = str(res.get("message", "unknown"))
+        if "rate" in msg.lower():
+            raise RuntimeError("NapCat WebUI ??????????????????????????????? 1-3 ??????????????????")
+        raise RuntimeError("NapCat WebUI ?????%s" % msg)
     cred = (res.get("data") or {}).get("Credential")
     if not cred:
-        raise RuntimeError("NapCat WebUI 没有返回 Credential")
+        raise RuntimeError("NapCat WebUI ???? Credential")
+    NAPCAT_CREDENTIAL_CACHE[name] = {"credential": cred, "hash": token_hash, "expires": now_ts + 3300}
     return cred
 
 
 def napcat_webui_call(row: dict, path: str, payload: dict | None = None) -> dict:
-    cred = napcat_webui_credential(row)
     port = str(row["webui_port"])
-    return http_json_post("http://127.0.0.1:%s/api/%s" % (port, path.lstrip("/")), payload or {}, {"Authorization": "Bearer " + cred})
+    last = None
+    for force in (False, True):
+        cred = napcat_webui_credential(row, force_refresh=force)
+        last = http_json_post("http://127.0.0.1:%s/api/%s" % (port, path.lstrip("/")), payload or {}, {"Authorization": "Bearer " + cred})
+        if int(last.get("code", -1)) != -1 or "Unauthorized" not in str(last.get("message", "")):
+            return last
+        NAPCAT_CREDENTIAL_CACHE.pop(str(row.get("name") or row.get("webui_port") or "napcat"), None)
+    return last or {"code": -1, "message": "NapCat WebUI ????"}
 
 
 def qr_svg_for_text(text_value: str) -> str:
