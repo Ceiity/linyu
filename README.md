@@ -36,7 +36,7 @@ sudo bash install.sh
 - 每个 NapCat 独立容器、独立配置、独立日志、独立数据
 - 自动分配可用端口，避免端口冲突
 - 自动生成 NapCat WebUI Token
-- 自动生成苹果风格 Web 控制台
+- 自动生成企业级 Web 控制台，支持电脑、平板、手机
 - 自动生成部署信息文件
 - 支持备份、恢复、更新、卸载
 - 提供中文管理菜单
@@ -68,22 +68,24 @@ napcat20
 
 每个实例都会生成独立目录和独立 Compose 文件。
 
-## Web 控制台
+## 企业级 Web 控制台
 
-安装完成后会自动启用一个中文 Web 控制台，界面按苹果风格设计，手机、电脑、平板都可以直接打开使用。
+安装完成后会自动启用中文 Web 控制台，界面按高级 SaaS 管理后台设计，手机、电脑、平板都可以直接打开使用。
 
 控制台能力：
 
-- 查看 AstrBot 地址、NapCat 数量、Docker 网络
-- 查看所有容器状态
+- 仪表盘：AstrBot、NapCat、Docker、CPU、内存、磁盘、端口、最近操作
+- AstrBot 管理：启动、停止、重启、查看 WebUI、账号、密码、Token、日志
+- NapCat 管理：实例列表、新增、删除、启动、停止、重启、批量重启
+- 日志中心：部署日志、容器日志、关键词过滤、错误高亮
+- 文件中心：拖拽上传、多文件上传、JSON 校验、预览、下载、删除、应用配置
+- 备份恢复：一键备份、备份列表、下载备份、恢复备份
+- 更新中心：更新 AstrBot、更新 NapCat、更新全部
+- 系统设置：安装目录、Docker 网络、默认 Token、账号密码、上传目录、危险操作
 - 查看所有 NapCat WebUI 地址和 Token
 - 一键新增 NapCat，输入几个就创建几个
-- 重启 AstrBot
-- 重启 NapCat
-- 重启全部容器
-- 一键备份
 
-控制台地址和 Token 会写入：
+控制台地址、账号和首次密码会写入：
 
 ```bash
 /opt/astrbot/deploy_info.txt
@@ -93,10 +95,16 @@ napcat20
 
 ```bash
 cd /opt/astrbot/AstrBot-Deploy
-bash scripts/web-admin.sh setup
+bash scripts/panel.sh setup
 ```
 
 重新生成或启动 Web 控制台。
+
+详细说明见：
+
+```bash
+panel/README.md
+```
 
 ## 目录说明
 
@@ -109,7 +117,10 @@ bash scripts/web-admin.sh setup
 | `/opt/astrbot/backups` | 备份目录 |
 | `/opt/astrbot/logs` | 脚本日志目录 |
 | `/opt/astrbot/deploy_info.txt` | 部署信息、端口、密码和 Token |
-| `/opt/astrbot/.env` | 部署状态、端口、Web 控制台 Token |
+| `/opt/astrbot/.env` | 部署状态、端口、镜像和 Docker 网络信息 |
+| `/opt/astrbot/panel_config.json` | Web 控制台账号、密码哈希、上传目录等配置 |
+| `/opt/astrbot/uploads` | Web 控制台默认上传目录 |
+| `/opt/astrbot/logs/panel-audit.log` | Web 控制台审计日志 |
 
 ## 管理菜单
 

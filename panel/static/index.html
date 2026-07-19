@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AstrBot-Deploy 企业控制台</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div id="login" class="login-screen">
+    <div class="login-card">
+      <div class="brand-mark">雨</div>
+      <h1>AstrBot-Deploy</h1>
+      <p>登录企业级 Web 控制台，统一管理 AstrBot 与 NapCat。</p>
+      <label>账号<input id="loginUser" autocomplete="username" value="admin"></label>
+      <label>密码<input id="loginPass" type="password" autocomplete="current-password" placeholder="首次密码在 /opt/astrbot/panel_config.json"></label>
+      <button class="primary wide" onclick="login()">进入控制台</button>
+      <div id="loginMsg" class="muted"></div>
+    </div>
+  </div>
+
+  <div id="app" class="app hidden">
+    <aside class="sidebar">
+      <div class="side-brand"><div class="brand-mark small">A</div><div><b>AstrBot</b><span>Deploy Panel</span></div></div>
+      <nav id="nav"></nav>
+    </aside>
+    <header class="topbar">
+      <button class="icon-btn mobile-only" onclick="toggleDrawer()">☰</button>
+      <div><h2 id="pageTitle">Dashboard</h2><span id="pageSub">系统总览</span></div>
+      <div class="top-actions">
+        <span id="globalStatus" class="status-pill grey">检测中</span>
+        <button class="ghost" onclick="refresh()">刷新</button>
+        <button class="ghost" onclick="toggleTheme()">主题</button>
+      </div>
+    </header>
+    <main id="content" class="content"></main>
+    <nav id="bottomNav" class="bottom-nav"></nav>
+  </div>
+
+  <div id="modal" class="modal hidden"><div class="modal-card"><div id="modalBody"></div><div class="modal-actions"><button onclick="closeModal()">取消</button><button id="modalOk" class="danger">确认</button></div></div></div>
+  <div id="toast" class="toast"></div>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

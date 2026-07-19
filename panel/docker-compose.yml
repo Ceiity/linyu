@@ -1,0 +1,24 @@
+services:
+  astrbot-deploy-panel:
+    build:
+      context: ..
+      dockerfile: panel/Dockerfile
+    container_name: astrbot-deploy-panel
+    restart: always
+    ports:
+      - "${PANEL_PORT:-7070}:7070"
+    environment:
+      - PROJECT_DIR=/opt/astrbot/AstrBot-Deploy
+      - INSTALL_PREFIX=/opt/astrbot
+      - STATE_FILE=/opt/astrbot/.env
+      - PANEL_CONFIG=/opt/astrbot/panel_config.json
+      - PANEL_AUDIT_LOG=/opt/astrbot/logs/panel-audit.log
+    volumes:
+      - /opt/astrbot:/opt/astrbot
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - astrbot_network
+
+networks:
+  astrbot_network:
+    external: true
