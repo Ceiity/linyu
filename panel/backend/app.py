@@ -83,9 +83,9 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 def default_config() -> dict:
-    password = secrets.token_urlsafe(12)
+    password = os.environ.get("PANEL_DEFAULT_PASSWORD") or secrets.token_urlsafe(12)
     return {
-        "username": "admin",
+        "username": "淋雨",
         "password_hash": hash_password(password),
         "initial_password": password,
         "session_secret": secrets.token_hex(32),
