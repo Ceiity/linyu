@@ -73,17 +73,17 @@ function openModal(html,ok){$("#modalBody").innerHTML=html;$("#modal").classList
 function closeModal(){$("#modal").classList.add("hidden")}
 function confirmDo(msg,word,fn){openModal(`<h3>二次确认</h3><p>${msg}</p><input id="confirmInput" placeholder="${word}">`,async()=>{if($("#confirmInput").value!==word)return toast("确认文字不匹配");closeModal();await fn()})}
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}
-function icon(name){const path={
-dashboard:"M3 13h8V3H3v10Zm10 8h8V3h-8v18ZM3 21h8v-6H3v6Z",
-bot:"M12 2v3m-5 3h10a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-5a3 3 0 0 1 3-3Zm2 4h.01M15 12h.01M9 16h6",
-nodes:"M6 6h.01M18 6h.01M6 18h.01M18 18h.01M6 6h12M6 6v12M18 6v12M6 18h12",
-logs:"M5 4h14v16H5V4Zm4 5h6M9 13h6M9 17h4",
-files:"M4 4h6l2 3h8v13H4V4Zm4 8h8M8 16h5",
-archive:"M4 7h16M6 7v13h12V7M9 11h6",
-upload:"M12 16V4m0 0 5 5m-5-5-5 5M5 20h14",
-settings:"M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0-6v3m0 14v3M4.2 4.2l2.1 2.1m11.4 11.4 2.1 2.1M2 12h3m14 0h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1",
-account:"M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm-8 9a8 8 0 0 1 16 0M17 14l2 2 4-4",
-docker:"M4 13h16l-2 5H7l-3-5Zm2-4h3v3H6V9Zm4 0h3v3h-3V9Zm4 0h3v3h-3V9Zm-4-4h3v3h-3V5Z",
-disk:"M5 5h14v14H5V5Zm3 10h8M8 9h8"
-}[name]||"M4 4h16v16H4V4Z";return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`}
+function icon(name){const icons={
+dashboard:`<rect x="3.5" y="4" width="7" height="7" rx="2"/><rect x="13.5" y="4" width="7" height="11" rx="2"/><rect x="3.5" y="14" width="7" height="6" rx="2"/><path d="M14 19.5h6"/>`,
+bot:`<path d="M12 3.5v2.8"/><rect x="4" y="7" width="16" height="11.5" rx="4"/><path d="M8.5 12h.01M15.5 12h.01M9 15.5c1.7 1 4.3 1 6 0"/><path d="M4 12.5H2.7M21.3 12.5H20"/>`,
+nodes:`<rect x="3.5" y="3.5" width="6" height="6" rx="2"/><rect x="14.5" y="3.5" width="6" height="6" rx="2"/><rect x="3.5" y="14.5" width="6" height="6" rx="2"/><rect x="14.5" y="14.5" width="6" height="6" rx="2"/><path d="M9.5 6.5h5M6.5 9.5v5M17.5 9.5v5M9.5 17.5h5"/>`,
+logs:`<rect x="5" y="3.5" width="14" height="17" rx="2.5"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4.5"/><path d="M16.8 3.5v4h-4"/>`,
+files:`<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H10l2 2.5h5.5A2.5 2.5 0 0 1 20 9v8.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11Z"/><path d="M7.5 12h9M7.5 15.5h5.5"/>`,
+archive:`<rect x="4" y="5" width="16" height="4" rx="1.5"/><path d="M6 9v9.5A2.5 2.5 0 0 0 8.5 21h7a2.5 2.5 0 0 0 2.5-2.5V9"/><path d="M9.5 13h5"/>`,
+upload:`<path d="M12 15.5V4.5"/><path d="M7.5 9 12 4.5 16.5 9"/><path d="M5 16.5v1.8A2.7 2.7 0 0 0 7.7 21h8.6a2.7 2.7 0 0 0 2.7-2.7v-1.8"/>`,
+settings:`<path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="M12 2.8v2.4M12 18.8v2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M2.8 12h2.4M18.8 12h2.4M4.9 19.1l1.7-1.7M17.4 6.6l1.7-1.7"/>`,
+account:`<circle cx="10" cy="8" r="4"/><path d="M3.5 20a7 7 0 0 1 13 0"/><path d="M16.5 13.5l1.8 1.8 3.7-4.2"/>`,
+docker:`<path d="M4 13.2h15.5l-1.8 4.2A3 3 0 0 1 15 19.2H8a3 3 0 0 1-2.7-1.8L4 13.2Z"/><rect x="6" y="9" width="3" height="3" rx=".8"/><rect x="10" y="9" width="3" height="3" rx=".8"/><rect x="14" y="9" width="3" height="3" rx=".8"/><rect x="10" y="5" width="3" height="3" rx=".8"/>`,
+disk:`<rect x="4.5" y="4" width="15" height="16" rx="3"/><path d="M8 15.5h8M8 9h8"/><circle cx="16" cy="16" r=".8"/>`
+};return `<svg class="adb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]||icons.dashboard}</svg>`}
 req("/api/me").then(d=>{state.user=d.user;$("#login").classList.add("hidden");$("#app").classList.remove("hidden");init()}).catch(()=>{})
