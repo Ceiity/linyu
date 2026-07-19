@@ -42,16 +42,40 @@ astrbot_common_jq_filter(){
 | .platform_settings = (.platform_settings // {})
 | .platform_settings.enable_id_white_list = false
 | .platform_settings.id_whitelist = []
+| .platform_settings.id_whitelist_log = false
+| .platform_settings.wl_ignore_admin_on_group = true
+| .platform_settings.wl_ignore_admin_on_friend = true
+| .platform_settings.reply_prefix = ""
+| .platform_settings.wake_prefix = ""
 | .platform_settings.reply_with_mention = false
 | .platform_settings.reply_with_quote = false
 | .platform_settings.friend_message_needs_wake_prefix = false
 | .platform_settings.empty_mention_waiting = false
 | .platform_settings.empty_mention_waiting_need_reply = false
 | .platform_settings.ignore_bot_self_message = false
+| .platform_settings.ignore_at_all = false
 | .provider_settings = (.provider_settings // {})
 | .provider_settings.wake_prefix = ""
+| .provider_settings.prompt_prefix = (.provider_settings.prompt_prefix // "{{prompt}}")
 | .wake_prefix = []
+| .content_safety = (.content_safety // {})
+| .content_safety.internal_keywords = (.content_safety.internal_keywords // {})
+| .content_safety.internal_keywords.enable = false
 EOF
+}
+
+apply_astrbot_no_prefix_wake(){
+  local dst="$DATA_DIR/cmd_config.json" tmp="$INSTALL_PREFIX/cmd_config.no-prefix.json"
+  [[ -f "$dst" ]] || { warn "AstrBot config not found: $dst"; return 0; }
+  jq "$(astrbot_common_jq_filter)" "$dst" > "$tmp"
+  install -m 600 "$tmp" "$dst"
+  rm -f "$tmp"
+  if container_running "$ASTRBOT_CONTAINER"; then
+    docker restart "$ASTRBOT_CONTAINER" >/dev/null
+    wait_container "$ASTRBOT_CONTAINER" 180 || { docker logs "$ASTRBOT_CONTAINER" --tail 120 || true; fail "AstrBot failed to restart after no-prefix config."; return 1; }
+    wait_astrbot_web 180 || warn "AstrBot WebUI did not return HTTP success after no-prefix config; container is running."
+  fi
+  success "AstrBot no-prefix/no-mention wake config applied"
 }
 
 sync_astrbot_platforms(){

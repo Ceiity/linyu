@@ -9,6 +9,7 @@ import json
 import mimetypes
 import os
 import secrets
+import re
 import shutil
 import socket
 import subprocess
@@ -32,6 +33,7 @@ STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
 TASK_LOCK = threading.RLock()
 TASKS: dict[str, "Task"] = {}
 IP_CACHE = {"public": "", "ts": 0.0}
+LOGIN_FAILS: dict[str, list[float]] = {}
 
 
 def now() -> str:
@@ -207,6 +209,17 @@ def private_ip() -> str:
         return "127.0.0.1"
 
 
+def public_origin() -> str:
+    cfg = load_config()
+    base = str(cfg.get("public_base_url") or "").strip().rstrip("/")
+    if base.startswith(("http://", "https://")):
+        return base
+    ip = public_ip()
+    if ip and ip != "unknown":
+        return "http://" + ip
+    return "http://127.0.0.1"
+
+
 def audit(user: str, action: str, detail: dict | None = None, ok: bool = True) -> None:
     ensure_parent(AUDIT_LOG)
     row = {"time": now(), "user": user, "action": action, "ok": ok, "detail": detail or {}}
@@ -297,7 +310,7 @@ def container_status(name: str) -> dict:
 
 def parse_napcat_index() -> list[dict]:
     st = shell_state()
-    pub = public_ip()
+    origin = public_origin()
     idx = Path(st.get("NAPCAT_INDEX_FILE", str(INSTALL_PREFIX / "napcat_index.tsv")))
     rows = []
     if not idx.exists():
@@ -306,7 +319,7 @@ def parse_napcat_index() -> list[dict]:
         p = line.split("\t")
         if len(p) >= 5 and p[0]:
             status = container_status(p[0])
-            rows.append({"name": p[0], "webui_port": p[1], "ws_port": p[2], "http_port": p[3], "token": p[4], "url": "http://%s:%s/webui" % (pub, p[1]), "status": status.get("status"), "running": status.get("running"), "directory": str(Path(st.get("NAPCAT_BASE_DIR", str(INSTALL_PREFIX / "napcat"))) / p[0])})
+            rows.append({"name": p[0], "webui_port": p[1], "ws_port": p[2], "http_port": p[3], "token": p[4], "url": "%s:%s/webui" % (origin, p[1]), "login_url": "%s:%s/webui?token=%s" % (origin, p[1], quote(p[4])), "status": status.get("status"), "running": status.get("running"), "directory": str(Path(st.get("NAPCAT_BASE_DIR", str(INSTALL_PREFIX / "napcat"))) / p[0])})
     return rows
 
 
@@ -349,9 +362,9 @@ def dashboard_data() -> dict:
 
 def astrbot_data() -> dict:
     st = shell_state()
-    pub = public_ip()
+    origin = public_origin()
     deploy = Path(st.get("DEPLOY_INFO_FILE", str(INSTALL_PREFIX / "deploy_info.txt")))
-    return {"status": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "url": "http://%s:%s" % (pub, st.get("ASTRBOT_WEB_PORT", "6185")), "username": st.get("ASTRBOT_USERNAME", "astrbot"), "password": parse_deploy_line(deploy, "AstrBot initial random password"), "token": st.get("ASTRBOT_REVERSE_WS_TOKEN", "yuyu521521"), "config_path": str(INSTALL_PREFIX / "data" / "cmd_config.json"), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署"}
+    return {"status": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "url": "%s:%s" % (origin, st.get("ASTRBOT_WEB_PORT", "6185")), "username": st.get("ASTRBOT_USERNAME", "astrbot"), "password": parse_deploy_line(deploy, "AstrBot initial random password"), "token": st.get("ASTRBOT_REVERSE_WS_TOKEN", "yuyu521521"), "config_path": str(INSTALL_PREFIX / "data" / "cmd_config.json"), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署"}
 
 
 def get_logs(target: str, lines: int) -> str:
@@ -474,6 +487,13 @@ def task_shell(task: Task, title: str, script: str, timeout: int) -> dict:
     return {"ok": code == 0, "output": out}
 
 
+def task_apply_no_prefix(task: Task) -> dict:
+    task.line("正在应用 AstrBot 群聊免 @ / 免前缀唤醒配置", 20)
+    code, out = bash("apply_astrbot_no_prefix_wake; sync_astrbot_platforms; write_deploy_info", timeout=600)
+    task.line(out, 90)
+    return {"ok": code == 0, "output": out}
+
+
 def delete_napcat(name: str, keep_data: bool) -> tuple[int, str]:
     st = shell_state()
     base = Path(st.get("NAPCAT_BASE_DIR", str(INSTALL_PREFIX / "napcat")))
@@ -482,17 +502,40 @@ def delete_napcat(name: str, keep_data: bool) -> tuple[int, str]:
     output = []
     comp = d / "docker-compose.yml"
     if comp.exists():
-        code, out = run_process(["bash", "-lc", "docker compose -f %s down || docker-compose -f %s down" % (sh_quote(str(comp)), sh_quote(str(comp)))], timeout=180)
+        code, out = run_process(["bash", "-lc", "docker compose -f %s down --remove-orphans || docker-compose -f %s down --remove-orphans" % (sh_quote(str(comp)), sh_quote(str(comp)))], timeout=240)
         output.append(out)
+    else:
+        code, out = docker(["rm", "-f", name], timeout=120)
+        output.append(out)
+    for _ in range(60):
+        status = container_status(name)
+        if not status.get("exists"):
+            output.append("容器已删除：%s" % name)
+            break
+        time.sleep(1)
+    else:
+        output.append("等待容器删除超时，已继续清理索引；可稍后刷新查看")
     if not keep_data and d.exists():
         shutil.rmtree(d)
-        output.append("data removed")
+        output.append("数据目录已删除")
     if idx.exists():
         rows = [x for x in idx.read_text(encoding="utf-8", errors="replace").splitlines() if not x.startswith(name + "\t")]
         idx.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
-    code, out = bash("sync_napcat_reverse_configs; sync_astrbot_platforms; write_deploy_info", timeout=300)
+    code, out = bash("sync_napcat_reverse_configs; sync_astrbot_platforms; write_deploy_info", timeout=420)
     output.append(out)
     return code, "\n".join(output)
+
+
+def task_delete_napcat(task: Task, name: str, keep_data: bool) -> dict:
+    task.line("正在停止并删除 %s" % name, 15)
+    code, out = delete_napcat(name, keep_data)
+    task.line(out, 85)
+    for _ in range(10):
+        if not any(r.get("name") == name for r in parse_napcat_index()):
+            task.line("机器人索引已更新", 95)
+            break
+        time.sleep(1)
+    return {"ok": code == 0, "output": out}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -501,11 +544,19 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
+    def security_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "same-origin")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; connect-src 'self'; frame-src http: https:; object-src 'none'; base-uri 'self'")
+
     def send_api(self, payload: dict, status: int = 200):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        self.security_headers()
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -617,6 +668,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if p.path == "/api/astrbot/action":
                 return self.astrbot_action(user)
+            if p.path == "/api/astrbot/no-prefix":
+                t = create_task("应用免 @ / 免前缀配置", "astrbot.no_prefix", task_apply_no_prefix, user)
+                return self.send_api(api(True, t.to_dict()))
             if p.path == "/api/napcat/action":
                 return self.napcat_action(user)
             if p.path == "/api/deploy/start":
@@ -675,6 +729,7 @@ class Handler(BaseHTTPRequestHandler):
         if ctype.startswith("text/") or ctype in {"application/javascript", "application/json"}:
             ctype += "; charset=utf-8"
         self.send_header("Content-Type", ctype)
+        self.security_headers()
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -682,12 +737,19 @@ class Handler(BaseHTTPRequestHandler):
     def login(self):
         data = self.read_json()
         cfg = load_config()
+        ip = self.client_address[0] if self.client_address else "unknown"
+        now_ts = time.time()
+        LOGIN_FAILS[ip] = [t for t in LOGIN_FAILS.get(ip, []) if now_ts - t < 600]
+        if len(LOGIN_FAILS[ip]) >= 8:
+            return self.send_api(api(False, message="登录失败次数过多，请 10 分钟后再试", code="RATE_LIMIT"), 429)
         if data.get("username") == cfg["username"] and verify_password(str(data.get("password", "")), cfg["password_hash"]):
+            LOGIN_FAILS.pop(ip, None)
             token = self.make_session(cfg["username"])
             body = json.dumps(api(True, {"user": cfg["username"], "token": token}), ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Set-Cookie", "adb_session=%s; Path=/; HttpOnly; SameSite=Lax" % token)
+            self.security_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -728,9 +790,8 @@ class Handler(BaseHTTPRequestHandler):
             keep_data = bool(data.get("keep_data", True))
             if not keep_data and not load_config()["allow_dangerous"]:
                 raise ValueError("完全删除数据需要先在系统设置里开启危险操作")
-            code, out = delete_napcat(name, keep_data)
-            audit(user, "napcat.delete", {"name": name}, code == 0)
-            return self.send_api(api(code == 0, {"output": out}))
+            t = create_task("删除 %s" % name, "napcat.delete", task_delete_napcat, user, name, keep_data)
+            return self.send_api(api(True, t.to_dict()))
         raise ValueError("操作不支持")
 
     def deploy_start(self, user: str):
@@ -784,6 +845,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        self.security_headers()
         self.end_headers()
         last = ""
         for _ in range(120):
@@ -806,6 +868,7 @@ class Handler(BaseHTTPRequestHandler):
         body = f.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
+        self.security_headers()
         self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(f.name))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -862,6 +925,7 @@ class Handler(BaseHTTPRequestHandler):
         body = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
+        self.security_headers()
         self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(path.name))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -872,10 +936,19 @@ class Handler(BaseHTTPRequestHandler):
         body = f.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "application/gzip")
+        self.security_headers()
         self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(f.name))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def safe_upload_filename(self, raw: str) -> str:
+        name = Path(raw).name.strip().replace("\x00", "")
+        name = re.sub(r"[^0-9A-Za-z._\-\u4e00-\u9fff]+", "_", name)
+        name = name.strip("._ ")[:120]
+        if not name:
+            name = "upload_" + secrets.token_hex(4)
+        return name
 
     def upload(self, user: str):
         cfg = load_config()
@@ -891,7 +964,7 @@ class Handler(BaseHTTPRequestHandler):
         for item in fields:
             if not getattr(item, "filename", ""):
                 continue
-            name = Path(item.filename).name
+            name = self.safe_upload_filename(item.filename)
             data = item.file.read(max_size + 1)
             if len(data) > max_size:
                 raise ValueError("文件超过大小限制")

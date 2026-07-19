@@ -11,7 +11,7 @@
     "forward_threshold": 99999,
     "enable_id_white_list": false,
     "id_whitelist": [],
-    "id_whitelist_log": true,
+    "id_whitelist_log": false,
     "wl_ignore_admin_on_group": true,
     "wl_ignore_admin_on_friend": true,
     "reply_with_mention": false,
@@ -40,7 +40,8 @@
     "empty_mention_waiting_need_reply": false,
     "friend_message_needs_wake_prefix": false,
     "ignore_bot_self_message": false,
-    "ignore_at_all": false
+    "ignore_at_all": false,
+    "wake_prefix": ""
   },
   "provider_sources": [],
   "provider": [],
@@ -168,7 +169,7 @@
   "content_safety": {
     "also_use_in_response": false,
     "internal_keywords": {
-      "enable": true,
+      "enable": false,
       "extra_keywords": []
     },
     "baidu_aip": {
