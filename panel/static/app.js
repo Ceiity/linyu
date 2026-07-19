@@ -15,7 +15,7 @@ window.addEventListener("hashchange",()=>{state.page=(location.hash||"#dashboard
 function toggleDrawer(){$(".sidebar").classList.toggle("open")}function toggleTheme(){state.theme=state.theme==="dark"?"light":"dark";document.documentElement.dataset.theme=state.theme;localStorage.theme=state.theme}
 document.addEventListener("click",e=>{const s=$(".sidebar");if(!s||!s.classList.contains("open"))return;if(e.target.closest(".sidebar")||e.target.closest(".mobile-only"))return;s.classList.remove("open")});
 async function refresh(){try{state.data=await req("/api/dashboard");const ok=state.data.astrbot.running;$("#globalStatus").className="status-pill "+(ok?"green":"red");$("#globalStatus").textContent=ok?"运行中":"异常";render()}catch(e){console.log(e)}}
-function title(t,s){$("#pageTitle").textContent=t;$("#pageSub").textContent=s}
+function title(t,s){const full=`淋雨-${t}`;document.title=full;$("#pageTitle").textContent=full;$("#pageSub").textContent=s}
 function fmtBytes(n){if(!n)return "0 B";const u=["B","KB","MB","GB","TB"];let i=0;while(n>1024&&i<u.length-1){n/=1024;i++}return n.toFixed(i?1:0)+" "+u[i]}
 function statusText(s){return {running:"运行中",exited:"已停止",created:"已创建",restarting:"重启中",paused:"已暂停",dead:"异常",missing:"不存在",unknown:"未知"}[s]||s||"未知"}
 function botName(n){const m=String(n||"").match(/^napcat0*(\d+)$/);return m?`机器人${Number(m[1])}`:(n||"机器人")}
