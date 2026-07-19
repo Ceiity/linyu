@@ -495,6 +495,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.handle_backup_download(p)
             if p.path == "/api/settings":
                 return self.send_api(api(True, sanitize_config(load_config())))
+            if p.path == "/api/config/astrbot":
+                return self.handle_astrbot_config()
             self.send_error(404)
         except Exception as e:
             self.send_api(api(False, message=str(e), code="SERVER_ERROR"), 500)
@@ -540,6 +542,8 @@ class Handler(BaseHTTPRequestHandler):
                 cfg = save_config_patch(self.read_json())
                 audit(user, "settings.save", {}, True)
                 return self.send_api(api(True, sanitize_config(cfg)))
+            if p.path == "/api/config/astrbot":
+                return self.save_astrbot_config(user)
             self.send_error(404)
         except Exception as e:
             self.send_api(api(False, message=str(e), code="SERVER_ERROR"), 500)
@@ -551,7 +555,10 @@ class Handler(BaseHTTPRequestHandler):
             file = STATIC_DIR / "index.html"
         body = file.read_bytes()
         self.send_response(200)
-        self.send_header("Content-Type", mimetypes.guess_type(str(file))[0] or "text/html; charset=utf-8")
+        ctype = mimetypes.guess_type(str(file))[0] or "text/html"
+        if ctype.startswith("text/") or ctype in {"application/javascript", "application/json"}:
+            ctype += "; charset=utf-8"
+        self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -713,6 +720,30 @@ class Handler(BaseHTTPRequestHandler):
         dest.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
         audit(user, "files.apply_astrbot_config", {"file": f.name}, True)
         self.send_api(api(True, message="已应用 AstrBot 配置"))
+
+    def handle_astrbot_config(self):
+        path = INSTALL_PREFIX / "data" / "cmd_config.json"
+        if not path.exists():
+            return self.send_api(api(False, message="AstrBot 配置文件不存在，可能尚未部署", code="NOT_DEPLOYED"), 404)
+        text = path.read_text(encoding="utf-8", errors="replace")
+        parsed = json.loads(text)
+        self.send_api(api(True, {"path": str(path), "content": json.dumps(parsed, ensure_ascii=False, indent=2)}))
+
+    def save_astrbot_config(self, user: str):
+        data = self.read_json()
+        content = str(data.get("content", ""))
+        parsed = json.loads(content)
+        path = INSTALL_PREFIX / "data" / "cmd_config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            shutil.copy2(path, str(path) + ".bak." + time.strftime("%Y%m%d_%H%M%S"))
+        path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
+        restart = bool(data.get("restart", False))
+        out = ""
+        if restart:
+            _, out = docker(["restart", "astrbot"], timeout=120)
+        audit(user, "astrbot.config.save", {"restart": restart}, True)
+        self.send_api(api(True, {"output": out}, "配置已保存"))
 
 
 def main():
