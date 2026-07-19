@@ -9,7 +9,7 @@
     },
     "reply_prefix": "",
     "forward_threshold": 99999,
-    "enable_id_white_list": true,
+    "enable_id_white_list": false,
     "id_whitelist": [],
     "id_whitelist_log": true,
     "wl_ignore_admin_on_group": true,
@@ -36,8 +36,8 @@
       "content_cleanup_rule": ""
     },
     "no_permission_reply": true,
-    "empty_mention_waiting": true,
-    "empty_mention_waiting_need_reply": true,
+    "empty_mention_waiting": false,
+    "empty_mention_waiting_need_reply": false,
     "friend_message_needs_wake_prefix": false,
     "ignore_bot_self_message": false,
     "ignore_at_all": false
@@ -231,7 +231,7 @@
       "enable": true,
       "ws_reverse_host": "0.0.0.0",
       "ws_reverse_port": 6199,
-      "ws_reverse_token": ""
+      "ws_reverse_token": "yuyu521521"
     }
   ],
   "platform_specific": {
@@ -260,9 +260,7 @@
       }
     }
   },
-  "wake_prefix": [
-    "/"
-  ],
+  "wake_prefix": [],
   "log_level": "INFO",
   "log_file_enable": false,
   "log_file_path": "logs/astrbot.log",

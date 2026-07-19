@@ -32,7 +32,59 @@ EOF
 deploy_astrbot(){ step "Deploying AstrBot with official image ${ASTRBOT_IMAGE}"; local file; file="$(generate_astrbot_compose)"; compose_pull "$file" || warn "Image pull failed; trying to start with local image/cache."; compose_up "$file"; wait_container "$ASTRBOT_CONTAINER" 180 || { docker logs "$ASTRBOT_CONTAINER" --tail 120 || true; fail "AstrBot container did not become running."; exit 1; }; wait_astrbot_web 180 || warn "AstrBot WebUI did not return HTTP success yet; container is running."; success "AstrBot started: http://$(private_ip):${ASTRBOT_WEB_PORT}"; }
 wait_astrbot_web(){ local timeout="$1" i; for ((i=1;i<=timeout;i++)); do curl -fsS --max-time 2 "http://127.0.0.1:${ASTRBOT_WEB_PORT}/" >/dev/null 2>&1 && return 0; sleep 1; done; return 1; }
 get_astrbot_password(){ local pass="" zh1 zh2; zh1=$'\345\210\235\345\247\213\345\257\206\347\240\201'; zh2=$'\351\232\217\346\234\272\345\210\235\345\247\213\345\257\206\347\240\201'; pass="$(docker logs "$ASTRBOT_CONTAINER" 2>&1 | grep -Ei "$zh1|$zh2|password|passwd" | sed -nE 's/.*[^A-Za-z0-9._@#%+=:-]([A-Za-z0-9._@#%+=:-]{6,}).*/\1/p' | tail -n1 || true)"; if [[ -z "$pass" ]]; then pass="$(grep -RIEho '"?(password|passwd|initial_password)"?[[:space:]]*[:=][[:space:]]*"?[A-Za-z0-9._@#%+=:-]{6,}' "$DATA_DIR" 2>/dev/null | sed -nE 's/.*[:=][[:space:]]*"?([^"[:space:]]+).*/\1/p' | tail -n1 || true)"; fi; [[ -n "$pass" ]] && echo "$pass" || echo "Not parsed automatically; inspect docker logs ${ASTRBOT_CONTAINER}"; }
-get_astrbot_token(){ echo "Official docs do not expose a stable first-run automatic token API; not generated"; }
+get_astrbot_token(){ echo "${ASTRBOT_REVERSE_WS_TOKEN}"; }
+
+astrbot_common_jq_filter(){
+  cat <<'EOF'
+.dashboard = (.dashboard // {})
+| .dashboard.host = "0.0.0.0"
+| .dashboard.port = 6185
+| .platform_settings = (.platform_settings // {})
+| .platform_settings.enable_id_white_list = false
+| .platform_settings.id_whitelist = []
+| .platform_settings.reply_with_mention = false
+| .platform_settings.reply_with_quote = false
+| .platform_settings.friend_message_needs_wake_prefix = false
+| .platform_settings.empty_mention_waiting = false
+| .platform_settings.empty_mention_waiting_need_reply = false
+| .platform_settings.ignore_bot_self_message = false
+| .provider_settings = (.provider_settings // {})
+| .provider_settings.wake_prefix = ""
+| .wake_prefix = []
+EOF
+}
+
+sync_astrbot_platforms(){
+  local dst="$DATA_DIR/cmd_config.json" tmp="$INSTALL_PREFIX/cmd_config.platforms.json" platforms_json="[]" count=0
+  [[ -f "$dst" ]] || return 0
+  if [[ -f "$NAPCAT_INDEX_FILE" ]]; then
+    platforms_json="$(
+      awk -F'\t' -v base="$ASTRBOT_INTERNAL_WS_PORT" -v token="$ASTRBOT_REVERSE_WS_TOKEN" '
+        BEGIN{print "["; first=1}
+        NF>=1 && $1!="" {
+          name=$1; id=name; sub(/^napcat0*/, "", id); if (id == "") id = NR;
+          port=base + id - 1;
+          if (!first) print ",";
+          first=0;
+          printf "{\"id\":\"%s\",\"type\":\"aiocqhttp\",\"enable\":true,\"ws_reverse_host\":\"0.0.0.0\",\"ws_reverse_port\":%d,\"ws_reverse_token\":\"%s\"}", name, port, token
+        }
+        END{print "]"}' "$NAPCAT_INDEX_FILE"
+    )"
+    count="$(jq 'length' <<<"$platforms_json")"
+  fi
+  if (( count == 0 )); then
+    platforms_json="[{\"id\":\"napcat01\",\"type\":\"aiocqhttp\",\"enable\":true,\"ws_reverse_host\":\"0.0.0.0\",\"ws_reverse_port\":${ASTRBOT_INTERNAL_WS_PORT},\"ws_reverse_token\":\"${ASTRBOT_REVERSE_WS_TOKEN}\"}]"
+  fi
+  jq --argjson platforms "$platforms_json" "$(astrbot_common_jq_filter) | .platform = \$platforms" "$dst" > "$tmp"
+  install -m 600 "$tmp" "$dst"
+  rm -f "$tmp"
+  if container_running "$ASTRBOT_CONTAINER"; then
+    docker restart "$ASTRBOT_CONTAINER" >/dev/null
+    wait_container "$ASTRBOT_CONTAINER" 180 || { docker logs "$ASTRBOT_CONTAINER" --tail 120 || true; fail "AstrBot failed to restart after platform sync."; return 1; }
+    wait_astrbot_web 180 || warn "AstrBot WebUI did not return HTTP success after platform sync; container is running."
+  fi
+  success "AstrBot reverse WebSocket platforms synced; token=${ASTRBOT_REVERSE_WS_TOKEN}"
+}
 
 apply_astrbot_default_config(){
   local src=""
@@ -53,7 +105,7 @@ apply_astrbot_default_config(){
     cp -a "$dst" "$dst.bak.$(date '+%Y%m%d_%H%M%S')"
   fi
   local tmp="$INSTALL_PREFIX/cmd_config.effective.json"
-  jq '.dashboard = (.dashboard // {}) | .dashboard.host = "0.0.0.0" | .dashboard.port = 6185' "$src" > "$tmp"
+  jq --arg token "$ASTRBOT_REVERSE_WS_TOKEN" "$(astrbot_common_jq_filter) | .platform = ((.platform // []) | if length == 0 then [{\"id\":\"napcat01\",\"type\":\"aiocqhttp\",\"enable\":true,\"ws_reverse_host\":\"0.0.0.0\",\"ws_reverse_port\":6199,\"ws_reverse_token\":\$token}] else map(if .type == \"aiocqhttp\" then .ws_reverse_token = \$token else . end) end)" "$src" > "$tmp"
   install -m 600 "$tmp" "$dst"
   rm -f "$tmp"
   if container_running "$ASTRBOT_CONTAINER"; then
