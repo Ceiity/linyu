@@ -63,17 +63,17 @@ async function loadNapQr(name){
   try{
     const d=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"qrcode"})});
     if(d.already_login){
-      const info=d.login_info||{}, nick=info.nick||info.nickname||info.uin||"QQ ???";
-      if(box)box.innerHTML=`<div class="login-ok-card"><div class="ok-doodle">${okIcon()}</div><h3>????</h3><p>${safeText(botName(name))} ????? QQ????????</p><div class="compact-url">${safeText(nick)}</div></div>`;
-      if(st)st.textContent="???????????????????";
+      const info=d.login_info||{}, nick=info.nick||info.nickname||info.uin||"QQ 已登录";
+      if(box)box.innerHTML=`<div class="login-ok-card"><div class="ok-doodle">${okIcon()}</div><h3>已经登录</h3><p>${safeText(botName(name))} 当前已连接 QQ?无需再次扫码?</p><div class="compact-url">${safeText(nick)}</div></div>`;
+      if(st)st.textContent="机器人在线，可以直接使用，窗口即将关闭";
       setTimeout(()=>closeModal(),1200);
       return;
     }
-    if(box)box.innerHTML=`<div class="qr-card"><div class="qr-svg">${d.svg}</div></div><div class="qr-help">???? QQ ???????</div>`;
-    if(st)st.textContent="??????";
+    if(box)box.innerHTML=`<div class="qr-card"><div class="qr-svg">${d.svg}</div></div><div class="qr-help">请用手机 QQ 扫描二维码登录</div>`;
+    if(st)st.textContent="等待扫码确认";
   }catch(e){
     if(box)box.innerHTML=`<div class="qr-error">${safeText(e.message||e)}</div>`;
-    if(st)st.textContent="???????????????";
+    if(st)st.textContent="获取失败，可以点刷新二维码再试";
   }
 }
 async function refreshNapQr(name){
@@ -87,15 +87,15 @@ async function pollNapQr(name){
     const r=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"status"})});
     const data=r.data||{}; const st=$("#qrLoginStatus");
     if(data.isLogin){
-      const box=$("#qrLoginBody"),info=data.loginInfo||{},nick=info.nick||info.nickname||info.uin||"QQ ???";
-      if(box)box.innerHTML=`<div class="login-ok-card"><div class="ok-doodle">${okIcon()}</div><h3>????</h3><p>${safeText(botName(name))} ???? QQ?</p><div class="compact-url">${safeText(nick)}</div></div>`;
-      if(st)st.textContent="???????????????????";
-      toast("QQ ????");
+      const box=$("#qrLoginBody"),info=data.loginInfo||{},nick=info.nick||info.nickname||info.uin||"QQ 已登录";
+      if(box)box.innerHTML=`<div class="login-ok-card"><div class="ok-doodle">${okIcon()}</div><h3>登录成功</h3><p>${safeText(botName(name))} 已经连接 QQ?</p><div class="compact-url">${safeText(nick)}</div></div>`;
+      if(st)st.textContent="机器人在线，可以直接使用，窗口即将关闭";
+      toast("QQ 登录成功");
       clearInterval(state.qrTimer);state.qrTimer=null;
       setTimeout(()=>{closeModal();refresh()},1200);
       return
     }
-    if(data.isOffline){if(st)st.textContent="??????????";return}
+    if(data.isOffline){if(st)st.textContent="账号离线，请重新扫码";return}
     if(data.loginError){if(st)st.textContent=data.loginError}
   }catch(e){}
 }

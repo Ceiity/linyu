@@ -354,11 +354,11 @@ def napcat_webui_credential(row: dict, force_refresh: bool = False) -> str:
     if int(res.get("code", -1)) != 0:
         msg = str(res.get("message", "unknown"))
         if "rate" in msg.lower():
-            raise RuntimeError("NapCat WebUI ??????????????????????????????? 1-3 ??????????????????")
-        raise RuntimeError("NapCat WebUI ?????%s" % msg)
+            raise RuntimeError("NapCat WebUI 登录太频繁，已触发限流。面板已修复为缓存鉴权；当前实例需要稍等 1-3 分钟，或重启该机器人后再点扫码登录?")
+        raise RuntimeError("NapCat WebUI 鉴权失败：%s" % msg)
     cred = (res.get("data") or {}).get("Credential")
     if not cred:
-        raise RuntimeError("NapCat WebUI ???? Credential")
+        raise RuntimeError("NapCat WebUI 没有返回 Credential")
     NAPCAT_CREDENTIAL_CACHE[name] = {"credential": cred, "hash": token_hash, "expires": now_ts + 3300}
     return cred
 
@@ -372,7 +372,7 @@ def napcat_webui_call(row: dict, path: str, payload: dict | None = None) -> dict
         if int(last.get("code", -1)) != -1 or "Unauthorized" not in str(last.get("message", "")):
             return last
         NAPCAT_CREDENTIAL_CACHE.pop(str(row.get("name") or row.get("webui_port") or "napcat"), None)
-    return last or {"code": -1, "message": "NapCat WebUI ????"}
+    return last or {"code": -1, "message": "NapCat WebUI 调用失败"}
 
 
 def qr_svg_for_text(text_value: str) -> str:
@@ -856,14 +856,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_api(api(True, {"name": name, "already_login": True, "status": status, "login_info": (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {}}))
             res = napcat_webui_call(row, "/QQLogin/GetQQLoginQrcode")
             if int(res.get("code", -1)) != 0:
-                return self.send_api(api(False, res, res.get("message", "???????")))
+                return self.send_api(api(False, res, res.get("message", "获取二维码失败")))
             qrcode_url = (res.get("data") or {}).get("qrcode") or ""
             if not qrcode_url:
-                return self.send_api(api(False, res, "NapCat ????????????????????????"))
+                return self.send_api(api(False, res, "NapCat 没有返回二维码链接，可能已经登录或二维码还没生成"))
             svg = qr_svg_for_text(qrcode_url)
             audit(user, "napcat.qq.qrcode", {"name": name}, True)
             return self.send_api(api(True, {"name": name, "already_login": False, "qrcode_url": qrcode_url, "svg": svg, "status": res}))
-        raise ValueError("QQ ???????")
+        raise ValueError("QQ 登录操作不支持")
 
     def napcat_action(self, user: str):
         data = self.read_json()
