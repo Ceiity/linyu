@@ -630,9 +630,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_api(api(code == 0, {"output": out}))
         if action == "delete":
             require_confirm(data, name)
-            if not load_config()["allow_dangerous"]:
-                raise ValueError("系统设置未开启危险操作")
-            code, out = delete_napcat(name, bool(data.get("keep_data", True)))
+            keep_data = bool(data.get("keep_data", True))
+            if not keep_data and not load_config()["allow_dangerous"]:
+                raise ValueError("完全删除数据需要先在系统设置里开启危险操作")
+            code, out = delete_napcat(name, keep_data)
             audit(user, "napcat.delete", {"name": name}, code == 0)
             return self.send_api(api(code == 0, {"output": out}))
         raise ValueError("操作不支持")
