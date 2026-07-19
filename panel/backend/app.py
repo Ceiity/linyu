@@ -805,7 +805,7 @@ class Handler(BaseHTTPRequestHandler):
         now_ts = time.time()
         LOGIN_FAILS[ip] = [t for t in LOGIN_FAILS.get(ip, []) if now_ts - t < 600]
         if len(LOGIN_FAILS[ip]) >= 8:
-            return self.send_api(api(False, message="登录失败次数过多，请 10 分钟后再试", code="RATE_LIMIT"), 429)
+            return self.send_api(api(False, message="?????????? 10 ?????", code="RATE_LIMIT"), 429)
         if data.get("username") == cfg["username"] and verify_password(str(data.get("password", "")), cfg["password_hash"]):
             LOGIN_FAILS.pop(ip, None)
             token = self.make_session(cfg["username"])
@@ -820,7 +820,7 @@ class Handler(BaseHTTPRequestHandler):
             audit(cfg["username"], "login", {}, True)
             return
         audit(str(data.get("username", "")), "login", {}, False)
-        self.send_api(api(False, message="账号或密码错误", code="BAD_LOGIN"), 401)
+        self.send_api(api(False, message="???????", code="BAD_LOGIN"), 401)
 
     def astrbot_action(self, user: str):
         action = self.read_json().get("action")
