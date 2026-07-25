@@ -157,9 +157,21 @@ def save_config_patch(patch: dict) -> dict:
 
 def sanitize_config(cfg: dict) -> dict:
     out = dict(cfg)
-    out.pop("password_hash", None)
-    out.pop("session_secret", None)
+    for key in ("password_hash", "session_secret", "initial_password"):
+        out.pop(key, None)
     return out
+
+
+def public_session_payload(user: str) -> dict:
+    return {"user": user, "login": True}
+
+
+def is_https_request(handler) -> bool:
+    proto = (handler.headers.get("X-Forwarded-Proto") or handler.headers.get("X-Forwarded-Scheme") or "").split(",", 1)[0].strip().lower()
+    if proto == "https":
+        return True
+    forwarded = handler.headers.get("Forwarded", "").lower()
+    return "proto=https" in forwarded
 
 
 def shell_state() -> dict[str, str]:
@@ -375,6 +387,36 @@ def audit(user: str, action: str, detail: dict | None = None, ok: bool = True) -
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def redact_secret_text(text: str) -> str:
+    value = str(text)
+    patterns = [
+        (r"(?i)(token=)[A-Za-z0-9._@#%+=:-]{6,}", r"\1***"),
+        (r"(?i)(reverse_token=)[A-Za-z0-9._@#%+=:-]{6,}", r"\1***"),
+        (r"(?i)(password=)[^\s&]+", r"\1***"),
+        (r'(?i)("(?:token|password|passwd|credential|secret)"\s*:\s*)"?[^",\s}]+"?', r'\1"***"'),
+        (r"(?i)(webui\?token=)[A-Za-z0-9._@#%+=:-]{6,}", r"\1***"),
+    ]
+    for pat, repl in patterns:
+        value = re.sub(pat, repl, value)
+    return value
+
+
+def redact_secrets(obj):
+    if isinstance(obj, str):
+        return redact_secret_text(obj)
+    if isinstance(obj, list):
+        return [redact_secrets(x) for x in obj]
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if str(k).lower() in {"token", "password", "passwd", "credential", "secret", "password_hash", "session_secret", "initial_password"}:
+                out[k] = "***"
+            else:
+                out[k] = redact_secrets(v)
+        return out
+    return obj
+
+
 @dataclass
 class Task:
     id: str
@@ -389,14 +431,14 @@ class Task:
 
     def line(self, text: str, progress: int | None = None) -> None:
         with TASK_LOCK:
-            self.logs.append("[%s] %s" % (now(), text.rstrip()))
+            self.logs.append("[%s] %s" % (now(), redact_secret_text(text.rstrip())))
             self.logs = self.logs[-500:]
             if progress is not None:
                 self.progress = max(0, min(100, progress))
             self.updated_at = now()
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "title": self.title, "kind": self.kind, "status": self.status, "progress": self.progress, "logs": self.logs, "result": self.result, "created_at": self.created_at, "updated_at": self.updated_at}
+        return {"id": self.id, "title": self.title, "kind": self.kind, "status": self.status, "progress": self.progress, "logs": redact_secrets(self.logs), "result": redact_secrets(self.result), "created_at": self.created_at, "updated_at": self.updated_at}
 
 
 def create_task(title: str, kind: str, func, user: str, *args) -> Task:
@@ -540,7 +582,7 @@ def watchdog_status() -> dict:
     }
 
 
-def parse_napcat_index(origin: str | None = None) -> list[dict]:
+def parse_napcat_index(origin: str | None = None, expose_secret: bool = False) -> list[dict]:
     st = shell_state()
     origin = origin or public_origin()
     recovery = recovery_status()
@@ -558,13 +600,13 @@ def parse_napcat_index(origin: str | None = None) -> list[dict]:
     for p in entries:
         status = statuses.get(p[0]) or {"status":"missing","running":False}
         url = url_for_port(origin, p[1], "webui")
-        rows.append({"name": p[0], "webui_port": p[1], "ws_port": p[2], "http_port": p[3], "token": p[4], "url": url, "login_url": url + "?token=" + quote(p[4]), "status": status.get("status"), "running": status.get("running"), "recovery": recovery.get(p[0], {}), "directory": str(base_dir / p[0])})
+        rows.append({"name": p[0], "webui_port": p[1], "ws_port": p[2], "http_port": p[3], "token": p[4] if expose_secret else "", "url": url, "login_url": (url + "?token=" + quote(p[4])) if expose_secret else ("/api/napcat/open?name=" + quote(p[0])), "status": status.get("status"), "running": status.get("running"), "recovery": recovery.get(p[0], {}), "directory": str(base_dir / p[0])})
     return rows
 
 
 def napcat_row(name: str) -> dict:
     safe = safe_name(name)
-    for row in parse_napcat_index():
+    for row in parse_napcat_index(expose_secret=True):
         if row.get("name") == safe:
             return row
     raise ValueError("机器人不存在：%s" % safe)
@@ -895,6 +937,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Pragma", "no-cache")
         self.security_headers()
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -967,6 +1010,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_api(api(True, plugins_data()))
             if p.path == "/api/napcat":
                 return self.send_api(api(True, parse_napcat_index(self.request_origin())))
+            if p.path == "/api/napcat/open":
+                return self.napcat_open(p)
             if p.path == "/api/tasks":
                 return self.send_api(api(True, [t.to_dict() for t in list(TASKS.values())[-50:]]))
             if p.path.startswith("/api/tasks/"):
@@ -1108,16 +1153,20 @@ class Handler(BaseHTTPRequestHandler):
         if data.get("username") == cfg["username"] and verify_password(str(data.get("password", "")), cfg["password_hash"]):
             LOGIN_FAILS.pop(ip, None)
             token = self.make_session(cfg["username"])
-            body = json.dumps(api(True, {"user": cfg["username"], "token": token}), ensure_ascii=False).encode("utf-8")
+            body = json.dumps(api(True, public_session_payload(cfg["username"])), ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Set-Cookie", "adb_session=%s; Path=/; HttpOnly; SameSite=Lax" % token)
+            cookie = "adb_session=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400" % token
+            if is_https_request(self):
+                cookie += "; Secure"
+            self.send_header("Set-Cookie", cookie)
             self.security_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
             audit(cfg["username"], "login", {}, True)
             return
+        LOGIN_FAILS.setdefault(ip, []).append(now_ts)
         audit(str(data.get("username", "")), "login", {}, False)
         self.send_api(api(False, message="\u8d26\u53f7\u6216\u5bc6\u7801\u9519\u8bef", code="BAD_LOGIN"), 401)
 
@@ -1227,6 +1276,20 @@ class Handler(BaseHTTPRequestHandler):
         t = create_task("自动配置 HTTPS", "https.setup", task_shell, user, "开始安装 Nginx / Certbot 并申请证书", script, 2400)
         self.send_api(api(True, t.to_dict()))
 
+
+    def napcat_open(self, p):
+        name = safe_name(parse_qs(p.query).get("name", [""])[0])
+        row = napcat_row(name)
+        origin = self.request_origin()
+        target = url_for_port(origin, row["webui_port"], "webui") + "?token=" + quote(str(row.get("token", "")))
+        audit(self.current_user() or "unknown", "napcat.open", {"name": name}, True)
+        self.send_response(302)
+        self.send_header("Location", target)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Pragma", "no-cache")
+        self.security_headers()
+        self.end_headers()
+
     def handle_logs(self, p):
         qs = parse_qs(p.query)
         target = qs.get("target", ["astrbot"])[0]
@@ -1244,6 +1307,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Pragma", "no-cache")
         self.send_header("X-Accel-Buffering", "no")
         self.security_headers()
         self.end_headers()
