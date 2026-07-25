@@ -25,6 +25,33 @@ max_napcat_id(){
   done < <(docker ps -a --format '{{.Names}}' 2>/dev/null || true)
   echo "$m"
 }
+used_napcat_ids(){
+  local name n
+  if [[ -f "$NAPCAT_INDEX_FILE" ]]; then
+    while IFS=$'\t' read -r name _; do
+      [[ "$name" =~ ^napcat[0-9]+$ ]] || continue
+      n="${name#napcat}"; echo "$((10#$n))"
+    done < "$NAPCAT_INDEX_FILE"
+  fi
+  while IFS= read -r name; do
+    [[ "$name" =~ ^napcat[0-9]+$ ]] || continue
+    n="${name#napcat}"; echo "$((10#$n))"
+  done < <(docker ps -a --format '{{.Names}}' 2>/dev/null || true)
+  shopt -s nullglob
+  for name in "$NAPCAT_BASE_DIR"/.creating/napcat[0-9]*; do
+    name="$(basename "$name")"
+    n="${name#napcat}"; echo "$((10#$n))"
+  done
+  shopt -u nullglob
+}
+next_reusable_napcat_id(){
+  local candidate=1 used
+  used="$(used_napcat_ids | sort -n | uniq | tr '\n' ' ')"
+  while [[ " ${used} " == *" ${candidate} "* ]]; do
+    candidate=$((candidate+1))
+  done
+  echo "$candidate"
+}
 port_state_init(){
   mkdir -p "$(dirname "$PORT_STATE_FILE")"
   [[ -s "$PORT_STATE_FILE" ]] || printf '{"version":1,"allocations":{}}\n' > "$PORT_STATE_FILE"
@@ -147,9 +174,10 @@ sync_napcat_reverse_configs(){
   success "NapCat reverse WebSocket configs synced; token=${ASTRBOT_REVERSE_WS_TOKEN}"
 }
 add_napcat_instances(){
-  local count="$1" start max width i id name token webui ws http file total astrbot_ws_port reserved_ports=""
+  local count="$1" width i id name token webui ws http file total astrbot_ws_port reserved_ports="" ids=()
   [[ "$count" =~ ^[0-9]+$ ]] && (( count > 0 )) || { fail "NapCat count must be a positive integer."; return 1; }
   port_state_init
+  rm -f "$NAPCAT_BASE_DIR/.creating"/napcat[0-9]* 2>/dev/null || true
   reserved_ports="$(build_reserved_ports)"
   next_free_unreserved(){
     local base="$1" limit="${2:-3000}" n p
@@ -164,9 +192,17 @@ add_napcat_instances(){
     done
     return 1
   }
-  max="$(max_napcat_id)"; start=$((max+1)); total=$((max+count)); width=2; (( total >= 100 )) && width=${#total}; NAPCAT_PAD_WIDTH="$width"
   for ((i=0;i<count;i++)); do
-    id=$((start+i)); name="$(napcat_name "$id")"; token="$(random_token)"
+    id="$(next_reusable_napcat_id)"
+    ids+=("$id")
+    # 预占本次要创建的编号，保证一次创建多个时不会重复。
+    mkdir -p "$NAPCAT_BASE_DIR/.creating"
+    : > "$NAPCAT_BASE_DIR/.creating/napcat${id}"
+  done
+  total="$(printf '%s\n' "${ids[@]}" | sort -n | tail -n1)"
+  width=2; (( total >= 100 )) && width=${#total}; NAPCAT_PAD_WIDTH="$width"
+  for ((i=0;i<count;i++)); do
+    id="${ids[$i]}"; name="$(napcat_name "$id")"; token="$(random_token)"
     webui="$(next_free_unreserved $((6098+id)))" || { fail "No free WebUI port for ${name}"; return 1; }
     http="$(next_free_unreserved $((3000+(id-1)*2)))" || { fail "No free HTTP port for ${name}"; return 1; }
     ws="$(next_free_unreserved $((3001+(id-1)*2)))" || { fail "No free WS port for ${name}"; return 1; }
@@ -184,7 +220,9 @@ add_napcat_instances(){
     verify_napcat_instance "$name" "$webui" || { port_state_remove "$name"; return 1; }
     append_napcat_index "$name" "$webui" "$ws" "$http" "$token"
     success "${name}: WebUI http://$(public_ip):${webui}/webui?token=${token} reverse_ws=ws://astrbot:${astrbot_ws_port}/ws reverse_token=${ASTRBOT_REVERSE_WS_TOKEN}"
+    rm -f "$NAPCAT_BASE_DIR/.creating/napcat${id}" 2>/dev/null || true
   done
+  rmdir "$NAPCAT_BASE_DIR/.creating" 2>/dev/null || true
   save_state_var NAPCAT_IMAGE "$NAPCAT_IMAGE"
   sync_napcat_reverse_configs
   sync_astrbot_platforms
