@@ -157,13 +157,13 @@ def save_config_patch(patch: dict) -> dict:
 
 def sanitize_config(cfg: dict) -> dict:
     out = dict(cfg)
-    for key in ("password_hash", "session_secret", "initial_password"):
+    for key in ("username", "password_hash", "session_secret", "initial_password"):
         out.pop(key, None)
     return out
 
 
 def public_session_payload(user: str) -> dict:
-    return {"user": user, "login": True}
+    return {"login": True}
 
 
 def is_https_request(handler) -> bool:
@@ -959,7 +959,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def make_session(self, user: str) -> str:
         cfg = load_config()
-        payload = base64.urlsafe_b64encode(json.dumps({"user": user, "exp": time.time() + 86400 * 7}).encode()).decode().rstrip("=")
+        payload = base64.urlsafe_b64encode(json.dumps({"sid": secrets.token_urlsafe(18), "exp": time.time() + 86400 * 7}).encode()).decode().rstrip("=")
         sig = hmac.new(cfg["session_secret"].encode(), payload.encode(), hashlib.sha256).hexdigest()
         return payload + "." + sig
 
@@ -980,7 +980,7 @@ class Handler(BaseHTTPRequestHandler):
             return None
         try:
             data = json.loads(base64.urlsafe_b64decode(payload + "===").decode())
-            return data["user"] if data.get("exp", 0) > time.time() else None
+            return cfg.get("username", "admin") if data.get("exp", 0) > time.time() else None
         except Exception:
             return None
 
@@ -1001,7 +1001,7 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 return
             if p.path == "/api/me":
-                return self.send_api(api(True, {"user": user, "config": sanitize_config(load_config())}))
+                return self.send_api(api(True, {"login": True, "config": sanitize_config(load_config())}))
             if p.path == "/api/dashboard":
                 return self.send_api(api(True, dashboard_data(self.request_origin())))
             if p.path == "/api/astrbot":

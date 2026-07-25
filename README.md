@@ -106,7 +106,8 @@ napcat20
 - Web 控制台支持浏览器会话缓存，切换页面不会反复闪烁刷新；点击“刷新”按钮才强制刷新最新状态
 - 主题支持“跟随系统 / 浅色 / 深色”，手机端打开侧边栏后可在左下角切换
 - 登录响应不再返回 session token，敏感会话只通过 HttpOnly Cookie 保存
-- `/api/me`、`/api/settings`、任务日志、NapCat 列表会自动脱敏密码、哈希、密钥和 Token
+- 登录响应、`/api/me`、`/api/settings` 不再返回面板真实用户名，避免被抓包后辅助爆破
+- `/api/me`、`/api/settings`、任务日志、NapCat 列表会自动脱敏用户名、密码、哈希、密钥和 Token
 
 控制台地址、账号和首次密码会写入：
 
