@@ -37,7 +37,13 @@ TASK_LOCK = threading.RLock()
 TASKS: dict[str, "Task"] = {}
 IP_CACHE = {"public": "", "ts": 0.0}
 LOGIN_FAILS: dict[str, list[float]] = {}
+LOGIN_LOCKS: dict[str, float] = {}
 NAPCAT_CREDENTIAL_CACHE: dict[str, dict] = {}
+LOGIN_FAIL_WINDOW_SECONDS = 600
+LOGIN_LOCK_SECONDS = 1800
+LOGIN_LOCK_THRESHOLD = 5
+LOGIN_SLOWDOWN_AFTER = 2
+LOGIN_DUMMY_HASH = "pbkdf2_sha256$180000$7f4b2f1379861d0dfb49e36af27e4f4c$gzQf0xR39bWn5zL6tIRkwQmL8kUmVJYzgbDbRKBS2F0="
 
 
 def now() -> str:
@@ -172,6 +178,23 @@ def is_https_request(handler) -> bool:
         return True
     forwarded = handler.headers.get("Forwarded", "").lower()
     return "proto=https" in forwarded
+
+
+def login_key_for_ip(ip: str) -> str:
+    return hashlib.sha256(str(ip or "unknown").encode("utf-8")).hexdigest()
+
+
+def register_login_failure(key: str, now_ts: float) -> int:
+    LOGIN_FAILS[key] = [t for t in LOGIN_FAILS.get(key, []) if now_ts - t < LOGIN_FAIL_WINDOW_SECONDS]
+    LOGIN_FAILS[key].append(now_ts)
+    if len(LOGIN_FAILS[key]) >= LOGIN_LOCK_THRESHOLD:
+        LOGIN_LOCKS[key] = now_ts + LOGIN_LOCK_SECONDS
+    return len(LOGIN_FAILS[key])
+
+
+def clear_login_failures(key: str) -> None:
+    LOGIN_FAILS.pop(key, None)
+    LOGIN_LOCKS.pop(key, None)
 
 
 def shell_state() -> dict[str, str]:
@@ -1146,12 +1169,31 @@ class Handler(BaseHTTPRequestHandler):
         data = self.read_json()
         cfg = load_config()
         ip = self.client_address[0] if self.client_address else "unknown"
+        login_key = login_key_for_ip(ip)
         now_ts = time.time()
-        LOGIN_FAILS[ip] = [t for t in LOGIN_FAILS.get(ip, []) if now_ts - t < 600]
-        if len(LOGIN_FAILS[ip]) >= 8:
-            return self.send_api(api(False, message="\u767b\u5f55\u5931\u8d25\u6b21\u6570\u8fc7\u591a\uff0c\u8bf7 10 \u5206\u949f\u540e\u518d\u8bd5", code="RATE_LIMIT"), 429)
-        if data.get("username") == cfg["username"] and verify_password(str(data.get("password", "")), cfg["password_hash"]):
-            LOGIN_FAILS.pop(ip, None)
+        lock_until = LOGIN_LOCKS.get(login_key, 0)
+        if lock_until > now_ts:
+            retry_after = max(1, int(lock_until - now_ts))
+            time.sleep(0.35)
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Retry-After", str(retry_after))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Pragma", "no-cache")
+            self.security_headers()
+            body = json.dumps(api(False, message="登录尝试过多，请稍后再试", code="RATE_LIMIT"), ensure_ascii=False).encode("utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            audit("anonymous", "login.rate_limited", {"ip_hash": login_key[:12], "retry_after": retry_after}, False)
+            return
+        LOGIN_FAILS[login_key] = [t for t in LOGIN_FAILS.get(login_key, []) if now_ts - t < LOGIN_FAIL_WINDOW_SECONDS]
+        supplied_user = str(data.get("username", ""))
+        supplied_password = str(data.get("password", ""))
+        username_ok = hmac.compare_digest(supplied_user, str(cfg["username"]))
+        password_ok = verify_password(supplied_password, cfg["password_hash"] if username_ok else LOGIN_DUMMY_HASH)
+        if username_ok and password_ok:
+            clear_login_failures(login_key)
             token = self.make_session(cfg["username"])
             body = json.dumps(api(True, public_session_payload(cfg["username"])), ensure_ascii=False).encode("utf-8")
             self.send_response(200)
@@ -1166,9 +1208,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             audit(cfg["username"], "login", {}, True)
             return
-        LOGIN_FAILS.setdefault(ip, []).append(now_ts)
-        audit(str(data.get("username", "")), "login", {}, False)
-        self.send_api(api(False, message="\u8d26\u53f7\u6216\u5bc6\u7801\u9519\u8bef", code="BAD_LOGIN"), 401)
+        fail_count = register_login_failure(login_key, now_ts)
+        if fail_count > LOGIN_SLOWDOWN_AFTER:
+            time.sleep(min(2.5, 0.4 * (fail_count - LOGIN_SLOWDOWN_AFTER)))
+        audit("anonymous", "login.failed", {"ip_hash": login_key[:12], "fail_count": fail_count}, False)
+        self.send_api(api(False, message="账号或密码错误", code="BAD_LOGIN"), 401)
 
     def astrbot_action(self, user: str):
         action = self.read_json().get("action")
