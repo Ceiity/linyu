@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/backup.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/security.sh"
 all_compose_files(){ find "$COMPOSE_DIR" "$NAPCAT_BASE_DIR" -name docker-compose.yml -type f 2>/dev/null | sort; }
 start_all(){ while read -r f; do [[ -n "$f" ]] && compose_up "$f"; done < <(all_compose_files); }
 stop_all(){ while read -r f; do [[ -n "$f" ]] && $(compose_cmd) -f "$f" stop; done < <(all_compose_files); }

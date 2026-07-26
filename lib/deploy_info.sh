@@ -18,6 +18,7 @@ Private IP: ${priv}
 OS: $(os_pretty)
 Docker version: $(docker --version 2>/dev/null || echo unknown)
 Compose version: $($(compose_cmd) version 2>/dev/null | head -n1 || echo unknown)
+Fail2Ban: $(systemctl is-active fail2ban 2>/dev/null || echo not-installed)
 AstrBot URL: http://${pub}:${ASTRBOT_WEB_PORT:-6185}
 AstrBot private URL: http://${priv}:${ASTRBOT_WEB_PORT:-6185}
 AstrBot username: ${ASTRBOT_USERNAME}

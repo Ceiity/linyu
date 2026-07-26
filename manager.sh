@@ -31,6 +31,7 @@ menu(){
     "22) \u4e00\u952e\u5347\u7ea7" \
     "23) \u5378\u8f7d" \
     "24) Web \u63a7\u5236\u53f0" \
+    "25) Fail2Ban SSH \u9632\u7206\u7834" \
     "0) \u9000\u51fa"
 }
 while true; do
@@ -60,6 +61,7 @@ while true; do
     22) update_all;;
     23) uninstall_all; exit 0;;
     24) bash "$PROJECT_DIR/scripts/panel.sh" setup;;
+    25) install_fail2ban; fail2ban_status;;
     0) exit 0;;
     *) warn $'\u65e0\u6548\u9009\u9879';;
   esac

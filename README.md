@@ -16,7 +16,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Ceiity/linyu/main/install.sh
 
 默认流程是“面板优先”：
 
-1. 自动安装 Docker、Docker Compose、Git、Curl 等依赖。
+1. 自动安装 Docker、Docker Compose、Git、Curl、Fail2Ban 等依赖。
 2. 自动创建安装目录和 Docker Network。
 3. 自动启动 Web 控制台。
 4. 用户打开网页，在仪表盘里填写 NapCat 数量和连接 Token。
@@ -347,6 +347,7 @@ Web 控制台不会写死 IP、域名或 localhost。后端会根据当前请求
 
 - Web 面板远程 API 使用独立 `remote_api_token` 鉴权，不使用网页登录态。
 - 插件默认必须配置 `owner_ids`，没有配置主人 QQ 时不会允许陌生人创建机器人。
+- 一键部署会自动安装并启用 Fail2Ban，默认开启 `sshd` jail：10 分钟内 SSH 失败 5 次封禁 1 小时。
 - 远程创建接口有速率限制，防止被刷实例。
 - 面板 API 不会把 NapCat Token 暴露给网页列表或普通登录响应。
 

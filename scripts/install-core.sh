@@ -31,7 +31,7 @@ install_full_stack(){
 main(){
   banner; require_root; ensure_dirs; save_state_var PROJECT_DIR "$PROJECT_DIR"; save_state_var INSTALL_PREFIX "$INSTALL_PREFIX"; save_state_var NETWORK_NAME "$NETWORK_NAME"; save_state_var SCRIPT_VERSION "$SCRIPT_VERSION"
   step "Environment checks"; validate_os; validate_arch; network_check
-  install_dependencies; install_docker; ensure_network
+  install_dependencies; install_docker; install_fail2ban || warn "Fail2Ban setup failed; continuing deployment."; ensure_network
   load_state
   : "${WEB_ADMIN_PORT:=$(find_free_port 7070)}"; save_state_var WEB_ADMIN_PORT "$WEB_ADMIN_PORT"
   if [[ "${ASTRBOT_DEPLOY_FULL:-0}" == "1" || "${ASTRBOT_DEPLOY_MODE:-panel}" == "full" ]]; then
