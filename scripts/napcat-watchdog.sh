@@ -68,6 +68,19 @@ napcat_api(){
   printf '%s\n' "$res"
 }
 
+onebot_api(){
+  local http_port="$1" token="$2" action="$3" res=""
+  [[ -n "${http_port:-}" ]] || return 1
+  if [[ -n "${token:-}" ]]; then
+    res="$(curl -sS --max-time 5 -H 'Content-Type: application/json' -H "Authorization: Bearer ${token}" -d '{}' "http://127.0.0.1:${http_port}/${action#/}" 2>/dev/null || true)"
+  fi
+  if [[ -z "$res" ]]; then
+    res="$(curl -sS --max-time 5 -H 'Content-Type: application/json' -d '{}' "http://127.0.0.1:${http_port}/${action#/}" 2>/dev/null || true)"
+  fi
+  [[ -n "$res" ]] || return 1
+  printf '%s\n' "$res"
+}
+
 recent_restart_count(){
   local file="$1" window="$2" now cutoff
   now="$(now_ts)"; cutoff=$((now-window))
@@ -113,8 +126,30 @@ check_one(){
       [[ "$is_login" == "true" ]] || reason="QQ offline or kicked"
     fi
   fi
+  if [[ -z "$reason" ]]; then
+    api_res="$(onebot_api "$http" "$token" "/get_status" || true)"
+    if [[ -n "$api_res" ]]; then
+      if [[ "$(jq -r '.retcode // 0' <<<"$api_res" 2>/dev/null || echo 0)" != "0" ]]; then
+        reason="OneBot get_status retcode abnormal"
+      elif [[ "$(jq -r '.data.online // true' <<<"$api_res" 2>/dev/null || echo true)" == "false" ]]; then
+        reason="OneBot reports offline"
+      elif [[ "$(jq -r '.data.good // true' <<<"$api_res" 2>/dev/null || echo true)" == "false" ]]; then
+        reason="OneBot reports bad connection"
+      fi
+    fi
+  fi
+  if [[ -z "$reason" ]]; then
+    api_res="$(onebot_api "$http" "$token" "/get_login_info" || true)"
+    if [[ -n "$api_res" ]]; then
+      if [[ "$(jq -r '.retcode // 0' <<<"$api_res" 2>/dev/null || echo 0)" != "0" ]]; then
+        reason="OneBot get_login_info retcode abnormal"
+      elif [[ -z "$(jq -r '.data.user_id // .data.uin // .data.qq // empty' <<<"$api_res" 2>/dev/null || true)" ]]; then
+        reason="OneBot login info is empty"
+      fi
+    fi
+  fi
   logs="$(docker logs --since "$((interval+30))s" "$name" 2>&1 || true)"
-  if grep -Eiq 'login.*expired|qrcode.*expired|kick|kicked|offline|logout|session.*expired|expired|QR.*expired' <<<"$logs"; then
+  if grep -Eiq '被踢|踢下线|掉线|离线|登录失效|登录过期|login.*expired|qrcode.*expired|kick|kicked|offline|logout|session.*expired|expired|QR.*expired' <<<"$logs"; then
     reason="possible QQ kick/offline or QR expired"
   fi
   count_file="$STATE_DIR/${name}.abnormal"

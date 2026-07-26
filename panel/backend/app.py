@@ -666,6 +666,13 @@ def http_json_post(url: str, payload: dict | None = None, headers: dict | None =
     return json.loads(raw)
 
 
+def http_json_post_optional(url: str, payload: dict | None = None, headers: dict | None = None, timeout: int = 5) -> tuple[bool, dict | str]:
+    try:
+        return True, http_json_post(url, payload or {}, headers or {}, timeout=timeout)
+    except Exception as e:
+        return False, str(e)
+
+
 def napcat_webui_credential(row: dict, force_refresh: bool = False) -> str:
     name = str(row.get("name") or row.get("webui_port") or "napcat")
     token = str(row.get("token") or "")
@@ -698,6 +705,73 @@ def napcat_webui_call(row: dict, path: str, payload: dict | None = None) -> dict
             return last
         NAPCAT_CREDENTIAL_CACHE.pop(str(row.get("name") or row.get("webui_port") or "napcat"), None)
     return last or {"code": -1, "message": "NapCat WebUI \u8c03\u7528\u5931\u8d25"}
+
+
+def napcat_onebot_call(row: dict, action: str) -> tuple[bool, dict | str]:
+    port = str(row.get("http_port") or "")
+    token = str(row.get("token") or "")
+    if not port:
+        return False, "OneBot HTTP port is missing"
+    url = "http://127.0.0.1:%s/%s" % (port, action.lstrip("/"))
+    header_sets = []
+    if token:
+        header_sets.append({"Authorization": "Bearer " + token})
+        header_sets.append({"access_token": token})
+    header_sets.append({})
+    last: dict | str = ""
+    for headers in header_sets:
+        ok, res = http_json_post_optional(url, {}, headers, timeout=4)
+        last = res
+        if ok and isinstance(res, dict):
+            return True, res
+    return False, last or "OneBot HTTP API not reachable"
+
+
+def napcat_false_online_reason(row: dict, login_status: dict | None = None) -> str:
+    status = login_status or {}
+    if int(status.get("code", -1)) != 0:
+        return "NapCat 登录状态接口异常"
+    if not (status.get("data") or {}).get("isLogin"):
+        return "QQ 未登录"
+    log_keywords = r"被踢|踢下线|掉线|离线|登录失效|登录过期|session.*expired|token.*expired|logout|offline|kicked|kick|qrcode.*expired|二维码.*过期"
+    code, logs = docker(["logs", "--since", "8m", str(row.get("name", ""))], timeout=15)
+    if code == 0 and re.search(log_keywords, logs, re.I):
+        return "NapCat 日志显示 QQ 可能被踢下线或登录失效"
+    ok, st = napcat_onebot_call(row, "/get_status")
+    if ok and isinstance(st, dict):
+        data = st.get("data") or {}
+        if st.get("retcode", 0) not in (0, "0"):
+            return "OneBot 状态异常：retcode=%s" % st.get("retcode")
+        if isinstance(data, dict):
+            if data.get("online") is False:
+                return "OneBot 状态显示 offline"
+            if data.get("good") is False:
+                return "OneBot 状态显示 good=false"
+    ok, info = napcat_onebot_call(row, "/get_login_info")
+    if ok and isinstance(info, dict):
+        if info.get("retcode", 0) not in (0, "0"):
+            return "OneBot 登录信息异常：retcode=%s" % info.get("retcode")
+        data = info.get("data") or {}
+        if isinstance(data, dict) and not any(data.get(k) for k in ("user_id", "nickname", "uin", "qq")):
+            return "OneBot 登录信息为空"
+    return ""
+
+
+def restart_napcat_for_fresh_qr(row: dict, reason: str, wait_seconds: int = 18) -> None:
+    name = safe_name(str(row.get("name", "")))
+    NAPCAT_CREDENTIAL_CACHE.pop(name, None)
+    docker(["restart", name], timeout=120)
+    deadline = time.time() + max(5, wait_seconds)
+    port = str(row.get("webui_port") or "")
+    while time.time() < deadline:
+        try:
+            ok, _ = http_json_post_optional("http://127.0.0.1:%s/api/auth/login" % port, {"hash": hashlib.sha256((str(row.get("token") or "") + ".napcat").encode()).hexdigest()}, timeout=3)
+            if ok:
+                break
+        except Exception:
+            pass
+        time.sleep(2)
+    audit("remote", "napcat.false_online.restart", {"name": name, "reason": reason[:160]}, True)
 
 
 def qr_svg_for_text(text_value: str) -> str:
@@ -739,6 +813,8 @@ def napcat_login_bundle(row: dict) -> dict:
             "login_name": login_name,
             "login_uin": login_uin,
         }
+    napcat_webui_call(row, "/QQLogin/RefreshQRcode")
+    time.sleep(1)
     res = napcat_webui_call(row, "/QQLogin/GetQQLoginQrcode")
     if int(res.get("code", -1)) != 0:
         raise RuntimeError(str(res.get("message", "获取二维码失败")))
@@ -1334,7 +1410,7 @@ class Handler(BaseHTTPRequestHandler):
         data = self.read_json()
         if not self.remote_auth_ok(data):
             audit("remote", "remote.napcat.create_login.denied", {"ip_hash": self.remote_client_key()[:12]}, False)
-            return self.send_api(api(False, message="????????", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
+            return self.send_api(api(False, message="remote auth failed", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
         self.check_remote_rate_limit()
 
         rows = parse_napcat_index(self.request_origin(), expose_secret=True)
@@ -1345,11 +1421,24 @@ class Handler(BaseHTTPRequestHandler):
                 bundle = napcat_login_bundle(row)
                 bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
                 bundle["container"] = row.get("name")
-                if not bundle.get("already_login"):
-                    bundle["reused"] = True
-                    audit("remote", "remote.napcat.reuse_login_slot", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
-                    return self.send_api(api(True, bundle))
-                occupied.append({"name": row.get("name"), "display_name": bundle.get("display_name"), "login_name": bundle.get("login_name"), "login_uin": bundle.get("login_uin")})
+                if bundle.get("already_login"):
+                    false_reason = napcat_false_online_reason(row, bundle.get("status") or {})
+                    if false_reason:
+                        restart_napcat_for_fresh_qr(row, false_reason, wait_seconds=22)
+                        bundle = napcat_login_bundle(row)
+                        bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
+                        bundle["container"] = row.get("name")
+                        bundle["reused"] = True
+                        bundle["recovered"] = True
+                        bundle["recover_reason"] = false_reason
+                        if not bundle.get("already_login"):
+                            audit("remote", "remote.napcat.false_online.recovered_qr", {"name": row.get("name"), "reason": false_reason[:120], "requester": str(data.get("requester", ""))[:64]}, True)
+                            return self.send_api(api(True, bundle))
+                    occupied.append({"name": row.get("name"), "display_name": bundle.get("display_name"), "login_name": bundle.get("login_name"), "login_uin": bundle.get("login_uin")})
+                    continue
+                bundle["reused"] = True
+                audit("remote", "remote.napcat.reuse_login_slot", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
+                return self.send_api(api(True, bundle))
             except Exception as e:
                 last_error = str(e)
 
@@ -1357,12 +1446,12 @@ class Handler(BaseHTTPRequestHandler):
         code, out = bash("ASTRBOT_SYNC_AFTER_NAPCAT=0 add_napcat_instances 1; write_deploy_info; nohup bash -lc 'sleep 60; cd \"$PROJECT_DIR\"; source lib/ops.sh; sync_astrbot_platforms; write_deploy_info' >/opt/astrbot/logs/remote-plugin-delayed-sync.log 2>&1 &", timeout=900)
         if code != 0:
             audit("remote", "remote.napcat.create_login", {"ok": False}, False)
-            return self.send_api(api(False, {"output": out[-4000:], "occupied": occupied, "last_error": last_error}, "???????", "CREATE_FAILED"), 500)
+            return self.send_api(api(False, {"output": out[-4000:], "occupied": occupied, "last_error": last_error}, "create NapCat failed", "CREATE_FAILED"), 500)
         rows = parse_napcat_index(self.request_origin(), expose_secret=True)
         created = [r for r in rows if r.get("name") not in before_names]
         row = created[0] if created else (rows[-1] if rows else None)
         if not row:
-            return self.send_api(api(False, {"output": out[-4000:], "occupied": occupied, "last_error": last_error}, "???????????????", "NO_NAPCAT"), 500)
+            return self.send_api(api(False, {"output": out[-4000:], "occupied": occupied, "last_error": last_error}, "NapCat index is empty", "NO_NAPCAT"), 500)
         for i in range(8):
             try:
                 bundle = napcat_login_bundle(row)
@@ -1376,7 +1465,7 @@ class Handler(BaseHTTPRequestHandler):
                 last_error = str(e)
                 time.sleep(3 if i < 3 else 6)
         audit("remote", "remote.napcat.create_login.qrcode_failed", {"name": row.get("name"), "error": last_error[:200]}, False)
-        return self.send_api(api(False, {"name": row.get("name"), "output": out[-4000:], "occupied": occupied}, "??????????????????" + last_error, "QRCODE_FAILED"), 500)
+        return self.send_api(api(False, {"name": row.get("name"), "output": out[-4000:], "occupied": occupied}, "QR code failed: " + last_error, "QRCODE_FAILED"), 500)
 
     def astrbot_action(self, user: str):
         action = self.read_json().get("action")

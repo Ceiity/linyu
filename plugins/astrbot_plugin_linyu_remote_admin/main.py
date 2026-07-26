@@ -145,7 +145,10 @@ class Main(Star):
         qrcode_url = str(data.get("qrcode_url") or "")
         name = data.get("display_name") or data.get("name") or "机器人"
         if qrcode_url:
-            action = "复用空闲机器人" if data.get("reused") else "新建机器人"
+            if data.get("recovered"):
+                action = "检测到机器人假在线，已自动重启并恢复"
+            else:
+                action = "复用空闲机器人" if data.get("reused") else "新建机器人"
             yield event.plain_result(f"{action}：{name} 扫码登录二维码已生成。如果图片没有显示，请复制链接到浏览器打开：\n{qrcode_url}")
         else:
             yield event.plain_result(f"{name} 已创建，但没有拿到二维码链接，请稍后再试。")
