@@ -36,12 +36,16 @@ AUDIT_LOG = Path(os.environ.get("PANEL_AUDIT_LOG", str(INSTALL_PREFIX / "logs" /
 STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
 TASK_LOCK = threading.RLock()
 TASKS: dict[str, "Task"] = {}
+REMOTE_LOGIN_LOCK = threading.RLock()
 IP_CACHE = {"public": "", "ts": 0.0}
 IP_GEO_CACHE: dict[str, dict] = {}
 LOGIN_FAILS: dict[str, list[float]] = {}
 LOGIN_LOCKS: dict[str, float] = {}
 NAPCAT_CREDENTIAL_CACHE: dict[str, dict] = {}
 NAPCAT_QR_CACHE: dict[str, dict] = {}
+NAPCAT_LOGIN_ASSIGNMENTS: dict[str, dict] = {}
+NAPCAT_LOGIN_ASSIGNMENT_FILE = Path(os.environ.get("NAPCAT_LOGIN_ASSIGNMENT_FILE", str(INSTALL_PREFIX / "napcat_login_assignments.json")))
+NAPCAT_LOGIN_ASSIGNMENT_TTL = 180
 LOGIN_FAIL_WINDOW_SECONDS = 600
 LOGIN_LOCK_SECONDS = 1800
 LOGIN_LOCK_THRESHOLD = 5
@@ -49,7 +53,7 @@ LOGIN_SLOWDOWN_AFTER = 2
 LOGIN_DUMMY_HASH = "pbkdf2_sha256$180000$7f4b2f1379861d0dfb49e36af27e4f4c$gzQf0xR39bWn5zL6tIRkwQmL8kUmVJYzgbDbRKBS2F0="
 REMOTE_CREATE_TIMES: dict[str, list[float]] = {}
 REMOTE_CREATE_WINDOW_SECONDS = 300
-REMOTE_CREATE_LIMIT = 5
+REMOTE_CREATE_LIMIT = 30
 
 
 def now() -> str:
@@ -787,6 +791,75 @@ def napcat_row(name: str) -> dict:
         if row.get("name") == safe:
             return row
     raise ValueError("机器人不存在：%s" % safe)
+
+
+def requester_key(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"[^0-9A-Za-z_.:@-]", "_", text)[:80]
+    return text or "anonymous"
+
+
+def load_login_assignments() -> dict[str, dict]:
+    global NAPCAT_LOGIN_ASSIGNMENTS
+    if not NAPCAT_LOGIN_ASSIGNMENTS:
+        raw = read_json(NAPCAT_LOGIN_ASSIGNMENT_FILE, {})
+        if isinstance(raw, dict):
+            NAPCAT_LOGIN_ASSIGNMENTS = raw
+    cleanup_login_assignments(write_back=False)
+    return NAPCAT_LOGIN_ASSIGNMENTS
+
+
+def save_login_assignments() -> None:
+    ensure_parent(NAPCAT_LOGIN_ASSIGNMENT_FILE)
+    write_json(NAPCAT_LOGIN_ASSIGNMENT_FILE, NAPCAT_LOGIN_ASSIGNMENTS)
+
+
+def cleanup_login_assignments(write_back: bool = True) -> None:
+    now_ts = time.time()
+    changed = False
+    for key in list(NAPCAT_LOGIN_ASSIGNMENTS.keys()):
+        item = NAPCAT_LOGIN_ASSIGNMENTS.get(key) or {}
+        if float(item.get("expires", 0)) <= now_ts:
+            NAPCAT_LOGIN_ASSIGNMENTS.pop(key, None)
+            changed = True
+    if changed and write_back:
+        save_login_assignments()
+
+
+def assignment_for_requester(requester: str) -> dict | None:
+    assignments = load_login_assignments()
+    item = assignments.get(requester_key(requester))
+    if item and float(item.get("expires", 0)) > time.time() and item.get("name"):
+        return dict(item)
+    return None
+
+
+def assignment_owner(name: str) -> str:
+    assignments = load_login_assignments()
+    now_ts = time.time()
+    for key, item in assignments.items():
+        if item.get("name") == name and float(item.get("expires", 0)) > now_ts:
+            return key
+    return ""
+
+
+def assign_login_slot(requester: str, name: str) -> dict:
+    key = requester_key(requester)
+    item = {"requester": key, "name": safe_name(name), "created": time.time(), "expires": time.time() + NAPCAT_LOGIN_ASSIGNMENT_TTL}
+    NAPCAT_LOGIN_ASSIGNMENTS[key] = item
+    save_login_assignments()
+    return dict(item)
+
+
+def release_login_assignment_by_name(name: str) -> None:
+    safe = safe_name(name)
+    changed = False
+    for key in list(NAPCAT_LOGIN_ASSIGNMENTS.keys()):
+        if NAPCAT_LOGIN_ASSIGNMENTS.get(key, {}).get("name") == safe:
+            NAPCAT_LOGIN_ASSIGNMENTS.pop(key, None)
+            changed = True
+    if changed:
+        save_login_assignments()
 
 
 def http_json_post(url: str, payload: dict | None = None, headers: dict | None = None, timeout: int = 10) -> dict:
@@ -1630,81 +1703,119 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_api(api(False, message="remote auth failed", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
         self.check_remote_rate_limit()
 
-        rows = parse_napcat_index(self.request_origin(), expose_secret=True)
-        occupied = []
-        last_error = ""
-        for row in rows:
-            try:
-                bundle = napcat_login_status_bundle(row)
-                bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
-                bundle["container"] = row.get("name")
-                bundle["server"] = server_brief(self.request_origin())
-                if bundle.get("already_login"):
-                    false_reason = napcat_false_online_reason(row, bundle.get("status") or {})
-                    if false_reason:
-                        restart_napcat_for_fresh_qr(row, false_reason, wait_seconds=22)
-                        bundle = napcat_login_bundle(row)
-                        bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
-                        bundle["container"] = row.get("name")
-                        bundle["server"] = server_brief(self.request_origin())
-                        bundle["reused"] = True
-                        bundle["recovered"] = True
-                        bundle["recover_reason"] = false_reason
-                        if not bundle.get("already_login"):
-                            audit("remote", "remote.napcat.false_online.recovered_qr", {"name": row.get("name"), "reason": false_reason[:120], "requester": str(data.get("requester", ""))[:64]}, True)
-                            return self.send_api(api(True, bundle))
-                    occupied.append({"name": row.get("name"), "display_name": bundle.get("display_name"), "login_name": bundle.get("login_name"), "login_uin": bundle.get("login_uin")})
-                    continue
-                cached = NAPCAT_QR_CACHE.get(str(row.get("name") or ""))
-                if cached and cached.get("expires", 0) > time.time():
-                    bundle = dict(cached.get("bundle") or {})
-                    if bundle:
-                        bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
-                        bundle["container"] = row.get("name")
-                        bundle["server"] = server_brief(self.request_origin())
-                        bundle["reused"] = True
+        with REMOTE_LOGIN_LOCK:
+            requester = requester_key(str(data.get("requester") or self.remote_client_key()))
+            assigned = assignment_for_requester(requester)
+            if assigned:
+                try:
+                    row = napcat_row(str(assigned.get("name") or ""))
+                    bundle = napcat_login_status_bundle(row)
+                    if bundle.get("already_login"):
+                        release_login_assignment_by_name(str(row.get("name") or ""))
+                    else:
+                        cached = NAPCAT_QR_CACHE.get(str(row.get("name") or ""))
+                        bundle = dict((cached or {}).get("bundle") or {}) if cached and cached.get("expires", 0) > time.time() else napcat_login_bundle(row)
+                    bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
+                    bundle["container"] = row.get("name")
+                    bundle["server"] = server_brief(self.request_origin())
+                    bundle["assigned"] = True
+                    bundle["assignment_ttl"] = max(0, int(float(assigned.get("expires", 0)) - time.time()))
+                    audit("remote", "remote.napcat.reuse_assigned_slot", {"name": row.get("name"), "requester": requester}, True)
+                    return self.send_api(api(True, bundle))
+                except Exception:
+                    NAPCAT_LOGIN_ASSIGNMENTS.pop(requester, None)
+                    save_login_assignments()
+            rows = parse_napcat_index(self.request_origin(), expose_secret=True)
+            occupied = []
+            last_error = ""
+            for row in rows:
+                try:
+                    owner = assignment_owner(str(row.get("name") or ""))
+                    if owner and owner != requester:
+                        occupied.append({"name": row.get("name"), "display_name": napcat_display_name(str(row.get("name") or "")), "pending": True})
+                        continue
+                    bundle = napcat_login_status_bundle(row)
+                    bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
+                    bundle["container"] = row.get("name")
+                    bundle["server"] = server_brief(self.request_origin())
+                    if bundle.get("already_login"):
+                        false_reason = napcat_false_online_reason(row, bundle.get("status") or {})
+                        if false_reason:
+                            restart_napcat_for_fresh_qr(row, false_reason, wait_seconds=22)
+                            bundle = napcat_login_bundle(row)
+                            bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
+                            bundle["container"] = row.get("name")
+                            bundle["server"] = server_brief(self.request_origin())
+                            bundle["reused"] = True
+                            bundle["recovered"] = True
+                            bundle["recover_reason"] = false_reason
+                            if not bundle.get("already_login"):
+                                assign_login_slot(requester, str(row.get("name") or ""))
+                                bundle["assigned"] = True
+                                bundle["assignment_ttl"] = NAPCAT_LOGIN_ASSIGNMENT_TTL
+                                audit("remote", "remote.napcat.false_online.recovered_qr", {"name": row.get("name"), "reason": false_reason[:120], "requester": str(data.get("requester", ""))[:64]}, True)
+                                return self.send_api(api(True, bundle))
+                        occupied.append({"name": row.get("name"), "display_name": bundle.get("display_name"), "login_name": bundle.get("login_name"), "login_uin": bundle.get("login_uin")})
+                        continue
+                    cached = NAPCAT_QR_CACHE.get(str(row.get("name") or ""))
+                    if cached and cached.get("expires", 0) > time.time():
+                        bundle = dict(cached.get("bundle") or {})
+                        if bundle:
+                            bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
+                            bundle["container"] = row.get("name")
+                            bundle["server"] = server_brief(self.request_origin())
+                            bundle["reused"] = True
                         bundle["cached"] = True
                         bundle["cache_ttl"] = max(0, int(cached.get("expires", 0) - time.time()))
+                        assign_login_slot(requester, str(row.get("name") or ""))
+                        bundle["assigned"] = True
+                        bundle["assignment_ttl"] = NAPCAT_LOGIN_ASSIGNMENT_TTL
                         audit("remote", "remote.napcat.reuse_cached_qr", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
                         return self.send_api(api(True, bundle))
-                reset_idle_napcat_for_fresh_login(row, "reuse idle slot and clear stale QQ data", wait_seconds=24)
-                bundle = napcat_login_bundle(row)
-                bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
-                bundle["container"] = row.get("name")
-                bundle["server"] = server_brief(self.request_origin())
-                bundle["reused"] = True
-                bundle["fresh_restarted"] = True
-                bundle["clean_reset"] = True
-                audit("remote", "remote.napcat.reuse_login_slot", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
-                return self.send_api(api(True, bundle))
-            except Exception as e:
-                last_error = str(e)
+                    reset_idle_napcat_for_fresh_login(row, "reuse idle slot and clear stale QQ data", wait_seconds=24)
+                    bundle = napcat_login_bundle(row)
+                    bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
+                    bundle["container"] = row.get("name")
+                    bundle["server"] = server_brief(self.request_origin())
+                    bundle["reused"] = True
+                    bundle["fresh_restarted"] = True
+                    bundle["clean_reset"] = True
+                    assign_login_slot(requester, str(row.get("name") or ""))
+                    bundle["assigned"] = True
+                    bundle["assignment_ttl"] = NAPCAT_LOGIN_ASSIGNMENT_TTL
+                    audit("remote", "remote.napcat.reuse_login_slot", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
+                    return self.send_api(api(True, bundle))
+                except Exception as e:
+                    last_error = str(e)
 
-        before_names = {r.get("name") for r in parse_napcat_index(expose_secret=True)}
-        code, out = bash("ASTRBOT_SYNC_AFTER_NAPCAT=0 add_napcat_instances 1; write_deploy_info; nohup bash -lc 'sleep 60; cd \"$PROJECT_DIR\"; source lib/ops.sh; sync_astrbot_platforms; write_deploy_info' >/opt/astrbot/logs/remote-plugin-delayed-sync.log 2>&1 &", timeout=900)
-        if code != 0:
-            audit("remote", "remote.napcat.create_login", {"ok": False}, False)
-            return self.send_api(api(False, {"output": out[-4000:], "occupied": occupied, "last_error": last_error}, "create NapCat failed", "CREATE_FAILED"), 500)
-        rows = parse_napcat_index(self.request_origin(), expose_secret=True)
-        created = [r for r in rows if r.get("name") not in before_names]
-        row = created[0] if created else (rows[-1] if rows else None)
-        if not row:
-            return self.send_api(api(False, {"output": out[-4000:], "occupied": occupied, "last_error": last_error}, "NapCat index is empty", "NO_NAPCAT"), 500)
-        for i in range(8):
-            try:
-                bundle = napcat_login_bundle(row)
-                bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
-                bundle["container"] = row.get("name")
-                bundle["server"] = server_brief(self.request_origin())
-                bundle["reused"] = False
-                bundle["occupied"] = occupied
-                audit("remote", "remote.napcat.create_login", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
-                return self.send_api(api(True, bundle))
-            except Exception as e:
-                last_error = str(e)
-                time.sleep(3 if i < 3 else 6)
-        audit("remote", "remote.napcat.create_login.qrcode_failed", {"name": row.get("name"), "error": last_error[:200]}, False)
-        return self.send_api(api(False, {"name": row.get("name"), "output": out[-4000:], "occupied": occupied}, "QR code failed: " + last_error, "QRCODE_FAILED"), 500)
+            before_names = {r.get("name") for r in parse_napcat_index(expose_secret=True)}
+            code, out = bash("ASTRBOT_SYNC_AFTER_NAPCAT=0 add_napcat_instances 1; write_deploy_info; nohup bash -lc 'sleep 60; cd \"$PROJECT_DIR\"; source lib/ops.sh; sync_astrbot_platforms; write_deploy_info' >/opt/astrbot/logs/remote-plugin-delayed-sync.log 2>&1 &", timeout=900)
+            if code != 0:
+                audit("remote", "remote.napcat.create_login", {"ok": False}, False)
+                return self.send_api(api(False, {"output": out[-4000:], "occupied": occupied, "last_error": last_error}, "create NapCat failed", "CREATE_FAILED"), 500)
+            rows = parse_napcat_index(self.request_origin(), expose_secret=True)
+            created = [r for r in rows if r.get("name") not in before_names]
+            row = created[0] if created else (rows[-1] if rows else None)
+            if not row:
+                return self.send_api(api(False, {"output": out[-4000:], "occupied": occupied, "last_error": last_error}, "NapCat index is empty", "NO_NAPCAT"), 500)
+            for i in range(8):
+                try:
+                    bundle = napcat_login_bundle(row)
+                    bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
+                    bundle["container"] = row.get("name")
+                    bundle["server"] = server_brief(self.request_origin())
+                    bundle["reused"] = False
+                    bundle["occupied"] = occupied
+                    assign_login_slot(requester, str(row.get("name") or ""))
+                    bundle["assigned"] = True
+                    bundle["assignment_ttl"] = NAPCAT_LOGIN_ASSIGNMENT_TTL
+                    audit("remote", "remote.napcat.create_login", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
+                    return self.send_api(api(True, bundle))
+                except Exception as e:
+                    last_error = str(e)
+                    time.sleep(3 if i < 3 else 6)
+            audit("remote", "remote.napcat.create_login.qrcode_failed", {"name": row.get("name"), "error": last_error[:200]}, False)
+            return self.send_api(api(False, {"name": row.get("name"), "output": out[-4000:], "occupied": occupied}, "QR code failed: " + last_error, "QRCODE_FAILED"), 500)
 
     def remote_napcat_login_status(self):
         data = self.read_json()
@@ -1725,6 +1836,8 @@ class Handler(BaseHTTPRequestHandler):
                 login_name, login_uin = napcat_login_identity(info.get("data") or {})
                 bundle["login_name"] = bundle.get("login_name") or login_name
                 bundle["login_uin"] = bundle.get("login_uin") or login_uin
+        if bundle.get("already_login"):
+            release_login_assignment_by_name(name)
         audit("remote", "remote.napcat.login_status", {"name": name, "already_login": bool(bundle.get("already_login"))}, True)
         return self.send_api(api(True, bundle))
 
