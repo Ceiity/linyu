@@ -1438,7 +1438,12 @@ class Handler(BaseHTTPRequestHandler):
                             return self.send_api(api(True, bundle))
                     occupied.append({"name": row.get("name"), "display_name": bundle.get("display_name"), "login_name": bundle.get("login_name"), "login_uin": bundle.get("login_uin")})
                     continue
+                restart_napcat_for_fresh_qr(row, "reuse idle slot and reset stale QR/session", wait_seconds=18)
+                bundle = napcat_login_bundle(row)
+                bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
+                bundle["container"] = row.get("name")
                 bundle["reused"] = True
+                bundle["fresh_restarted"] = True
                 audit("remote", "remote.napcat.reuse_login_slot", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
                 return self.send_api(api(True, bundle))
             except Exception as e:
