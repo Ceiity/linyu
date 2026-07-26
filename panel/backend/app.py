@@ -1309,7 +1309,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_api(api(False, message="远程调用鉴权失败", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
         self.check_remote_rate_limit()
         before_names = {r.get("name") for r in parse_napcat_index(expose_secret=True)}
-        code, out = bash("add_napcat_instances 1; repair_astrbot_napcat_connection || true; write_deploy_info", timeout=900)
+        code, out = bash("ASTRBOT_SYNC_AFTER_NAPCAT=0 add_napcat_instances 1; write_deploy_info; nohup bash -lc 'sleep 60; cd \"$PROJECT_DIR\"; source lib/ops.sh; sync_astrbot_platforms; write_deploy_info' >/opt/astrbot/logs/remote-plugin-delayed-sync.log 2>&1 &", timeout=900)
         if code != 0:
             audit("remote", "remote.napcat.create_login", {"ok": False}, False)
             return self.send_api(api(False, {"output": out[-4000:]}, "创建机器人失败", "CREATE_FAILED"), 500)

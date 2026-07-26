@@ -225,7 +225,11 @@ add_napcat_instances(){
   rmdir "$NAPCAT_BASE_DIR/.creating" 2>/dev/null || true
   save_state_var NAPCAT_IMAGE "$NAPCAT_IMAGE"
   sync_napcat_reverse_configs
-  sync_astrbot_platforms
+  if [[ "${ASTRBOT_SYNC_AFTER_NAPCAT:-1}" == "1" ]]; then
+    sync_astrbot_platforms
+  else
+    warn "Skipped immediate AstrBot platform sync because ASTRBOT_SYNC_AFTER_NAPCAT=${ASTRBOT_SYNC_AFTER_NAPCAT}; delayed sync should handle it."
+  fi
 }
 
 delete_napcat_instance(){
