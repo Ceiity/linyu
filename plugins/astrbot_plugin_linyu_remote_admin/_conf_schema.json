@@ -31,8 +31,13 @@
     "default": ["\u7533\u8bf7\u767b\u5f55"]
   },
   "cooldown_seconds": {
-    "description": "Cooldown seconds for each user.",
+    "description": "Reserved global cooldown seconds.",
     "type": "int",
     "default": 300
+  },
+  "qr_retry_seconds": {
+    "description": "Seconds before the same user can request a fresh QR code again. Default 60 seconds.",
+    "type": "int",
+    "default": 60
   }
 }

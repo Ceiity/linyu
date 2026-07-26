@@ -25,3 +25,8 @@ After the QR image is sent, the plugin polls login status for about 3 minutes. I
 Avatar URL format:
 
 `http://q.qlogo.cn/headimg_dl?dst_uin=<QQ>&spec=640&img_type=jpg`
+
+QR refresh behavior:
+
+- `qr_retry_seconds` defaults to 60 seconds. If the first QR code expires or was not scanned in time, the user can send the trigger again after 60 seconds to get a fresh QR code.
+- The panel remote API still has server-side rate limiting to prevent abuse.
