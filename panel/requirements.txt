@@ -1,2 +1,1 @@
-﻿qrcode>=7.4.2
-
+qrcode[pil]>=7.4.2

@@ -329,3 +329,35 @@ Web 控制台不会写死 IP、域名或 localhost。后端会根据当前请求
 ### 实时日志
 
 日志中心使用 SSE 长连接实时推送新增日志，支持自动滚动、暂停滚动、关键词过滤、错误高亮、断线重连和全屏查看，不再依赖疯狂轮询。
+
+
+## QQ 内创建扫码机器人
+
+项目内置 AstrBot 插件：`plugins/astrbot_plugin_linyu_remote_admin`。
+
+部署时会自动复制到 AstrBot 插件目录。配置好主人 QQ 后，你可以在 QQ 私聊或群聊里直接发送：
+
+```text
+登录
+```
+
+插件会调用 Web 面板远程 API，自动创建一个 NapCat 机器人，并把扫码登录二维码发回聊天窗口。
+
+安全设计：
+
+- Web 面板远程 API 使用独立 `remote_api_token` 鉴权，不使用网页登录态。
+- 插件默认必须配置 `owner_ids`，没有配置主人 QQ 时不会允许陌生人创建机器人。
+- 远程创建接口有速率限制，防止被刷实例。
+- 面板 API 不会把 NapCat Token 暴露给网页列表或普通登录响应。
+
+插件配置文件位置：
+
+```bash
+/opt/astrbot/data/config/astrbot_plugin_linyu_remote_admin_config.json
+```
+
+如果 AstrBot 在 Docker 容器里运行，`server_url` 不要写 `127.0.0.1`，建议写宿主机内网地址，例如：
+
+```text
+http://服务器内网IP:7070
+```

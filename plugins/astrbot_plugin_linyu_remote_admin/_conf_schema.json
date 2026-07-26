@@ -1,0 +1,33 @@
+{
+  "server_url": {
+    "description": "AstrBot-Deploy Web 面板地址。Docker 内运行 AstrBot 时建议填写宿主机内网地址，例如 http://172.17.0.1:7070 或 http://服务器内网IP:7070。",
+    "type": "string",
+    "default": "http://127.0.0.1:7070"
+  },
+  "remote_token": {
+    "description": "远程 API Token，需要与 /opt/astrbot/panel_config.json 里的 remote_api_token 一致。",
+    "type": "string",
+    "default": "",
+    "obvious_hint": true
+  },
+  "owner_ids": {
+    "description": "允许使用创建机器人命令的 QQ 号列表。留空时默认拒绝，防止陌生人刷机器人。",
+    "type": "list",
+    "default": []
+  },
+  "allowed_groups": {
+    "description": "允许使用命令的群号列表。留空表示不限制群，但仍会检查 owner_ids。",
+    "type": "list",
+    "default": []
+  },
+  "triggers": {
+    "description": "触发词。用户直接发送其中任意一条文本即可触发，不需要 / 前缀。",
+    "type": "list",
+    "default": ["登录", "扫码登录", "创建机器人", "机器人登录"]
+  },
+  "cooldown_seconds": {
+    "description": "同一用户触发创建机器人的冷却时间，单位秒。",
+    "type": "int",
+    "default": 300
+  }
+}

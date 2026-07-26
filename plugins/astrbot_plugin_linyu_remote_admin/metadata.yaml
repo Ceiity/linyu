@@ -1,0 +1,10 @@
+name: astrbot_plugin_linyu_remote_admin
+display_name: 淋雨远程机器人管理
+desc: 在 QQ 群聊或私聊中发送“登录”，自动创建 NapCat 机器人并返回扫码登录二维码。
+short_desc: QQ 内一键创建 NapCat 扫码机器人
+version: v1.0.0
+author: linyu
+repo: https://github.com/Ceiity/linyu
+support_platforms:
+  - aiocqhttp
+astrbot_version: ">=4.16,<5"

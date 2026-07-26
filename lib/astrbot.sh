@@ -206,3 +206,62 @@ apply_astrbot_default_config(){
   fi
   success "AstrBot default config applied: $dst"
 }
+
+install_linyu_remote_plugin(){
+  local src="$PROJECT_DIR/plugins/astrbot_plugin_linyu_remote_admin"
+  local dst="$DATA_DIR/plugins/astrbot_plugin_linyu_remote_admin"
+  local cfg_dir="$DATA_DIR/config"
+  local panel_cfg="$INSTALL_PREFIX/panel_config.json"
+  local remote_token server_url plugin_cfg
+  [[ -d "$src" ]] || { warn "Linyu remote plugin source not found: $src"; return 0; }
+  mkdir -p "$dst" "$cfg_dir"
+  cp -a "$src/." "$dst/"
+  remote_token="$(
+    PANEL_CONFIG_PATH="$panel_cfg" python3 - <<'PY'
+import json, os, secrets
+path = os.environ["PANEL_CONFIG_PATH"]
+data = {}
+if os.path.exists(path):
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+token = str(data.get("remote_api_token") or "")
+if not token:
+    token = secrets.token_urlsafe(24)
+    data["remote_api_enabled"] = True
+    data["remote_api_token"] = token
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
+print(token)
+PY
+  )"
+  server_url="http://$(private_ip):${WEB_ADMIN_PORT:-7070}"
+  plugin_cfg="$cfg_dir/astrbot_plugin_linyu_remote_admin_config.json"
+  if [[ ! -f "$plugin_cfg" ]]; then
+    cat > "$plugin_cfg" <<JSON
+{
+  "server_url": "$server_url",
+  "remote_token": "$remote_token",
+  "owner_ids": [],
+  "allowed_groups": [],
+  "triggers": ["登录", "扫码登录", "创建机器人", "机器人登录"],
+  "cooldown_seconds": 300
+}
+JSON
+    chmod 600 "$plugin_cfg" || true
+  fi
+  if container_running "$ASTRBOT_CONTAINER"; then
+    docker restart "$ASTRBOT_CONTAINER" >/dev/null || true
+    wait_container "$ASTRBOT_CONTAINER" 180 || warn "AstrBot did not restart cleanly after plugin install."
+  fi
+  success "Linyu QQ remote plugin installed: $dst"
+}

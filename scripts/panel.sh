@@ -33,6 +33,7 @@ setup_panel(){
   mkdir -p "$INSTALL_PREFIX/uploads" "$INSTALL_PREFIX/logs"
   if ! python3 - <<'PY' >/dev/null 2>&1
 import qrcode
+import PIL.Image
 PY
   then
     apt-get update -y >/dev/null

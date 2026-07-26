@@ -5,6 +5,7 @@ import base64
 import cgi
 import hashlib
 import hmac
+import io
 import json
 import mimetypes
 import ipaddress
@@ -44,6 +45,9 @@ LOGIN_LOCK_SECONDS = 1800
 LOGIN_LOCK_THRESHOLD = 5
 LOGIN_SLOWDOWN_AFTER = 2
 LOGIN_DUMMY_HASH = "pbkdf2_sha256$180000$7f4b2f1379861d0dfb49e36af27e4f4c$gzQf0xR39bWn5zL6tIRkwQmL8kUmVJYzgbDbRKBS2F0="
+REMOTE_CREATE_TIMES: dict[str, list[float]] = {}
+REMOTE_CREATE_WINDOW_SECONDS = 300
+REMOTE_CREATE_LIMIT = 5
 
 
 def now() -> str:
@@ -115,6 +119,8 @@ def default_config() -> dict:
         "max_upload_mb": 256,
         "network_name": "astrbot_network",
         "default_reverse_ws_token": "yuyu521521",
+        "remote_api_enabled": True,
+        "remote_api_token": os.environ.get("PANEL_REMOTE_TOKEN") or secrets.token_urlsafe(24),
         "public_base_url": "",
         "allow_dangerous": False,
         "theme_color": "#2563eb",
@@ -127,9 +133,16 @@ def load_config() -> dict:
     if not cfg:
         cfg = default_config()
         write_json(PANEL_CONFIG, cfg)
+        return cfg
     base = default_config()
-    base.update(cfg)
-    return base
+    changed = False
+    for key, value in base.items():
+        if key not in cfg:
+            cfg[key] = value
+            changed = True
+    if changed:
+        write_json(PANEL_CONFIG, cfg)
+    return cfg
 
 
 def save_config_patch(patch: dict) -> dict:
@@ -163,7 +176,7 @@ def save_config_patch(patch: dict) -> dict:
 
 def sanitize_config(cfg: dict) -> dict:
     out = dict(cfg)
-    for key in ("username", "password_hash", "session_secret", "initial_password"):
+    for key in ("username", "password_hash", "session_secret", "initial_password", "remote_api_token"):
         out.pop(key, None)
     return out
 
@@ -627,6 +640,16 @@ def parse_napcat_index(origin: str | None = None, expose_secret: bool = False) -
     return rows
 
 
+def napcat_display_name(name: str) -> str:
+    m = re.search(r"(\d+)$", str(name or ""))
+    if m:
+        try:
+            return "机器人%d" % int(m.group(1))
+        except Exception:
+            pass
+    return str(name or "机器人")
+
+
 def napcat_row(name: str) -> dict:
     safe = safe_name(name)
     for row in parse_napcat_index(expose_secret=True):
@@ -685,6 +708,48 @@ def qr_svg_for_text(text_value: str) -> str:
         raise RuntimeError("\u670d\u52a1\u5668\u7f3a\u5c11\u4e8c\u7ef4\u7801\u5e93\uff1a\u8bf7\u5b89\u88c5 python3-qrcode \u6216 pip install qrcode\u3002\u539f\u59cb\u4e8c\u7ef4\u7801\u5185\u5bb9\uff1a%s" % text_value) from e
     img = qrcode.make(text_value, image_factory=qrcode.image.svg.SvgPathImage, box_size=10, border=2)
     return img.to_string(encoding="unicode")
+
+
+def qr_png_base64_for_text(text_value: str) -> str:
+    try:
+        import qrcode
+    except Exception as e:
+        raise RuntimeError("服务器缺少二维码库：请安装 qrcode[pil]。") from e
+    img = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=2)
+    img.add_data(text_value)
+    img.make(fit=True)
+    pil_img = img.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    pil_img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def napcat_login_bundle(row: dict) -> dict:
+    status = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
+    if int(status.get("code", -1)) == 0 and (status.get("data") or {}).get("isLogin"):
+        info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
+        return {
+            "name": row.get("name"),
+            "display_name": napcat_display_name(str(row.get("name", ""))),
+            "already_login": True,
+            "status": status,
+            "login_info": (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {},
+        }
+    res = napcat_webui_call(row, "/QQLogin/GetQQLoginQrcode")
+    if int(res.get("code", -1)) != 0:
+        raise RuntimeError(str(res.get("message", "获取二维码失败")))
+    qrcode_url = (res.get("data") or {}).get("qrcode") or ""
+    if not qrcode_url:
+        raise RuntimeError("NapCat 没有返回二维码链接，可能正在初始化或已经登录。")
+    return {
+        "name": row.get("name"),
+        "display_name": napcat_display_name(str(row.get("name", ""))),
+        "already_login": False,
+        "qrcode_url": qrcode_url,
+        "svg": qr_svg_for_text(qrcode_url),
+        "qrcode_png_base64": qr_png_base64_for_text(qrcode_url),
+        "status": res,
+    }
 
 
 def system_metrics() -> dict:
@@ -980,6 +1045,27 @@ class Handler(BaseHTTPRequestHandler):
         b = self.read_body()
         return json.loads(b.decode("utf-8")) if b else {}
 
+    def remote_client_key(self) -> str:
+        raw = self.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip() or self.client_address[0]
+        return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()
+
+    def remote_auth_ok(self, data: dict) -> bool:
+        cfg = load_config()
+        if not bool(cfg.get("remote_api_enabled", True)):
+            return False
+        expected = str(cfg.get("remote_api_token") or "")
+        supplied = str(self.headers.get("X-Remote-Token") or data.get("remote_token") or data.get("token") or "")
+        return bool(expected) and hmac.compare_digest(supplied, expected)
+
+    def check_remote_rate_limit(self) -> None:
+        key = self.remote_client_key()
+        now_ts = time.time()
+        items = [t for t in REMOTE_CREATE_TIMES.get(key, []) if now_ts - t < REMOTE_CREATE_WINDOW_SECONDS]
+        if len(items) >= REMOTE_CREATE_LIMIT:
+            raise ValueError("创建太频繁，请稍后再试。")
+        items.append(now_ts)
+        REMOTE_CREATE_TIMES[key] = items
+
     def make_session(self, user: str) -> str:
         cfg = load_config()
         payload = base64.urlsafe_b64encode(json.dumps({"sid": secrets.token_urlsafe(18), "exp": time.time() + 86400 * 7}).encode()).decode().rstrip("=")
@@ -1080,6 +1166,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             p = urlparse(self.path)
+            if p.path == "/api/remote/napcat/create-login":
+                return self.remote_napcat_create_login()
             if p.path == "/api/login":
                 return self.login()
             user = self.require_auth()
@@ -1214,6 +1302,36 @@ class Handler(BaseHTTPRequestHandler):
         audit("anonymous", "login.failed", {"ip_hash": login_key[:12], "fail_count": fail_count}, False)
         self.send_api(api(False, message="账号或密码错误", code="BAD_LOGIN"), 401)
 
+    def remote_napcat_create_login(self):
+        data = self.read_json()
+        if not self.remote_auth_ok(data):
+            audit("remote", "remote.napcat.create_login.denied", {"ip_hash": self.remote_client_key()[:12]}, False)
+            return self.send_api(api(False, message="远程调用鉴权失败", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
+        self.check_remote_rate_limit()
+        before_names = {r.get("name") for r in parse_napcat_index(expose_secret=True)}
+        code, out = bash("add_napcat_instances 1; repair_astrbot_napcat_connection || true; write_deploy_info", timeout=900)
+        if code != 0:
+            audit("remote", "remote.napcat.create_login", {"ok": False}, False)
+            return self.send_api(api(False, {"output": out[-4000:]}, "创建机器人失败", "CREATE_FAILED"), 500)
+        rows = parse_napcat_index(self.request_origin(), expose_secret=True)
+        created = [r for r in rows if r.get("name") not in before_names]
+        row = created[0] if created else (rows[-1] if rows else None)
+        if not row:
+            return self.send_api(api(False, {"output": out[-4000:]}, "机器人索引为空，无法生成二维码", "NO_NAPCAT"), 500)
+        last_error = ""
+        for i in range(8):
+            try:
+                bundle = napcat_login_bundle(row)
+                bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
+                bundle["container"] = row.get("name")
+                audit("remote", "remote.napcat.create_login", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
+                return self.send_api(api(True, bundle))
+            except Exception as e:
+                last_error = str(e)
+                time.sleep(3 if i < 3 else 6)
+        audit("remote", "remote.napcat.create_login.qrcode_failed", {"name": row.get("name"), "error": last_error[:200]}, False)
+        return self.send_api(api(False, {"name": row.get("name"), "output": out[-4000:]}, "机器人已创建，但二维码暂时获取失败：" + last_error, "QRCODE_FAILED"), 500)
+
     def astrbot_action(self, user: str):
         action = self.read_json().get("action")
         mapping = {"start": ["start", "astrbot"], "stop": ["stop", "astrbot"], "restart": ["restart", "astrbot"]}
@@ -1306,7 +1424,7 @@ class Handler(BaseHTTPRequestHandler):
         )
         if count > 0:
             script += "add_napcat_instances %d; " % count
-        script += "repair_astrbot_napcat_connection; write_deploy_info"
+        script += "repair_astrbot_napcat_connection; install_linyu_remote_plugin; write_deploy_info"
         t = create_task("初始化部署 AstrBot + NapCat", "deploy.start", task_shell, user, "开始初始化部署", script, 2400)
         self.send_api(api(True, t.to_dict()))
 
