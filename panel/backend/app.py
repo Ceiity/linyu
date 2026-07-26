@@ -37,6 +37,7 @@ STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
 TASK_LOCK = threading.RLock()
 TASKS: dict[str, "Task"] = {}
 IP_CACHE = {"public": "", "ts": 0.0}
+IP_GEO_CACHE: dict[str, dict] = {}
 LOGIN_FAILS: dict[str, list[float]] = {}
 LOGIN_LOCKS: dict[str, float] = {}
 NAPCAT_CREDENTIAL_CACHE: dict[str, dict] = {}
@@ -392,14 +393,73 @@ def os_pretty_name() -> str:
         return "Linux"
 
 
+def ip_geo(ip: str) -> dict:
+    ip = str(ip or "").strip()
+    if not ip or ip.startswith(("127.", "10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")):
+        return {}
+    cached = IP_GEO_CACHE.get(ip)
+    if cached and time.time() - float(cached.get("ts", 0)) < 86400:
+        return dict(cached.get("data") or {})
+    try:
+        url = "https://whois.pconline.com.cn/ipJson.jsp?json=true&ip=%s" % quote(ip)
+        with urlrequest.urlopen(url, timeout=3) as resp:
+            raw = resp.read()
+        text = raw.decode("gbk", errors="replace")
+        data = json.loads(text)
+        if not data.get("err"):
+            geo = {
+                "country": "中国",
+                "region": str(data.get("pro") or "").strip(),
+                "city": str(data.get("city") or "").strip(),
+                "isp": str(data.get("addr") or "").replace(str(data.get("pro") or ""), "").replace(str(data.get("city") or ""), "").strip(),
+            }
+            IP_GEO_CACHE[ip] = {"ts": time.time(), "data": geo}
+            return geo
+    except Exception:
+        pass
+    try:
+        url = "http://ip-api.com/json/%s?lang=zh-CN&fields=status,country,regionName,city,isp,query" % quote(ip)
+        with urlrequest.urlopen(url, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        if data.get("status") == "success":
+            geo = {
+                "country": str(data.get("country") or ""),
+                "region": str(data.get("regionName") or ""),
+                "city": str(data.get("city") or ""),
+                "isp": str(data.get("isp") or ""),
+            }
+            IP_GEO_CACHE[ip] = {"ts": time.time(), "data": geo}
+            return geo
+    except Exception:
+        pass
+    IP_GEO_CACHE[ip] = {"ts": time.time(), "data": {}}
+    return {}
+
+
+def format_login_location(ip: str, origin: str | None = None) -> str:
+    ip = str(ip or "").strip()
+    geo = ip_geo(ip)
+    parts = [x for x in [geo.get("country"), geo.get("region"), geo.get("city")] if x]
+    area = " · ".join(dict.fromkeys(parts))
+    isp = geo.get("isp") or ""
+    if area and isp:
+        return "%s（%s / %s）" % (ip, area, isp)
+    if area:
+        return "%s（%s）" % (ip, area)
+    return ip or str(origin or "未知")
+
+
 def server_brief(origin: str | None = None) -> dict:
     origin = origin or public_origin()
+    pub = public_ip()
+    geo = ip_geo(pub)
     return {
         "system": os_pretty_name(),
-        "public_ip": public_ip(),
+        "public_ip": pub,
         "private_ip": private_ip(),
         "panel_url": origin,
-        "login_location": public_ip() or origin,
+        "geo": geo,
+        "login_location": format_login_location(pub, origin),
     }
 
 
