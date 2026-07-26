@@ -86,7 +86,7 @@ generate_napcat_config(){
   dir="$NAPCAT_BASE_DIR/$name"
   mkdir -p "$dir/config" "$dir/ntqq" "$dir/logs" "$dir/plugins"
   cat > "$dir/config/webui.json" <<EOF
-{"host":"0.0.0.0","port":6099,"token":"${token}","loginRate":3}
+{"host":"0.0.0.0","port":6099,"token":"${token}","loginRate":60}
 EOF
 cat > "$dir/config/onebot11.json" <<EOF
 {"network":{"httpServers":[],"httpClients":[],"websocketServers":[],"websocketClients":[{"name":"AstrBotReverseWs","enable":true,"url":"ws://astrbot:${astrbot_ws_port}/ws","messagePostFormat":"array","reportSelfMessage":false,"reconnectInterval":5000,"token":"${ASTRBOT_REVERSE_WS_TOKEN}","debug":false,"heartInterval":30000}]},"musicSignUrl":"","enableLocalFile2Url":false,"parseMultMsg":false}

@@ -40,6 +40,7 @@ IP_CACHE = {"public": "", "ts": 0.0}
 LOGIN_FAILS: dict[str, list[float]] = {}
 LOGIN_LOCKS: dict[str, float] = {}
 NAPCAT_CREDENTIAL_CACHE: dict[str, dict] = {}
+NAPCAT_QR_CACHE: dict[str, dict] = {}
 LOGIN_FAIL_WINDOW_SECONDS = 600
 LOGIN_LOCK_SECONDS = 1800
 LOGIN_LOCK_THRESHOLD = 5
@@ -679,6 +680,8 @@ def napcat_webui_credential(row: dict, force_refresh: bool = False) -> str:
     token_hash = hashlib.sha256((token + ".napcat").encode("utf-8")).hexdigest()
     cache = NAPCAT_CREDENTIAL_CACHE.get(name)
     now_ts = time.time()
+    if cache and cache.get("rate_limited_until", 0) > now_ts:
+        raise RuntimeError("NapCat WebUI 登录限速中，请稍等 %d 秒后再试。" % int(cache.get("rate_limited_until", 0) - now_ts + 1))
     if not force_refresh and cache and cache.get("hash") == token_hash and cache.get("expires", 0) > now_ts + 60:
         return str(cache["credential"])
     port = str(row["webui_port"])
@@ -686,6 +689,7 @@ def napcat_webui_credential(row: dict, force_refresh: bool = False) -> str:
     if int(res.get("code", -1)) != 0:
         msg = str(res.get("message", "unknown"))
         if "rate" in msg.lower():
+            NAPCAT_CREDENTIAL_CACHE[name] = {"hash": token_hash, "rate_limited_until": now_ts + 75}
             raise RuntimeError("NapCat WebUI \u767b\u5f55\u592a\u9891\u7e41\uff0c\u5df2\u89e6\u53d1\u9650\u6d41\u3002\u5f53\u524d\u5b9e\u4f8b\u9700\u8981\u7a0d\u7b49 1-3 \u5206\u949f\uff0c\u6216\u91cd\u542f\u8be5\u673a\u5668\u4eba\u540e\u518d\u70b9\u626b\u7801\u767b\u5f55\u3002")
         raise RuntimeError("NapCat WebUI \u9274\u6743\u5931\u8d25\uff1a%s" % msg)
     cred = (res.get("data") or {}).get("Credential")
@@ -760,6 +764,7 @@ def napcat_false_online_reason(row: dict, login_status: dict | None = None) -> s
 def restart_napcat_for_fresh_qr(row: dict, reason: str, wait_seconds: int = 18) -> None:
     name = safe_name(str(row.get("name", "")))
     NAPCAT_CREDENTIAL_CACHE.pop(name, None)
+    NAPCAT_QR_CACHE.pop(name, None)
     docker(["restart", name], timeout=120)
     deadline = time.time() + max(5, wait_seconds)
     port = str(row.get("webui_port") or "")
@@ -784,6 +789,7 @@ def reset_idle_napcat_for_fresh_login(row: dict, reason: str = "reset idle login
     ntqq_dir = inst_dir / "ntqq"
     cfg_dir = inst_dir / "config"
     NAPCAT_CREDENTIAL_CACHE.pop(name, None)
+    NAPCAT_QR_CACHE.pop(name, None)
     docker(["stop", name], timeout=120)
     if ntqq_dir.exists():
         for child in ntqq_dir.iterdir():
@@ -835,8 +841,18 @@ def qr_png_base64_for_text(text_value: str) -> str:
 
 
 def napcat_login_bundle(row: dict) -> dict:
+    name = str(row.get("name") or "")
+    cached = NAPCAT_QR_CACHE.get(name)
+    now_ts = time.time()
+    if cached and cached.get("expires", 0) > now_ts:
+        data = dict(cached.get("bundle") or {})
+        if data:
+            data["cached"] = True
+            data["cache_ttl"] = max(0, int(cached.get("expires", 0) - now_ts))
+            return data
     status = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
     if int(status.get("code", -1)) == 0 and (status.get("data") or {}).get("isLogin"):
+        NAPCAT_QR_CACHE.pop(name, None)
         info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
         login_info = (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {}
         login_name, login_uin = napcat_login_identity(login_info)
@@ -857,7 +873,7 @@ def napcat_login_bundle(row: dict) -> dict:
     qrcode_url = (res.get("data") or {}).get("qrcode") or ""
     if not qrcode_url:
         raise RuntimeError("NapCat 没有返回二维码链接，可能正在初始化或已经登录。")
-    return {
+    bundle = {
         "name": row.get("name"),
         "display_name": napcat_display_name(str(row.get("name", ""))),
         "already_login": False,
@@ -866,12 +882,16 @@ def napcat_login_bundle(row: dict) -> dict:
         "qrcode_png_base64": qr_png_base64_for_text(qrcode_url),
         "status": res,
     }
+    NAPCAT_QR_CACHE[name] = {"bundle": dict(bundle), "expires": time.time() + 60}
+    return bundle
 
 
 def napcat_login_status_bundle(row: dict) -> dict:
     """只检查登录状态，不刷新二维码，避免轮询把用户正在扫码的二维码顶掉。"""
+    name = str(row.get("name") or "")
     status = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
     if int(status.get("code", -1)) == 0 and (status.get("data") or {}).get("isLogin"):
+        NAPCAT_QR_CACHE.pop(name, None)
         info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
         login_info = (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {}
         login_name, login_uin = napcat_login_identity(login_info)
@@ -1480,7 +1500,7 @@ class Handler(BaseHTTPRequestHandler):
         last_error = ""
         for row in rows:
             try:
-                bundle = napcat_login_bundle(row)
+                bundle = napcat_login_status_bundle(row)
                 bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
                 bundle["container"] = row.get("name")
                 if bundle.get("already_login"):
@@ -1498,6 +1518,17 @@ class Handler(BaseHTTPRequestHandler):
                             return self.send_api(api(True, bundle))
                     occupied.append({"name": row.get("name"), "display_name": bundle.get("display_name"), "login_name": bundle.get("login_name"), "login_uin": bundle.get("login_uin")})
                     continue
+                cached = NAPCAT_QR_CACHE.get(str(row.get("name") or ""))
+                if cached and cached.get("expires", 0) > time.time():
+                    bundle = dict(cached.get("bundle") or {})
+                    if bundle:
+                        bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
+                        bundle["container"] = row.get("name")
+                        bundle["reused"] = True
+                        bundle["cached"] = True
+                        bundle["cache_ttl"] = max(0, int(cached.get("expires", 0) - time.time()))
+                        audit("remote", "remote.napcat.reuse_cached_qr", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
+                        return self.send_api(api(True, bundle))
                 reset_idle_napcat_for_fresh_login(row, "reuse idle slot and clear stale QQ data", wait_seconds=24)
                 bundle = napcat_login_bundle(row)
                 bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
