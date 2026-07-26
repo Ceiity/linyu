@@ -242,21 +242,21 @@ class Main(Star):
                     yield event.image_result(await self._download_avatar(str(data.get("login_uin"))))
                 except Exception:
                     logger.exception("QQ avatar send failed")
-            yield event.plain_result(f"{data.get('display_name') or data.get('name') or '\u673a\u5668\u4eba'} \u5df2\u7ecf\u767b\u5f55\uff1a{who}{extra}\uff0c\u4e0d\u9700\u8981\u91cd\u590d\u626b\u7801\u3002")
+            yield event.plain_result(f"\u5df2\u7ecf\u767b\u5f55\uff1a{who}{extra}\uff0c\u4e0d\u9700\u8981\u91cd\u590d\u626b\u7801\u3002")
             return
         png = str(data.get("qrcode_png_base64") or "")
         name = data.get("display_name") or data.get("name") or "\u673a\u5668\u4eba"
         if not png:
-            yield event.plain_result(f"{name} \u4e8c\u7ef4\u7801\u6682\u65f6\u6ca1\u6709\u751f\u6210\uff0c\u8bf7\u7a0d\u540e\u518d\u7533\u8bf7\u3002")
+            yield event.plain_result("\u4e8c\u7ef4\u7801\u6682\u65f6\u6ca1\u6709\u751f\u6210\uff0c\u8bf7\u7a0d\u540e\u518d\u7533\u8bf7\u3002")
             return
         try:
             path = Path(tempfile.gettempdir()) / f"linyu-napcat-login-{int(time.time())}.png"
             path.write_bytes(base64.b64decode(png))
             yield event.image_result(str(path))
             if data.get("recovered"):
-                yield event.plain_result(f"\u68c0\u6d4b\u5230 {name} \u5047\u5728\u7ebf\uff0c\u5df2\u81ea\u52a8\u91cd\u542f\u5e76\u751f\u6210\u65b0\u4e8c\u7ef4\u7801\u3002")
+                yield event.plain_result("\u68c0\u6d4b\u5230\u767b\u5f55\u72b6\u6001\u5f02\u5e38\uff0c\u5df2\u81ea\u52a8\u91cd\u542f\u5e76\u751f\u6210\u65b0\u4e8c\u7ef4\u7801\u3002")
             else:
-                yield event.plain_result(f"{name} \u4e8c\u7ef4\u7801\u5df2\u751f\u6210\uff0c\u8bf7\u626b\u7801\u767b\u5f55\u3002")
+                yield event.plain_result("\u4e8c\u7ef4\u7801\u5df2\u751f\u6210\uff0c\u8bf7\u626b\u7801\u767b\u5f55\u3002")
             status = await self._wait_login_success(str(data.get("container") or data.get("name") or ""), timeout_seconds=180, interval_seconds=5)
             if status:
                 login_name = status.get("login_name") or ""
@@ -268,10 +268,10 @@ class Main(Star):
                         yield event.image_result(await self._download_avatar(login_uin))
                     except Exception:
                         logger.exception("QQ avatar send failed")
-                yield event.plain_result(f"{name} \u767b\u5f55\u6210\u529f\uff1a{who}{extra}")
+                yield event.plain_result(f"\u767b\u5f55\u6210\u529f\uff1a{who}{extra}")
         except Exception:
             logger.exception("QR image send failed")
-            yield event.plain_result(f"{name} \u4e8c\u7ef4\u7801\u56fe\u7247\u53d1\u9001\u5931\u8d25\uff0c\u8bf7\u6253\u5f00 Web \u9762\u677f\u626b\u7801\u3002")
+            yield event.plain_result("\u4e8c\u7ef4\u7801\u56fe\u7247\u53d1\u9001\u5931\u8d25\uff0c\u8bf7\u6253\u5f00 Web \u9762\u677f\u626b\u7801\u3002")
 
     async def terminate(self):
         self.cooldowns.clear()
