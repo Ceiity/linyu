@@ -133,7 +133,9 @@ class Main(Star):
             yield event.plain_result(f"创建失败：{e}")
             return
         if data.get("already_login"):
-            yield event.plain_result(f"{data.get('display_name') or data.get('name') or '机器人'} 已经登录，不需要重复扫码。")
+            who = data.get("login_name") or data.get("login_uin") or "未知 QQ"
+            extra = f"（{data.get('login_uin')}）" if data.get("login_name") and data.get("login_uin") else ""
+            yield event.plain_result(f"{data.get('display_name') or data.get('name') or '机器人'} 已经登录：{who}{extra}，不需要重复扫码。")
             return
         png = str(data.get("qrcode_png_base64") or "")
         if png:
@@ -143,7 +145,8 @@ class Main(Star):
         qrcode_url = str(data.get("qrcode_url") or "")
         name = data.get("display_name") or data.get("name") or "机器人"
         if qrcode_url:
-            yield event.plain_result(f"{name} 扫码登录二维码已生成。如果图片没有显示，请复制链接到浏览器打开：\n{qrcode_url}")
+            action = "复用空闲机器人" if data.get("reused") else "新建机器人"
+            yield event.plain_result(f"{action}：{name} 扫码登录二维码已生成。如果图片没有显示，请复制链接到浏览器打开：\n{qrcode_url}")
         else:
             yield event.plain_result(f"{name} 已创建，但没有拿到二维码链接，请稍后再试。")
 

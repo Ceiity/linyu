@@ -728,12 +728,16 @@ def napcat_login_bundle(row: dict) -> dict:
     status = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
     if int(status.get("code", -1)) == 0 and (status.get("data") or {}).get("isLogin"):
         info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
+        login_info = (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {}
+        login_name, login_uin = napcat_login_identity(login_info)
         return {
             "name": row.get("name"),
             "display_name": napcat_display_name(str(row.get("name", ""))),
             "already_login": True,
             "status": status,
-            "login_info": (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {},
+            "login_info": login_info,
+            "login_name": login_name,
+            "login_uin": login_uin,
         }
     res = napcat_webui_call(row, "/QQLogin/GetQQLoginQrcode")
     if int(res.get("code", -1)) != 0:
@@ -750,6 +754,30 @@ def napcat_login_bundle(row: dict) -> dict:
         "qrcode_png_base64": qr_png_base64_for_text(qrcode_url),
         "status": res,
     }
+
+
+def napcat_login_identity(info: dict) -> tuple[str, str]:
+    data = info if isinstance(info, dict) else {}
+    candidates = []
+    for obj in (data, data.get("user"), data.get("account"), data.get("profile")):
+        if isinstance(obj, dict):
+            candidates.append(obj)
+    name_keys = ("nickname", "nick", "name", "displayName", "display_name", "username", "userName")
+    uin_keys = ("uin", "qq", "user_id", "userId", "account", "id")
+    name = ""
+    uin = ""
+    for obj in candidates:
+        if not name:
+            for k in name_keys:
+                if obj.get(k):
+                    name = str(obj.get(k))
+                    break
+        if not uin:
+            for k in uin_keys:
+                if obj.get(k):
+                    uin = str(obj.get(k))
+                    break
+    return name, uin
 
 
 def system_metrics() -> dict:
@@ -1306,31 +1334,49 @@ class Handler(BaseHTTPRequestHandler):
         data = self.read_json()
         if not self.remote_auth_ok(data):
             audit("remote", "remote.napcat.create_login.denied", {"ip_hash": self.remote_client_key()[:12]}, False)
-            return self.send_api(api(False, message="远程调用鉴权失败", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
+            return self.send_api(api(False, message="????????", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
         self.check_remote_rate_limit()
+
+        rows = parse_napcat_index(self.request_origin(), expose_secret=True)
+        occupied = []
+        last_error = ""
+        for row in rows:
+            try:
+                bundle = napcat_login_bundle(row)
+                bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
+                bundle["container"] = row.get("name")
+                if not bundle.get("already_login"):
+                    bundle["reused"] = True
+                    audit("remote", "remote.napcat.reuse_login_slot", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
+                    return self.send_api(api(True, bundle))
+                occupied.append({"name": row.get("name"), "display_name": bundle.get("display_name"), "login_name": bundle.get("login_name"), "login_uin": bundle.get("login_uin")})
+            except Exception as e:
+                last_error = str(e)
+
         before_names = {r.get("name") for r in parse_napcat_index(expose_secret=True)}
         code, out = bash("ASTRBOT_SYNC_AFTER_NAPCAT=0 add_napcat_instances 1; write_deploy_info; nohup bash -lc 'sleep 60; cd \"$PROJECT_DIR\"; source lib/ops.sh; sync_astrbot_platforms; write_deploy_info' >/opt/astrbot/logs/remote-plugin-delayed-sync.log 2>&1 &", timeout=900)
         if code != 0:
             audit("remote", "remote.napcat.create_login", {"ok": False}, False)
-            return self.send_api(api(False, {"output": out[-4000:]}, "创建机器人失败", "CREATE_FAILED"), 500)
+            return self.send_api(api(False, {"output": out[-4000:], "occupied": occupied, "last_error": last_error}, "???????", "CREATE_FAILED"), 500)
         rows = parse_napcat_index(self.request_origin(), expose_secret=True)
         created = [r for r in rows if r.get("name") not in before_names]
         row = created[0] if created else (rows[-1] if rows else None)
         if not row:
-            return self.send_api(api(False, {"output": out[-4000:]}, "机器人索引为空，无法生成二维码", "NO_NAPCAT"), 500)
-        last_error = ""
+            return self.send_api(api(False, {"output": out[-4000:], "occupied": occupied, "last_error": last_error}, "???????????????", "NO_NAPCAT"), 500)
         for i in range(8):
             try:
                 bundle = napcat_login_bundle(row)
                 bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
                 bundle["container"] = row.get("name")
+                bundle["reused"] = False
+                bundle["occupied"] = occupied
                 audit("remote", "remote.napcat.create_login", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
                 return self.send_api(api(True, bundle))
             except Exception as e:
                 last_error = str(e)
                 time.sleep(3 if i < 3 else 6)
         audit("remote", "remote.napcat.create_login.qrcode_failed", {"name": row.get("name"), "error": last_error[:200]}, False)
-        return self.send_api(api(False, {"name": row.get("name"), "output": out[-4000:]}, "机器人已创建，但二维码暂时获取失败：" + last_error, "QRCODE_FAILED"), 500)
+        return self.send_api(api(False, {"name": row.get("name"), "output": out[-4000:], "occupied": occupied}, "??????????????????" + last_error, "QRCODE_FAILED"), 500)
 
     def astrbot_action(self, user: str):
         action = self.read_json().get("action")
