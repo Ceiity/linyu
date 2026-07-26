@@ -105,7 +105,6 @@ services:
     environment:
       - NAPCAT_UID=1000
       - NAPCAT_GID=1000
-      - MODE=astrbot
       - TZ=${DEFAULT_TIMEZONE}
     ports:
       - "${webui_port}:6099"
