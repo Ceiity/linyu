@@ -774,6 +774,42 @@ def restart_napcat_for_fresh_qr(row: dict, reason: str, wait_seconds: int = 18) 
     audit("remote", "napcat.false_online.restart", {"name": name, "reason": reason[:160]}, True)
 
 
+def reset_idle_napcat_for_fresh_login(row: dict, reason: str = "reset idle login state", wait_seconds: int = 24) -> None:
+    name = safe_name(str(row.get("name", "")))
+    st = shell_state()
+    base_dir = Path(st.get("NAPCAT_BASE_DIR", str(INSTALL_PREFIX / "napcat"))).resolve()
+    inst_dir = (base_dir / name).resolve()
+    if base_dir != inst_dir and base_dir not in inst_dir.parents:
+        raise ValueError("invalid NapCat directory")
+    ntqq_dir = inst_dir / "ntqq"
+    cfg_dir = inst_dir / "config"
+    NAPCAT_CREDENTIAL_CACHE.pop(name, None)
+    docker(["stop", name], timeout=120)
+    if ntqq_dir.exists():
+        for child in ntqq_dir.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink(missing_ok=True)
+    ntqq_dir.mkdir(parents=True, exist_ok=True)
+    if cfg_dir.exists():
+        for pattern in ("napcat_[0-9]*.json", "napcat_protocol_[0-9]*.json", "onebot11_[0-9]*.json"):
+            for file in cfg_dir.glob(pattern):
+                file.unlink(missing_ok=True)
+    docker(["start", name], timeout=120)
+    deadline = time.time() + max(8, wait_seconds)
+    while time.time() < deadline:
+        ok, _ = http_json_post_optional(
+            "http://127.0.0.1:%s/api/auth/login" % str(row.get("webui_port") or ""),
+            {"hash": hashlib.sha256((str(row.get("token") or "") + ".napcat").encode()).hexdigest()},
+            timeout=3,
+        )
+        if ok:
+            break
+        time.sleep(2)
+    audit("remote", "napcat.idle_reset", {"name": name, "reason": reason[:160]}, True)
+
+
 def qr_svg_for_text(text_value: str) -> str:
     try:
         import qrcode
@@ -829,6 +865,30 @@ def napcat_login_bundle(row: dict) -> dict:
         "svg": qr_svg_for_text(qrcode_url),
         "qrcode_png_base64": qr_png_base64_for_text(qrcode_url),
         "status": res,
+    }
+
+
+def napcat_login_status_bundle(row: dict) -> dict:
+    """只检查登录状态，不刷新二维码，避免轮询把用户正在扫码的二维码顶掉。"""
+    status = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
+    if int(status.get("code", -1)) == 0 and (status.get("data") or {}).get("isLogin"):
+        info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
+        login_info = (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {}
+        login_name, login_uin = napcat_login_identity(login_info)
+        return {
+            "name": row.get("name"),
+            "display_name": napcat_display_name(str(row.get("name", ""))),
+            "already_login": True,
+            "status": status,
+            "login_info": login_info,
+            "login_name": login_name,
+            "login_uin": login_uin,
+        }
+    return {
+        "name": row.get("name"),
+        "display_name": napcat_display_name(str(row.get("name", ""))),
+        "already_login": False,
+        "status": status,
     }
 
 
@@ -1438,12 +1498,13 @@ class Handler(BaseHTTPRequestHandler):
                             return self.send_api(api(True, bundle))
                     occupied.append({"name": row.get("name"), "display_name": bundle.get("display_name"), "login_name": bundle.get("login_name"), "login_uin": bundle.get("login_uin")})
                     continue
-                restart_napcat_for_fresh_qr(row, "reuse idle slot and reset stale QR/session", wait_seconds=18)
+                reset_idle_napcat_for_fresh_login(row, "reuse idle slot and clear stale QQ data", wait_seconds=24)
                 bundle = napcat_login_bundle(row)
                 bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
                 bundle["container"] = row.get("name")
                 bundle["reused"] = True
                 bundle["fresh_restarted"] = True
+                bundle["clean_reset"] = True
                 audit("remote", "remote.napcat.reuse_login_slot", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
                 return self.send_api(api(True, bundle))
             except Exception as e:
@@ -1483,7 +1544,7 @@ class Handler(BaseHTTPRequestHandler):
         if not name:
             raise ValueError("name is required")
         row = napcat_row(name)
-        bundle = napcat_login_bundle(row)
+        bundle = napcat_login_status_bundle(row)
         bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
         bundle["container"] = row.get("name")
         if bundle.get("already_login") and (not bundle.get("login_name") or not bundle.get("login_uin")):
