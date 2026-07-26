@@ -1424,7 +1424,7 @@ class Handler(BaseHTTPRequestHandler):
         )
         if count > 0:
             script += "add_napcat_instances %d; " % count
-        script += "repair_astrbot_napcat_connection; install_linyu_remote_plugin; write_deploy_info"
+        script += "repair_astrbot_napcat_connection; write_deploy_info"
         t = create_task("初始化部署 AstrBot + NapCat", "deploy.start", task_shell, user, "开始初始化部署", script, 2400)
         self.send_api(api(True, t.to_dict()))
 
