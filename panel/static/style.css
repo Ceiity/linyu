@@ -176,3 +176,11 @@ button,.pill-btn,.tiny,.link-pill{white-space:nowrap}.toolbar,.head-actions,.nap
 @media(max-width:900px){.pool-hero{display:grid}.pool-actions{justify-content:flex-start}.pool-actions button{flex:1 1 120px}}
 @media(max-width:720px){.pool-page .span3{grid-column:1}.pool-hero{padding:16px}.pool-actions{display:grid;grid-template-columns:1fr 1fr}.pool-actions button:first-child{grid-column:1/-1}.pool-list-card{padding:12px}.pool-info-grid{grid-template-columns:1fr 1fr}.pool-mobile-card .action-pills{margin-top:10px}.pool-mobile-card .nap-webui-main{margin-top:10px}}
 @media(max-width:380px){.pool-actions,.pool-info-grid{grid-template-columns:1fr}}
+
+/* 2026-07-26 mobile drawer seam fix: no dark sliver when closed */
+html,body{overflow-x:hidden}
+@media(max-width:720px){
+  .sidebar{transform:translateX(calc(-100% - 36px))!important;box-shadow:none!important;will-change:transform}
+  .sidebar.open{transform:translateX(0)!important;box-shadow:24px 0 70px rgba(0,0,0,.22)!important}
+  :root:not([data-theme=dark]) .sidebar:not(.open){box-shadow:none!important}
+}
