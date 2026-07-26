@@ -115,6 +115,8 @@ class Main(Star):
         return bool(owners) and sender in owners
 
     def _allowed(self, event: AstrMessageEvent) -> tuple[bool, str]:
+        if self._cfg("enabled", True) is False:
+            return False, "\u8fdc\u7a0b\u7533\u8bf7\u767b\u5f55\u5df2\u5173\u95ed\u3002"
         sender = self._sender_id(event)
         group = self._group_id(event)
         self_id = self._self_id(event)

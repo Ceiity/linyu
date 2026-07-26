@@ -1,6 +1,11 @@
 {
+  "enabled": {
+    "description": "是否启用 QQ 远程申请登录。",
+    "type": "bool",
+    "default": true
+  },
   "server_url": {
-    "description": "AstrBot-Deploy Web panel URL, for example http://server-ip:7070.",
+    "description": "AstrBot-Deploy Web 面板地址，例如 http://server-ip:7070。",
     "type": "string",
     "default": "http://127.0.0.1:7070"
   },

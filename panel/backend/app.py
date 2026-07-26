@@ -122,6 +122,14 @@ def default_config() -> dict:
         "default_reverse_ws_token": "yuyu521521",
         "remote_api_enabled": True,
         "remote_api_token": os.environ.get("PANEL_REMOTE_TOKEN") or secrets.token_urlsafe(24),
+        "linyu_remote_login_enabled": True,
+        "linyu_remote_server_url": "",
+        "linyu_remote_owner_ids": os.environ.get("LINYU_REMOTE_OWNER_IDS", "3179806299"),
+        "linyu_remote_bot_self_ids": os.environ.get("LINYU_REMOTE_BOT_SELF_IDS", "2141945863"),
+        "linyu_remote_allowed_groups": "",
+        "linyu_remote_triggers": "申请登录",
+        "linyu_remote_qr_retry_seconds": 60,
+        "linyu_remote_cooldown_seconds": 300,
         "public_base_url": "",
         "allow_dangerous": False,
         "theme_color": "#2563eb",
@@ -148,7 +156,7 @@ def load_config() -> dict:
 
 def save_config_patch(patch: dict) -> dict:
     cfg = load_config()
-    allowed = {"install_prefix", "network_name", "default_reverse_ws_token", "upload_dir", "astrbot_plugin_dir", "napcat_watchdog_enabled", "napcat_watchdog_interval", "napcat_watchdog_abnormal_threshold", "napcat_recovery_max", "napcat_recovery_window", "napcat_recovery_wait", "max_upload_mb", "public_base_url", "allow_dangerous", "theme_color", "username"}
+    allowed = {"install_prefix", "network_name", "default_reverse_ws_token", "upload_dir", "astrbot_plugin_dir", "napcat_watchdog_enabled", "napcat_watchdog_interval", "napcat_watchdog_abnormal_threshold", "napcat_recovery_max", "napcat_recovery_window", "napcat_recovery_wait", "max_upload_mb", "public_base_url", "allow_dangerous", "theme_color", "username", "linyu_remote_login_enabled", "linyu_remote_server_url", "linyu_remote_owner_ids", "linyu_remote_bot_self_ids", "linyu_remote_allowed_groups", "linyu_remote_triggers", "linyu_remote_qr_retry_seconds", "linyu_remote_cooldown_seconds"}
     numeric_limits = {
         "max_upload_mb": (1, 2048),
         "napcat_watchdog_interval": (30, 3600),
@@ -156,6 +164,8 @@ def save_config_patch(patch: dict) -> dict:
         "napcat_recovery_max": (0, 20),
         "napcat_recovery_window": (60, 86400),
         "napcat_recovery_wait": (5, 600),
+        "linyu_remote_qr_retry_seconds": (10, 3600),
+        "linyu_remote_cooldown_seconds": (0, 86400),
     }
     for k, v in patch.items():
         if k in allowed:
@@ -167,12 +177,49 @@ def save_config_patch(patch: dict) -> dict:
                     raise ValueError("%s \u5fc5\u987b\u662f\u6570\u5b57" % k)
                 if v < lo or v > hi:
                     raise ValueError("%s \u5fc5\u987b\u5728 %s-%s \u4e4b\u95f4" % (k, lo, hi))
+            if k in {"allow_dangerous", "napcat_watchdog_enabled", "linyu_remote_login_enabled"}:
+                v = bool(v) if isinstance(v, bool) else str(v).lower() == "true"
             cfg[k] = v
     if patch.get("password"):
         cfg["password_hash"] = hash_password(str(patch["password"]))
         cfg.pop("initial_password", None)
     write_json(PANEL_CONFIG, cfg)
     return cfg
+
+
+def split_csv_ids(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
+    text = str(value or "").replace("，", ",").replace("\n", ",")
+    return [x.strip() for x in text.split(",") if x.strip()]
+
+
+def sync_linyu_remote_plugin_config(origin: str | None = None) -> dict:
+    cfg = load_config()
+    plugin_cfg = INSTALL_PREFIX / "data" / "config" / "astrbot_plugin_linyu_remote_admin_config.json"
+    plugin_cfg.parent.mkdir(parents=True, exist_ok=True)
+    server_url = str(cfg.get("linyu_remote_server_url") or cfg.get("public_base_url") or origin or public_origin()).strip().rstrip("/")
+    if not server_url:
+        server_url = "http://127.0.0.1:%s" % str(shell_state().get("WEB_ADMIN_PORT", "7070"))
+    payload = {
+        "enabled": bool(cfg.get("linyu_remote_login_enabled", True)),
+        "server_url": server_url,
+        "remote_token": str(cfg.get("remote_api_token") or ""),
+        "owner_ids": split_csv_ids(cfg.get("linyu_remote_owner_ids")),
+        "bot_self_ids": split_csv_ids(cfg.get("linyu_remote_bot_self_ids")),
+        "allowed_groups": split_csv_ids(cfg.get("linyu_remote_allowed_groups")),
+        "triggers": split_csv_ids(cfg.get("linyu_remote_triggers")) or ["申请登录"],
+        "cooldown_seconds": int(cfg.get("linyu_remote_cooldown_seconds", 300) or 300),
+        "qr_retry_seconds": int(cfg.get("linyu_remote_qr_retry_seconds", 60) or 60),
+    }
+    plugin_cfg.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        os.chmod(plugin_cfg, 0o600)
+    except Exception:
+        pass
+    return {"path": str(plugin_cfg), "server_url": server_url, "enabled": payload["enabled"]}
 
 
 def sanitize_config(cfg: dict) -> dict:
@@ -1404,10 +1451,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.install_plugin(user)
             if p.path == "/api/watchdog/restart":
                 return self.watchdog_restart(user)
+            if p.path == "/api/linyu-remote/sync":
+                res = sync_linyu_remote_plugin_config(self.request_origin())
+                audit(user, "linyu_remote.sync", res, True)
+                return self.send_api(api(True, res, "已同步 QQ 远程登录插件配置"))
             if p.path == "/api/settings":
                 cfg = save_config_patch(self.read_json())
-                audit(user, "settings.save", {}, True)
-                return self.send_api(api(True, sanitize_config(cfg)))
+                plugin_sync = sync_linyu_remote_plugin_config(self.request_origin())
+                audit(user, "settings.save", {"linyu_remote": plugin_sync}, True)
+                return self.send_api(api(True, {**sanitize_config(cfg), "linyu_remote_plugin": plugin_sync}))
             if p.path == "/api/account/password":
                 return self.change_password(user)
             if p.path == "/api/config/astrbot":

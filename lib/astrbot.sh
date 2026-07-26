@@ -244,21 +244,22 @@ if not token:
 print(token)
 PY
   )"
-  server_url="http://$(private_ip):${WEB_ADMIN_PORT:-7070}"
+  server_url="http://$(public_ip):${WEB_ADMIN_PORT:-7070}"
   plugin_cfg="$cfg_dir/astrbot_plugin_linyu_remote_admin_config.json"
-  if [[ ! -f "$plugin_cfg" ]]; then
-    cat > "$plugin_cfg" <<JSON
+  cat > "$plugin_cfg" <<JSON
 {
+  "enabled": true,
   "server_url": "$server_url",
   "remote_token": "$remote_token",
-  "owner_ids": [],
+  "owner_ids": ["${LINYU_REMOTE_OWNER_ID:-3179806299}"],
+  "bot_self_ids": ["${LINYU_REMOTE_BOT_SELF_ID:-2141945863}"],
   "allowed_groups": [],
-  "triggers": ["登录", "扫码登录", "创建机器人", "机器人登录"],
-  "cooldown_seconds": 300
+  "triggers": ["申请登录"],
+  "cooldown_seconds": 300,
+  "qr_retry_seconds": 60
 }
 JSON
-    chmod 600 "$plugin_cfg" || true
-  fi
+  chmod 600 "$plugin_cfg" || true
   if container_running "$ASTRBOT_CONTAINER"; then
     docker restart "$ASTRBOT_CONTAINER" >/dev/null || true
     wait_container "$ASTRBOT_CONTAINER" 180 || warn "AstrBot did not restart cleanly after plugin install."
