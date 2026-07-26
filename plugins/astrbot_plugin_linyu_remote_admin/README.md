@@ -8,3 +8,11 @@ Runtime behavior:
 - Only bot self account `2141945863` responds.
 - The plugin sends only the QR image and does not expose the QQ login URL in chat.
 - It reuses idle NapCat instances first; it creates a new one only when no idle slot exists.
+
+
+Owner commands:
+
+- `\u767b\u5f55\u5f00\u542f`: allow everyone to use `\u7533\u8bf7\u767b\u5f55`.
+- `\u767b\u5f55\u5173\u95ed`: only owner can use `\u7533\u8bf7\u767b\u5f55`.
+
+Owner is `3179806299` by default. Bot self account is restricted to `2141945863`.

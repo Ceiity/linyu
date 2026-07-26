@@ -15,6 +15,8 @@ from astrbot.api.star import Context, Star, register
 TRIGGER_APPLY_LOGIN = "\u7533\u8bf7\u767b\u5f55"
 DEFAULT_BOT_SELF_ID = "2141945863"
 DEFAULT_OWNER_ID = "3179806299"
+CMD_LOGIN_OPEN = "\u767b\u5f55\u5f00\u542f"
+CMD_LOGIN_CLOSE = "\u767b\u5f55\u5173\u95ed"
 
 
 @register(
@@ -92,6 +94,26 @@ class Main(Star):
                 return text
         return ""
 
+    def _state_path(self) -> Path:
+        return Path(__file__).resolve().parent / "linyu_remote_admin_state.json"
+
+    def _public_login_enabled(self) -> bool:
+        try:
+            data = json.loads(self._state_path().read_text(encoding="utf-8"))
+            return bool(data.get("public_login_enabled", False))
+        except Exception:
+            return False
+
+    def _set_public_login_enabled(self, enabled: bool) -> None:
+        path = self._state_path()
+        payload = {"public_login_enabled": bool(enabled), "updated_at": int(time.time())}
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _is_owner(self, event: AstrMessageEvent) -> bool:
+        sender = self._sender_id(event)
+        owners = self._as_str_set(self._cfg("owner_ids", [DEFAULT_OWNER_ID]))
+        return bool(owners) and sender in owners
+
     def _allowed(self, event: AstrMessageEvent) -> tuple[bool, str]:
         sender = self._sender_id(event)
         group = self._group_id(event)
@@ -103,8 +125,8 @@ class Main(Star):
             return False, ""
         if not owners:
             return False, "\u8fd8\u6ca1\u6709\u914d\u7f6e\u4e3b\u4eba QQ\u3002\u8bf7\u5148\u5728\u63d2\u4ef6\u914d\u7f6e\u91cc\u586b\u5199 owner_ids\u3002"
-        if sender not in owners:
-            return False, "\u4f60\u6ca1\u6709\u6743\u9650\u7533\u8bf7\u767b\u5f55\u3002"
+        if sender not in owners and not self._public_login_enabled():
+            return False, "\u5f53\u524d\u672a\u5f00\u653e\u7533\u8bf7\u767b\u5f55\u6743\u9650\uff0c\u8bf7\u8054\u7cfb\u4e3b\u4eba\u5f00\u542f\u3002"
         if groups and group and group not in groups:
             return False, "\u5f53\u524d\u7fa4\u6ca1\u6709\u542f\u7528\u7533\u8bf7\u767b\u5f55\u6743\u9650\u3002"
         return True, ""
@@ -150,6 +172,16 @@ class Main(Star):
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         text = (event.message_str or "").strip()
+        if text in {CMD_LOGIN_OPEN, CMD_LOGIN_CLOSE}:
+            if not self._is_owner(event):
+                return
+            enabled = text == CMD_LOGIN_OPEN
+            self._set_public_login_enabled(enabled)
+            if enabled:
+                yield event.plain_result("\u5df2\u5f00\u542f\u5168\u5458\u7533\u8bf7\u767b\u5f55\u6743\u9650\uff0c\u6240\u6709\u4eba\u90fd\u53ef\u4ee5\u53d1\u9001\u201c\u7533\u8bf7\u767b\u5f55\u201d\u3002")
+            else:
+                yield event.plain_result("\u5df2\u5173\u95ed\u5168\u5458\u7533\u8bf7\u767b\u5f55\u6743\u9650\uff0c\u73b0\u5728\u53ea\u6709\u4e3b\u4eba\u53ef\u4ee5\u7533\u8bf7\u3002")
+            return
         triggers = self._as_str_set(self._cfg("triggers", [TRIGGER_APPLY_LOGIN]))
         if text not in triggers:
             return
