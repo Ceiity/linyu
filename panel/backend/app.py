@@ -21,6 +21,7 @@ import traceback
 import zipfile
 from dataclasses import dataclass, field
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -1139,6 +1140,103 @@ def napcat_login_identity(info: dict) -> tuple[str, str]:
     return name, uin
 
 
+
+def napcat_onebot_quick(row: dict, action: str, timeout: float = 1.4) -> tuple[bool, dict | str]:
+    port = str(row.get("http_port") or "")
+    token = str(row.get("token") or "")
+    if not port:
+        return False, "missing http port"
+    url = "http://127.0.0.1:%s/%s" % (port, action.lstrip("/"))
+    headers = {"Authorization": "Bearer " + token} if token else {}
+    return http_json_post_optional(url, {}, headers, timeout=timeout)
+
+
+def napcat_pool_item(row: dict) -> dict:
+    name = str(row.get("name") or "")
+    recovery = row.get("recovery") if isinstance(row.get("recovery"), dict) else {}
+    assigned_to = assignment_owner(name)
+    item = {
+        "name": name,
+        "display_name": napcat_display_name(name),
+        "status": row.get("status"),
+        "running": bool(row.get("running")),
+        "webui_port": row.get("webui_port"),
+        "ws_port": row.get("ws_port"),
+        "http_port": row.get("http_port"),
+        "url": row.get("url"),
+        "login_url": row.get("login_url"),
+        "directory": row.get("directory"),
+        "recovery": recovery,
+        "assigned_to": assigned_to,
+        "assignment_ttl": 0,
+        "login_name": "",
+        "login_uin": "",
+        "online": False,
+        "onebot_ok": False,
+        "pool_state": "stopped",
+        "pool_state_text": "已停止",
+    }
+    assigned = assignment_for_requester(assigned_to) if assigned_to else None
+    if assigned:
+        item["assignment_ttl"] = max(0, int(float(assigned.get("expires", 0)) - time.time()))
+    if not item["running"]:
+        return item
+    ok_status, st = napcat_onebot_quick(row, "/get_status")
+    if ok_status and isinstance(st, dict):
+        data = st.get("data") or {}
+        item["onebot_ok"] = st.get("retcode", 0) in (0, "0")
+        if isinstance(data, dict) and (data.get("online") is True or data.get("good") is True):
+            item["online"] = True
+    ok_info, info = napcat_onebot_quick(row, "/get_login_info")
+    if ok_info and isinstance(info, dict) and info.get("retcode", 0) in (0, "0"):
+        login_name, login_uin = napcat_login_identity(info.get("data") or info)
+        item["login_name"] = login_name
+        item["login_uin"] = login_uin
+        if login_name or login_uin:
+            item["online"] = True
+            item["onebot_ok"] = True
+    if item["online"] or recovery.get("health") == "online":
+        item["pool_state"] = "online"
+        item["pool_state_text"] = "已登录"
+    elif assigned_to:
+        item["pool_state"] = "assigned"
+        item["pool_state_text"] = "待扫码"
+    elif recovery.get("health") in {"suspect", "recovering", "limited"}:
+        item["pool_state"] = "abnormal"
+        item["pool_state_text"] = "需处理"
+    else:
+        item["pool_state"] = "idle"
+        item["pool_state_text"] = "空闲"
+    return item
+
+
+def napcat_pool_data(origin: str | None = None) -> dict:
+    rows = parse_napcat_index(origin, expose_secret=True)
+    load_login_assignments()
+    items: list[dict] = []
+    if rows:
+        workers = min(8, max(1, len(rows)))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(napcat_pool_item, row): row for row in rows}
+            for future in as_completed(futures):
+                try:
+                    items.append(future.result())
+                except Exception as e:
+                    row = futures[future]
+                    items.append({"name": row.get("name"), "display_name": napcat_display_name(str(row.get("name") or "")), "status": row.get("status"), "pool_state": "abnormal", "pool_state_text": "检测失败", "error": str(e)})
+    order = {str(r.get("name")): i for i, r in enumerate(rows)}
+    items.sort(key=lambda x: order.get(str(x.get("name")), 999999))
+    summary = {"total": len(items), "online": 0, "idle": 0, "assigned": 0, "abnormal": 0, "stopped": 0}
+    for item in items:
+        key = str(item.get("pool_state") or "abnormal")
+        if key in summary:
+            summary[key] += 1
+        elif item.get("running") is False:
+            summary["stopped"] += 1
+        else:
+            summary["abnormal"] += 1
+    return {"summary": summary, "items": items, "generated_at": now()}
+
 def system_metrics() -> dict:
     meminfo = {}
     try:
@@ -1394,6 +1492,31 @@ def task_delete_napcat(task: Task, name: str, keep_data: bool) -> dict:
     return {"ok": code == 0, "output": out}
 
 
+def task_cleanup_idle_napcat(task: Task, keep_data: bool = True) -> dict:
+    task.line("正在扫描机器人池空闲实例", 10)
+    pool = napcat_pool_data()
+    idle = [x for x in pool.get("items", []) if x.get("pool_state") == "idle"]
+    if not idle:
+        task.line("没有需要清理的空闲机器人", 100)
+        return {"ok": True, "deleted": [], "output": "no idle robots"}
+    deleted = []
+    outputs = []
+    total = len(idle)
+    for idx, item in enumerate(idle, 1):
+        name = safe_name(str(item.get("name") or ""))
+        if not name:
+            continue
+        task.line("正在清理空闲机器人：%s" % name, 15 + int(idx / max(total, 1) * 70))
+        code, out = delete_napcat(name, keep_data)
+        outputs.append(out)
+        if code == 0:
+            deleted.append(name)
+        else:
+            task.line("清理 %s 返回异常，继续处理下一个" % name)
+    task.line("空闲机器人清理完成，共清理 %d 个" % len(deleted), 95)
+    return {"ok": True, "deleted": deleted, "output": "\n".join(outputs)[-8000:]}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "AstrBotPanel/%s" % APP_VERSION
 
@@ -1506,6 +1629,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_api(api(True, plugins_data()))
             if p.path == "/api/napcat":
                 return self.send_api(api(True, parse_napcat_index(self.request_origin())))
+            if p.path == "/api/napcat/pool":
+                return self.send_api(api(True, napcat_pool_data(self.request_origin())))
             if p.path == "/api/napcat/open":
                 return self.napcat_open(p)
             if p.path == "/api/tasks":
@@ -1572,6 +1697,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_api(api(True, t.to_dict()))
             if p.path == "/api/napcat/action":
                 return self.napcat_action(user)
+            if p.path == "/api/napcat/pool/cleanup":
+                data = self.read_json(); require_confirm(data, "清理空闲机器人")
+                t = create_task("清理空闲机器人", "napcat.cleanup_idle", task_cleanup_idle_napcat, user, bool(data.get("keep_data", True)))
+                return self.send_api(api(True, t.to_dict()))
             if p.path == "/api/napcat/qq-login":
                 return self.napcat_qq_login(user)
             if p.path == "/api/deploy/start":
