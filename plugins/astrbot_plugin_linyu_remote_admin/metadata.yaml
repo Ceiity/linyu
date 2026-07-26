@@ -2,7 +2,7 @@ name: astrbot_plugin_linyu_remote_admin
 display_name: Linyu Remote Login
 desc: 通过 QQ 指令申请 NapCat 扫码登录二维码，并在登录成功后自动提示头像与账号信息。
 short_desc: QQ 远程申请 NapCat 扫码登录
-version: v1.0.3
+version: v1.0.4
 author: linyu
 repo: https://github.com/Ceiity/linyu
 support_platforms:

@@ -1788,6 +1788,11 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     last_error = str(e)
 
+            allow_create = bool(data.get("allow_create"))
+            if not allow_create:
+                audit("remote", "remote.napcat.create_login.no_idle", {"requester": str(data.get("requester", ""))[:64], "occupied": len(occupied)}, False)
+                return self.send_api(api(False, {"occupied": occupied, "last_error": last_error}, "\u6ca1\u6709\u7a7a\u95f2\u673a\u5668\u4eba\uff0c\u666e\u901a\u7528\u6237\u4e0d\u80fd\u81ea\u52a8\u521b\u5efa\u65b0\u673a\u5668\u4eba", "NO_IDLE_NAPCAT"), 409)
+
             before_names = {r.get("name") for r in parse_napcat_index(expose_secret=True)}
             code, out = bash("ASTRBOT_SYNC_AFTER_NAPCAT=0 add_napcat_instances 1; write_deploy_info; nohup bash -lc 'sleep 60; cd \"$PROJECT_DIR\"; source lib/ops.sh; sync_astrbot_platforms; write_deploy_info' >/opt/astrbot/logs/remote-plugin-delayed-sync.log 2>&1 &", timeout=900)
             if code != 0:

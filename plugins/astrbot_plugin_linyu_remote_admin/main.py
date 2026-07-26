@@ -23,7 +23,7 @@ CMD_LOGIN_CLOSE = "\u767b\u5f55\u5173\u95ed"
     "astrbot_plugin_linyu_remote_admin",
     "linyu",
     "\u53d1\u9001\u7533\u8bf7\u767b\u5f55\uff0c\u81ea\u52a8\u7533\u8bf7\u4e00\u4e2a NapCat \u626b\u7801\u673a\u5668\u4eba\u3002",
-    "1.0.3",
+    "1.0.4",
     "https://github.com/Ceiity/linyu",
 )
 class Main(Star):
@@ -168,6 +168,7 @@ class Main(Star):
             "group_id": self._group_id(event),
             "bot_self_id": self._self_id(event),
             "source": "astrbot_plugin_linyu_remote_admin",
+            "allow_create": self._is_owner(event),
         }
         return await asyncio.to_thread(self._post_json_sync, "/api/remote/napcat/create-login", payload)
 
@@ -249,7 +250,11 @@ class Main(Star):
             data = await self._create_login(event)
         except Exception as e:
             logger.exception("NapCat login QR request failed")
-            yield event.plain_result(f"\u7533\u8bf7\u5931\u8d25\uff1a{e}")
+            msg = str(e)
+            if "NO_IDLE_NAPCAT" in msg:
+                yield event.plain_result("\u5f53\u524d\u6ca1\u6709\u7a7a\u95f2\u673a\u5668\u4eba\u53ef\u7528\uff0c\u8bf7\u8054\u7cfb\u4e3b\u4eba\u5728\u9762\u677f\u91cc\u521b\u5efa\u673a\u5668\u4eba\uff0c\u6216\u7531\u4e3b\u4eba\u53d1\u9001\u201c\u7533\u8bf7\u767b\u5f55\u201d\u81ea\u52a8\u521b\u5efa\u3002")
+            else:
+                yield event.plain_result(f"\u7533\u8bf7\u5931\u8d25\uff1a{e}")
             return
         if data.get("already_login"):
             msg = self._login_success_text(data, "\u5df2\u7ecf\u767b\u5f55")
