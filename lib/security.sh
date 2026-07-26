@@ -19,7 +19,7 @@ filter = sshd
 backend = systemd
 maxretry = 5
 findtime = 10m
-bantime = 1h
+bantime = 24h
 ignoreip = 127.0.0.1/8 ::1
 EOF
 
