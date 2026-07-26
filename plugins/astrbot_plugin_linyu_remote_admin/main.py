@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from urllib import request as urlrequest
 
-from astrbot.api import AstrBotConfig, logger
+from astrbot.api import AstrBotConfig, logger, message_components as Comp
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
@@ -23,7 +23,7 @@ CMD_LOGIN_CLOSE = "\u767b\u5f55\u5173\u95ed"
     "astrbot_plugin_linyu_remote_admin",
     "linyu",
     "\u53d1\u9001\u7533\u8bf7\u767b\u5f55\uff0c\u81ea\u52a8\u7533\u8bf7\u4e00\u4e2a NapCat \u626b\u7801\u673a\u5668\u4eba\u3002",
-    "1.0.2",
+    "1.0.3",
     "https://github.com/Ceiity/linyu",
 )
 class Main(Star):
@@ -201,6 +201,10 @@ class Main(Star):
     async def _download_avatar(self, qq: str) -> str:
         return await asyncio.to_thread(self._download_avatar_sync, qq)
 
+    @staticmethod
+    def _image_text_result(event: AstrMessageEvent, image_path: str, text: str):
+        return event.chain_result([Comp.Image.fromFileSystem(image_path), Comp.Plain(text)])
+
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         text = (event.message_str or "").strip()
@@ -239,7 +243,9 @@ class Main(Star):
             extra = f"\uff08{data.get('login_uin')}\uff09" if data.get("login_name") and data.get("login_uin") else ""
             if data.get("login_uin"):
                 try:
-                    yield event.image_result(await self._download_avatar(str(data.get("login_uin"))))
+                    avatar = await self._download_avatar(str(data.get("login_uin")))
+                    yield self._image_text_result(event, avatar, f"\u5df2\u7ecf\u767b\u5f55\uff1a{who}{extra}\uff0c\u4e0d\u9700\u8981\u91cd\u590d\u626b\u7801\u3002")
+                    return
                 except Exception:
                     logger.exception("QQ avatar send failed")
             yield event.plain_result(f"\u5df2\u7ecf\u767b\u5f55\uff1a{who}{extra}\uff0c\u4e0d\u9700\u8981\u91cd\u590d\u626b\u7801\u3002")
@@ -265,7 +271,9 @@ class Main(Star):
                 extra = f"\uff08{login_uin}\uff09" if login_name and login_uin else ""
                 if login_uin:
                     try:
-                        yield event.image_result(await self._download_avatar(login_uin))
+                        avatar = await self._download_avatar(login_uin)
+                        yield self._image_text_result(event, avatar, f"\u767b\u5f55\u6210\u529f\uff1a{who}{extra}")
+                        return
                     except Exception:
                         logger.exception("QQ avatar send failed")
                 yield event.plain_result(f"\u767b\u5f55\u6210\u529f\uff1a{who}{extra}")
