@@ -1272,6 +1272,8 @@ class Handler(BaseHTTPRequestHandler):
             p = urlparse(self.path)
             if p.path == "/api/remote/napcat/create-login":
                 return self.remote_napcat_create_login()
+            if p.path == "/api/remote/napcat/login-status":
+                return self.remote_napcat_login_status()
             if p.path == "/api/login":
                 return self.login()
             user = self.require_auth()
@@ -1466,6 +1468,27 @@ class Handler(BaseHTTPRequestHandler):
                 time.sleep(3 if i < 3 else 6)
         audit("remote", "remote.napcat.create_login.qrcode_failed", {"name": row.get("name"), "error": last_error[:200]}, False)
         return self.send_api(api(False, {"name": row.get("name"), "output": out[-4000:], "occupied": occupied}, "QR code failed: " + last_error, "QRCODE_FAILED"), 500)
+
+    def remote_napcat_login_status(self):
+        data = self.read_json()
+        if not self.remote_auth_ok(data):
+            audit("remote", "remote.napcat.login_status.denied", {"ip_hash": self.remote_client_key()[:12]}, False)
+            return self.send_api(api(False, message="remote auth failed", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
+        name = safe_name(str(data.get("name") or data.get("container") or ""))
+        if not name:
+            raise ValueError("name is required")
+        row = napcat_row(name)
+        bundle = napcat_login_bundle(row)
+        bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
+        bundle["container"] = row.get("name")
+        if bundle.get("already_login") and (not bundle.get("login_name") or not bundle.get("login_uin")):
+            ok, info = napcat_onebot_call(row, "/get_login_info")
+            if ok and isinstance(info, dict):
+                login_name, login_uin = napcat_login_identity(info.get("data") or {})
+                bundle["login_name"] = bundle.get("login_name") or login_name
+                bundle["login_uin"] = bundle.get("login_uin") or login_uin
+        audit("remote", "remote.napcat.login_status", {"name": name, "already_login": bool(bundle.get("already_login"))}, True)
+        return self.send_api(api(True, bundle))
 
     def astrbot_action(self, user: str):
         action = self.read_json().get("action")

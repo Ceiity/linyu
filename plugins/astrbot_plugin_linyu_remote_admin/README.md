@@ -16,3 +16,12 @@ Owner commands:
 - `\u767b\u5f55\u5173\u95ed`: only owner can use `\u7533\u8bf7\u767b\u5f55`.
 
 Owner is `3179806299` by default. Bot self account is restricted to `2141945863`.
+
+
+Login success notice:
+
+After the QR image is sent, the plugin polls login status for about 3 minutes. If the QQ account logs in successfully, it sends the QQ avatar and a success message with nickname and QQ number.
+
+Avatar URL format:
+
+`http://q.qlogo.cn/headimg_dl?dst_uin=<QQ>&spec=640&img_type=jpg`
