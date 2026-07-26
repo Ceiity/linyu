@@ -207,6 +207,17 @@ class Main(Star):
     def _image_text_result(event: AstrMessageEvent, image_path: str, text: str):
         return event.chain_result([Comp.Image.fromFileSystem(image_path), Comp.Plain(text)])
 
+    @staticmethod
+    def _login_success_text(data: dict, prefix: str = "\u767b\u5f55\u6210\u529f") -> str:
+        login_name = str(data.get("login_name") or "")
+        login_uin = str(data.get("login_uin") or "")
+        who = login_name or login_uin or "\u672a\u77e5 QQ"
+        extra = f"\uff08{login_uin}\uff09" if login_name and login_uin else ""
+        server = data.get("server") if isinstance(data.get("server"), dict) else {}
+        system = str(server.get("system") or "\u672a\u77e5")
+        location = str(server.get("login_location") or server.get("public_ip") or server.get("panel_url") or "\u672a\u77e5")
+        return f"{prefix}\nQQ\uff1a{who}{extra}\n\u670d\u52a1\u5668\uff1a{system}\n\u767b\u5f55\u5730\u70b9\uff1a{location}"
+
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         text = (event.message_str or "").strip()
@@ -241,16 +252,15 @@ class Main(Star):
             yield event.plain_result(f"\u7533\u8bf7\u5931\u8d25\uff1a{e}")
             return
         if data.get("already_login"):
-            who = data.get("login_name") or data.get("login_uin") or "\u672a\u77e5 QQ"
-            extra = f"\uff08{data.get('login_uin')}\uff09" if data.get("login_name") and data.get("login_uin") else ""
+            msg = self._login_success_text(data, "\u5df2\u7ecf\u767b\u5f55")
             if data.get("login_uin"):
                 try:
                     avatar = await self._download_avatar(str(data.get("login_uin")))
-                    yield self._image_text_result(event, avatar, f"\u5df2\u7ecf\u767b\u5f55\uff1a{who}{extra}\uff0c\u4e0d\u9700\u8981\u91cd\u590d\u626b\u7801\u3002")
+                    yield self._image_text_result(event, avatar, msg + "\n\u4e0d\u9700\u8981\u91cd\u590d\u626b\u7801\u3002")
                     return
                 except Exception:
                     logger.exception("QQ avatar send failed")
-            yield event.plain_result(f"\u5df2\u7ecf\u767b\u5f55\uff1a{who}{extra}\uff0c\u4e0d\u9700\u8981\u91cd\u590d\u626b\u7801\u3002")
+            yield event.plain_result(msg + "\n\u4e0d\u9700\u8981\u91cd\u590d\u626b\u7801\u3002")
             return
         png = str(data.get("qrcode_png_base64") or "")
         name = data.get("display_name") or data.get("name") or "\u673a\u5668\u4eba"
@@ -267,18 +277,16 @@ class Main(Star):
                 yield event.plain_result("\u4e8c\u7ef4\u7801\u5df2\u751f\u6210\uff0c\u8bf7\u626b\u7801\u767b\u5f55\u3002")
             status = await self._wait_login_success(str(data.get("container") or data.get("name") or ""), timeout_seconds=180, interval_seconds=5)
             if status:
-                login_name = status.get("login_name") or ""
                 login_uin = str(status.get("login_uin") or "")
-                who = login_name or login_uin or "\u672a\u77e5 QQ"
-                extra = f"\uff08{login_uin}\uff09" if login_name and login_uin else ""
+                msg = self._login_success_text(status, "\u767b\u5f55\u6210\u529f")
                 if login_uin:
                     try:
                         avatar = await self._download_avatar(login_uin)
-                        yield self._image_text_result(event, avatar, f"\u767b\u5f55\u6210\u529f\uff1a{who}{extra}")
+                        yield self._image_text_result(event, avatar, msg)
                         return
                     except Exception:
                         logger.exception("QQ avatar send failed")
-                yield event.plain_result(f"\u767b\u5f55\u6210\u529f\uff1a{who}{extra}")
+                yield event.plain_result(msg)
         except Exception:
             logger.exception("QR image send failed")
             yield event.plain_result("\u4e8c\u7ef4\u7801\u56fe\u7247\u53d1\u9001\u5931\u8d25\uff0c\u8bf7\u6253\u5f00 Web \u9762\u677f\u626b\u7801\u3002")

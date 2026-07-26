@@ -380,6 +380,29 @@ def private_ip() -> str:
         return "127.0.0.1"
 
 
+def os_pretty_name() -> str:
+    try:
+        data = {}
+        for line in Path("/etc/os-release").read_text(encoding="utf-8", errors="replace").splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                data[k] = v.strip().strip('"')
+        return data.get("PRETTY_NAME") or data.get("NAME") or "Linux"
+    except Exception:
+        return "Linux"
+
+
+def server_brief(origin: str | None = None) -> dict:
+    origin = origin or public_origin()
+    return {
+        "system": os_pretty_name(),
+        "public_ip": public_ip(),
+        "private_ip": private_ip(),
+        "panel_url": origin,
+        "login_location": public_ip() or origin,
+    }
+
+
 def _first_header(value: str) -> str:
     return (value or "").split(",", 1)[0].strip()
 
@@ -1555,6 +1578,7 @@ class Handler(BaseHTTPRequestHandler):
                 bundle = napcat_login_status_bundle(row)
                 bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
                 bundle["container"] = row.get("name")
+                bundle["server"] = server_brief(self.request_origin())
                 if bundle.get("already_login"):
                     false_reason = napcat_false_online_reason(row, bundle.get("status") or {})
                     if false_reason:
@@ -1562,6 +1586,7 @@ class Handler(BaseHTTPRequestHandler):
                         bundle = napcat_login_bundle(row)
                         bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
                         bundle["container"] = row.get("name")
+                        bundle["server"] = server_brief(self.request_origin())
                         bundle["reused"] = True
                         bundle["recovered"] = True
                         bundle["recover_reason"] = false_reason
@@ -1576,6 +1601,7 @@ class Handler(BaseHTTPRequestHandler):
                     if bundle:
                         bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
                         bundle["container"] = row.get("name")
+                        bundle["server"] = server_brief(self.request_origin())
                         bundle["reused"] = True
                         bundle["cached"] = True
                         bundle["cache_ttl"] = max(0, int(cached.get("expires", 0) - time.time()))
@@ -1585,6 +1611,7 @@ class Handler(BaseHTTPRequestHandler):
                 bundle = napcat_login_bundle(row)
                 bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
                 bundle["container"] = row.get("name")
+                bundle["server"] = server_brief(self.request_origin())
                 bundle["reused"] = True
                 bundle["fresh_restarted"] = True
                 bundle["clean_reset"] = True
@@ -1608,6 +1635,7 @@ class Handler(BaseHTTPRequestHandler):
                 bundle = napcat_login_bundle(row)
                 bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
                 bundle["container"] = row.get("name")
+                bundle["server"] = server_brief(self.request_origin())
                 bundle["reused"] = False
                 bundle["occupied"] = occupied
                 audit("remote", "remote.napcat.create_login", {"name": row.get("name"), "requester": str(data.get("requester", ""))[:64]}, True)
@@ -1630,6 +1658,7 @@ class Handler(BaseHTTPRequestHandler):
         bundle = napcat_login_status_bundle(row)
         bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")
         bundle["container"] = row.get("name")
+        bundle["server"] = server_brief(self.request_origin())
         if bundle.get("already_login") and (not bundle.get("login_name") or not bundle.get("login_uin")):
             ok, info = napcat_onebot_call(row, "/get_login_info")
             if ok and isinstance(info, dict):
