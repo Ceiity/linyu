@@ -171,6 +171,8 @@ repair_astrbot_napcat_connection(){
         [[ -n "${webui:-}" ]] && wait_napcat_webui "$webui" 60 || true
       fi
     done < "$NAPCAT_INDEX_FILE"
+    # NapCat may regenerate default onebot11.json during startup; sync again after restart.
+    sync_napcat_reverse_configs
   fi
   write_deploy_info
   (( failed == 0 )) || { warn "一键配置完成，但有 ${failed} 个机器人需要稍后再看状态"; return 1; }
