@@ -17,13 +17,14 @@ DEFAULT_BOT_SELF_ID = "2141945863"
 DEFAULT_OWNER_ID = "3179806299"
 CMD_LOGIN_OPEN = "\u767b\u5f55\u5f00\u542f"
 CMD_LOGIN_CLOSE = "\u767b\u5f55\u5173\u95ed"
+CMD_CREATE_BOT = "\u521b\u5efa\u673a\u5668\u4eba"
 
 
 @register(
     "astrbot_plugin_linyu_remote_admin",
     "linyu",
     "\u53d1\u9001\u7533\u8bf7\u767b\u5f55\uff0c\u81ea\u52a8\u7533\u8bf7\u4e00\u4e2a NapCat \u626b\u7801\u673a\u5668\u4eba\u3002",
-    "1.0.4",
+    "1.0.5",
     "https://github.com/Ceiity/linyu",
 )
 class Main(Star):
@@ -175,6 +176,16 @@ class Main(Star):
     async def _login_status(self, name: str) -> dict:
         return await asyncio.to_thread(self._post_json_sync, "/api/remote/napcat/login-status", {"name": name})
 
+    async def _create_instances(self, event: AstrMessageEvent, count: int) -> dict:
+        payload = {
+            "requester": self._sender_id(event),
+            "group_id": self._group_id(event),
+            "bot_self_id": self._self_id(event),
+            "source": "astrbot_plugin_linyu_remote_admin",
+            "count": count,
+        }
+        return await asyncio.to_thread(self._post_json_sync, "/api/remote/napcat/create", payload)
+
     async def _wait_login_success(self, name: str, timeout_seconds: int = 180, interval_seconds: int = 5) -> dict | None:
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
@@ -222,6 +233,30 @@ class Main(Star):
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         text = (event.message_str or "").strip()
+        if text.startswith(CMD_CREATE_BOT):
+            if not self._is_owner(event):
+                return
+            parts = text.split()
+            count = 1
+            if len(parts) >= 2:
+                try:
+                    count = int(parts[1])
+                except Exception:
+                    count = 1
+            count = max(1, min(count, 20))
+            yield event.plain_result(f"\u6b63\u5728\u521b\u5efa\u673a\u5668\u4eba x{count}\uff0c\u8bf7\u7a0d\u7b49\u2026\u2026")
+            try:
+                task = await self._create_instances(event, count)
+                yield event.plain_result(
+                    f"\u521b\u5efa\u4efb\u52a1\u5df2\u63d0\u4ea4\uff1a{task.get('title', 'NapCat')}\n"
+                    f"\u4efb\u52a1 ID\uff1a{task.get('id', '')}\n"
+                    "\u53ef\u5728 Web \u9762\u677f\u7684\u4efb\u52a1\u8fdb\u5ea6\u91cc\u67e5\u770b\u3002"
+                )
+            except Exception as e:
+                logger.exception("NapCat create command failed")
+                yield event.plain_result(f"\u521b\u5efa\u5931\u8d25\uff1a{e}")
+            return
+
         if text in {CMD_LOGIN_OPEN, CMD_LOGIN_CLOSE}:
             if not self._is_owner(event):
                 return

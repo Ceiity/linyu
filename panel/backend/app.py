@@ -1680,6 +1680,8 @@ class Handler(BaseHTTPRequestHandler):
             p = urlparse(self.path)
             if p.path == "/api/remote/napcat/create-login":
                 return self.remote_napcat_create_login()
+            if p.path == "/api/remote/napcat/create":
+                return self.remote_napcat_create_instances()
             if p.path == "/api/remote/napcat/login-status":
                 return self.remote_napcat_login_status()
             if p.path == "/api/login":
@@ -1824,6 +1826,23 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(min(2.5, 0.4 * (fail_count - LOGIN_SLOWDOWN_AFTER)))
         audit("anonymous", "login.failed", {"ip_hash": login_key[:12], "fail_count": fail_count}, False)
         self.send_api(api(False, message="账号或密码错误", code="BAD_LOGIN"), 401)
+
+
+    def remote_napcat_create_instances(self):
+        data = self.read_json()
+        if not self.remote_auth_ok(data):
+            audit("remote", "remote.napcat.create.denied", {"ip_hash": self.remote_client_key()[:12]}, False)
+            return self.send_api(api(False, message="remote auth failed", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
+        self.check_remote_rate_limit()
+        try:
+            count = int(data.get("count", 1) or 1)
+        except Exception:
+            count = 1
+        count = max(1, min(count, 20))
+        requester = str(data.get("requester") or "remote")[:64]
+        t = create_task("\u0051\u0051 \u6307\u4ee4\u521b\u5efa NapCat x%d" % count, "remote.napcat.create", task_add_napcat, "remote:" + requester, count)
+        audit("remote", "remote.napcat.create", {"count": count, "requester": requester, "task": t.id}, True)
+        return self.send_api(api(True, t.to_dict()))
 
     def remote_napcat_create_login(self):
         data = self.read_json()
