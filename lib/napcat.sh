@@ -151,27 +151,57 @@ verify_napcat_instance(){
 
 sync_napcat_reverse_configs(){
   [[ -f "$NAPCAT_INDEX_FILE" ]] || return 0
-  local name webui ws http webtoken id astrbot_ws_port dir cfg
+  local name webui ws http webtoken id astrbot_ws_port dir cfg token_to_use
   while IFS=$'\t' read -r name webui ws http webtoken; do
     [[ -n "${name:-}" ]] || continue
     id="${name#napcat}"; id="$((10#$id))"
     astrbot_ws_port="$((ASTRBOT_INTERNAL_WS_PORT + id - 1))"
     dir="$NAPCAT_BASE_DIR/$name"
+    token_to_use="${ASTRBOT_REVERSE_WS_TOKEN:-yuyu521521}"
     shopt -s nullglob
     for cfg in "$dir"/config/onebot11*.json; do
-      jq --arg url "ws://astrbot:${astrbot_ws_port}/ws" --arg token "$ASTRBOT_REVERSE_WS_TOKEN" '
-        .network = (.network // {})
-        | .network.websocketClients = (.network.websocketClients // [])
-        | if (.network.websocketClients | length) > 0 then
-            .network.websocketClients |= map(.url=$url | .token=$token | .enable=true | .messagePostFormat=(.messagePostFormat // "array") | .reportSelfMessage=(.reportSelfMessage // false))
-          else
-            .network.websocketClients = [{"name":"rws","enable":true,"url":$url,"messagePostFormat":"array","reportSelfMessage":false,"reconnectInterval":30000,"token":$token,"debug":false,"heartInterval":30000}]
-          end
-      ' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+      [[ -f "$cfg" ]] || continue
+      python3 - "$cfg" "ws://astrbot:${astrbot_ws_port}/ws" "$token_to_use" <<'PY'
+import json, os, sys
+path, url, token = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(path, 'r', encoding='utf-8-sig') as f:
+        data = json.load(f)
+except Exception:
+    data = {}
+if not isinstance(data, dict):
+    data = {}
+network = data.setdefault('network', {})
+if not isinstance(network, dict):
+    network = {}
+    data['network'] = network
+clients = network.get('websocketClients')
+if not isinstance(clients, list) or not clients:
+    clients = [{"name":"rws"}]
+fixed = []
+for item in clients:
+    if not isinstance(item, dict):
+        item = {}
+    item['name'] = item.get('name') or 'rws'
+    item['enable'] = True
+    item['url'] = url
+    item['messagePostFormat'] = item.get('messagePostFormat') or 'array'
+    item['reportSelfMessage'] = bool(item.get('reportSelfMessage', False))
+    item['reconnectInterval'] = int(item.get('reconnectInterval') or 30000)
+    item['token'] = token
+    item['debug'] = bool(item.get('debug', False))
+    item['heartInterval'] = int(item.get('heartInterval') or 30000)
+    fixed.append(item)
+network['websocketClients'] = fixed
+tmp = path + '.tmp'
+with open(tmp, 'w', encoding='utf-8') as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+os.replace(tmp, path)
+PY
     done
     shopt -u nullglob
   done < "$NAPCAT_INDEX_FILE"
-  success "NapCat reverse WebSocket configs synced; token=${ASTRBOT_REVERSE_WS_TOKEN}"
+  success "NapCat reverse WebSocket configs synced; token=${ASTRBOT_REVERSE_WS_TOKEN:-yuyu521521}"
 }
 add_napcat_instances(){
   local count="$1" width i id name token webui ws http file total astrbot_ws_port reserved_ports="" ids=()
