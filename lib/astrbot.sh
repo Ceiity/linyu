@@ -31,13 +31,13 @@ EOF
 }
 deploy_astrbot(){ step "Deploying AstrBot with official image ${ASTRBOT_IMAGE}"; local file; file="$(generate_astrbot_compose)"; compose_pull "$file" || warn "Image pull failed; trying to start with local image/cache."; compose_up "$file"; wait_container "$ASTRBOT_CONTAINER" 180 || { docker logs "$ASTRBOT_CONTAINER" --tail 120 || true; fail "AstrBot container did not become running."; exit 1; }; wait_astrbot_web 180 || warn "AstrBot WebUI did not return HTTP success yet; container is running."; success "AstrBot started: http://$(private_ip):${ASTRBOT_WEB_PORT}"; }
 wait_astrbot_web(){
-  local timeout="${1:-60}" i code
+  local timeout="${1:-60}" i code web_port="${ASTRBOT_WEB_PORT:-6185}"
   # AstrBot 新版根路径可能返回 405/403，这代表 Web 服务已经启动。
   # 不能使用 curl -f，否则“免 @ / 免前缀”应用后会误判未就绪并等待到超时。
   for ((i=1;i<=timeout;i++)); do
-    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${ASTRBOT_WEB_PORT}/" 2>/dev/null || true)"
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${web_port}/" 2>/dev/null || true)"
     [[ "$code" =~ ^[0-9]{3}$ && "$code" != "000" ]] && return 0
-    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${ASTRBOT_WEB_PORT}/dashboard" 2>/dev/null || true)"
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${web_port}/dashboard" 2>/dev/null || true)"
     [[ "$code" =~ ^[0-9]{3}$ && "$code" != "000" ]] && return 0
     sleep 1
   done
@@ -62,7 +62,7 @@ get_astrbot_password(){
 get_astrbot_token(){ echo "${ASTRBOT_REVERSE_WS_TOKEN}"; }
 
 astrbot_common_jq_filter(){
-  cat <<'EOF'
+cat <<'EOF'
 .dashboard = (.dashboard // {})
 | .dashboard.host = "0.0.0.0"
 | .dashboard.port = 6185
@@ -96,6 +96,12 @@ astrbot_common_jq_filter(){
 EOF
 }
 
+astrbot_effective_compare_filter(){
+cat <<'EOF'
+del(.platform_settings.group_message_needs_wake_prefix, .platform_settings.wake_prefix)
+EOF
+}
+
 apply_astrbot_no_prefix_wake(){
   local targets=() dst tmp changed=0
   [[ -f "$DATA_DIR/cmd_config.json" ]] && targets+=("$DATA_DIR/cmd_config.json")
@@ -106,10 +112,18 @@ apply_astrbot_no_prefix_wake(){
   for dst in "${targets[@]}"; do
     tmp="$INSTALL_PREFIX/$(basename "$dst").no-prefix.json"
     jq "$(astrbot_common_jq_filter)" "$dst" > "$tmp"
+    if jq -S "$(astrbot_effective_compare_filter)" "$tmp" > "${tmp}.new.norm" 2>/dev/null && jq -S "$(astrbot_effective_compare_filter)" "$dst" > "${tmp}.old.norm" 2>/dev/null && cmp -s "${tmp}.new.norm" "${tmp}.old.norm"; then
+      rm -f "$tmp" "${tmp}.new.norm" "${tmp}.old.norm"
+      continue
+    fi
     install -m 600 "$tmp" "$dst"
-    rm -f "$tmp"
+    rm -f "$tmp" "${tmp}.new.norm" "${tmp}.old.norm"
     changed=$((changed+1))
   done
+  if (( changed == 0 )); then
+    success "AstrBot no-prefix/no-mention wake config already applied; no restart needed."
+    return 0
+  fi
   if container_running "$ASTRBOT_CONTAINER"; then
     docker restart "$ASTRBOT_CONTAINER" >/dev/null
     wait_container "$ASTRBOT_CONTAINER" 180 || { docker logs "$ASTRBOT_CONTAINER" --tail 120 || true; fail "AstrBot failed to restart after no-prefix config."; return 1; }
@@ -140,8 +154,13 @@ sync_astrbot_platforms(){
     platforms_json="[{\"id\":\"napcat01\",\"type\":\"aiocqhttp\",\"enable\":true,\"ws_reverse_host\":\"0.0.0.0\",\"ws_reverse_port\":${ASTRBOT_INTERNAL_WS_PORT},\"ws_reverse_token\":\"${ASTRBOT_REVERSE_WS_TOKEN}\"}]"
   fi
   jq --argjson platforms "$platforms_json" "$(astrbot_common_jq_filter) | .platform = \$platforms" "$dst" > "$tmp"
+  if jq -S "$(astrbot_effective_compare_filter)" "$tmp" > "${tmp}.new.norm" 2>/dev/null && jq -S "$(astrbot_effective_compare_filter)" "$dst" > "${tmp}.old.norm" 2>/dev/null && cmp -s "${tmp}.new.norm" "${tmp}.old.norm"; then
+    rm -f "$tmp" "${tmp}.new.norm" "${tmp}.old.norm"
+    success "AstrBot reverse WebSocket platforms already synced; no restart needed."
+    return 0
+  fi
   install -m 600 "$tmp" "$dst"
-  rm -f "$tmp"
+  rm -f "$tmp" "${tmp}.new.norm" "${tmp}.old.norm"
   if container_running "$ASTRBOT_CONTAINER"; then
     docker restart "$ASTRBOT_CONTAINER" >/dev/null
     wait_container "$ASTRBOT_CONTAINER" 180 || { docker logs "$ASTRBOT_CONTAINER" --tail 120 || true; fail "AstrBot failed to restart after platform sync."; return 1; }
@@ -151,34 +170,28 @@ sync_astrbot_platforms(){
 }
 
 repair_astrbot_napcat_connection(){
-  local name webui rest failed=0 restarted=0
-  step "一键配置 AstrBot 与 NapCat 连接"
+  local name webui rest failed=0 connected=0
+  load_state
+  step "Repairing AstrBot and NapCat connection"
   ensure_network
   if container_running "$ASTRBOT_CONTAINER"; then
     docker network connect "$NETWORK_NAME" "$ASTRBOT_CONTAINER" >/dev/null 2>&1 || true
   fi
-  sync_napcat_reverse_configs
-  sync_astrbot_platforms
   if [[ -f "$NAPCAT_INDEX_FILE" ]]; then
     while IFS=$'\t' read -r name webui rest; do
       [[ -n "${name:-}" ]] || continue
       docker network connect "$NETWORK_NAME" "$name" >/dev/null 2>&1 || true
-      if container_running "$name"; then
-        step "重启 ${name}，刷新反向 WebSocket 连接"
-        docker restart "$name" >/dev/null || { warn "${name} restart failed"; failed=$((failed+1)); continue; }
-        restarted=$((restarted+1))
-        wait_container "$name" 120 || { warn "${name} did not return running in time"; failed=$((failed+1)); }
-        [[ -n "${webui:-}" ]] && wait_napcat_webui "$webui" 60 || true
-      fi
+      connected=$((connected+1))
     done < "$NAPCAT_INDEX_FILE"
-    # NapCat may regenerate default onebot11.json during startup; sync again after restart.
-    sync_napcat_reverse_configs
   fi
+  # Do not restart NapCat here: network config changes can be applied by NapCat/WebUI,
+  # and preserving QQ login state is more important. Only AstrBot needs restart after platform/config changes.
+  sync_napcat_reverse_configs
+  sync_astrbot_platforms
   write_deploy_info
-  (( failed == 0 )) || { warn "一键配置完成，但有 ${failed} 个机器人需要稍后再看状态"; return 1; }
-  success "一键配置完成：已同步免 @ / 免前缀、Token、反向 WebSocket，并刷新 ${restarted} 个机器人连接"
+  (( failed == 0 )) || { warn "Connection repair completed with ${failed} NapCat issue(s)."; return 1; }
+  success "Connection repair completed: synced token/reverse WebSocket and connected ${connected} NapCat container(s) to Docker network; NapCat was not restarted, QQ login state preserved."
 }
-
 apply_astrbot_default_config(){
   local src=""
   if [[ -n "${ASTRBOT_CONFIG_FILE:-}" && -f "${ASTRBOT_CONFIG_FILE}" ]]; then
