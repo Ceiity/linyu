@@ -1594,6 +1594,14 @@ class Handler(BaseHTTPRequestHandler):
         supplied = str(self.headers.get("X-Remote-Token") or data.get("remote_token") or data.get("token") or "")
         return bool(expected) and hmac.compare_digest(supplied, expected)
 
+    def remote_principal_ok(self, data: dict) -> bool:
+        cfg = load_config()
+        owners = set(split_csv_ids(cfg.get("linyu_remote_owner_ids")))
+        bots = set(split_csv_ids(cfg.get("linyu_remote_bot_self_ids")))
+        requester = str(data.get("requester") or "").strip()
+        bot_self_id = str(data.get("bot_self_id") or "").strip()
+        return bool(owners) and bool(bots) and requester in owners and bot_self_id in bots
+
     def check_remote_rate_limit(self) -> None:
         key = self.remote_client_key()
         now_ts = time.time()
@@ -1895,6 +1903,9 @@ class Handler(BaseHTTPRequestHandler):
             audit("remote", "remote.napcat.create.denied", {"ip_hash": self.remote_client_key()[:12]}, False)
             return self.send_api(api(False, message="remote auth failed", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
         self.check_remote_rate_limit()
+        if not self.remote_principal_ok(data):
+            audit("remote", "remote.napcat.create.principal_denied", {"requester": str(data.get("requester", ""))[:64], "bot_self_id": str(data.get("bot_self_id", ""))[:64]}, False)
+            return self.send_api(api(False, message="remote principal forbidden", code="REMOTE_PRINCIPAL_FORBIDDEN"), HTTPStatus.FORBIDDEN)
         try:
             count = int(data.get("count", 1) or 1)
         except Exception:
@@ -1911,6 +1922,9 @@ class Handler(BaseHTTPRequestHandler):
             audit("remote", "remote.napcat.create_login.denied", {"ip_hash": self.remote_client_key()[:12]}, False)
             return self.send_api(api(False, message="remote auth failed", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
         self.check_remote_rate_limit()
+        if not self.remote_principal_ok(data):
+            audit("remote", "remote.napcat.create_login.principal_denied", {"requester": str(data.get("requester", ""))[:64], "bot_self_id": str(data.get("bot_self_id", ""))[:64]}, False)
+            return self.send_api(api(False, message="remote principal forbidden", code="REMOTE_PRINCIPAL_FORBIDDEN"), HTTPStatus.FORBIDDEN)
 
         with REMOTE_LOGIN_LOCK:
             requester = requester_key(str(data.get("requester") or self.remote_client_key()))

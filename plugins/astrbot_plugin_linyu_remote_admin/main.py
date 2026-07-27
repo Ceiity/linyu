@@ -24,7 +24,7 @@ CMD_CREATE_BOT = "\u521b\u5efa\u673a\u5668\u4eba"
     "astrbot_plugin_linyu_remote_admin",
     "linyu",
     "\u53d1\u9001\u7533\u8bf7\u767b\u5f55\uff0c\u81ea\u52a8\u7533\u8bf7\u4e00\u4e2a NapCat \u626b\u7801\u673a\u5668\u4eba\u3002",
-    "1.0.5",
+    "1.0.6",
     "https://github.com/Ceiity/linyu",
 )
 class Main(Star):
@@ -115,6 +115,30 @@ class Main(Star):
         owners = self._as_str_set(self._cfg("owner_ids", [DEFAULT_OWNER_ID]))
         return bool(owners) and sender in owners
 
+    def _is_managed_bot(self, event: AstrMessageEvent) -> bool:
+        self_id = self._self_id(event)
+        allowed_bots = self._as_str_set(self._cfg("bot_self_ids", [DEFAULT_BOT_SELF_ID]))
+        return bool(allowed_bots) and self_id in allowed_bots
+
+    def _hard_allowed(self, event: AstrMessageEvent) -> bool:
+        """Every plugin command must pass this first.
+
+        Only configured managed bot accounts may receive commands, and only
+        configured owner QQ accounts may send commands. Other scanned-in
+        NapCat accounts are ignored silently.
+        """
+        if self._cfg("enabled", True) is False:
+            return False
+        if not self._is_managed_bot(event):
+            return False
+        if not self._is_owner(event):
+            return False
+        groups = self._as_str_set(self._cfg("allowed_groups", []))
+        group = self._group_id(event)
+        if groups and group and group not in groups:
+            return False
+        return True
+
     def _allowed(self, event: AstrMessageEvent) -> tuple[bool, str]:
         if self._cfg("enabled", True) is False:
             return False, "\u8fdc\u7a0b\u7533\u8bf7\u767b\u5f55\u5df2\u5173\u95ed\u3002"
@@ -124,14 +148,14 @@ class Main(Star):
         allowed_bots = self._as_str_set(self._cfg("bot_self_ids", [DEFAULT_BOT_SELF_ID]))
         owners = self._as_str_set(self._cfg("owner_ids", [DEFAULT_OWNER_ID]))
         groups = self._as_str_set(self._cfg("allowed_groups", []))
-        if allowed_bots and self_id not in allowed_bots:
+        if not allowed_bots or self_id not in allowed_bots:
             return False, ""
         if not owners:
             return False, "\u8fd8\u6ca1\u6709\u914d\u7f6e\u4e3b\u4eba QQ\u3002\u8bf7\u5148\u5728\u63d2\u4ef6\u914d\u7f6e\u91cc\u586b\u5199 owner_ids\u3002"
-        if sender not in owners and not self._public_login_enabled():
-            return False, "\u5f53\u524d\u672a\u5f00\u653e\u7533\u8bf7\u767b\u5f55\u6743\u9650\uff0c\u8bf7\u8054\u7cfb\u4e3b\u4eba\u5f00\u542f\u3002"
+        if sender not in owners:
+            return False, ""
         if groups and group and group not in groups:
-            return False, "\u5f53\u524d\u7fa4\u6ca1\u6709\u542f\u7528\u7533\u8bf7\u767b\u5f55\u6743\u9650\u3002"
+            return False, ""
         return True, ""
 
     def _cooldown_ok(self, sender: str) -> tuple[bool, int]:
@@ -233,9 +257,11 @@ class Main(Star):
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         text = (event.message_str or "").strip()
+        triggers = self._as_str_set(self._cfg("triggers", [TRIGGER_APPLY_LOGIN]))
+        is_plugin_command = text.startswith(CMD_CREATE_BOT) or text in {CMD_LOGIN_OPEN, CMD_LOGIN_CLOSE} or text in triggers
+        if is_plugin_command and not self._hard_allowed(event):
+            return
         if text.startswith(CMD_CREATE_BOT):
-            if not self._is_owner(event):
-                return
             parts = text.split()
             count = 1
             if len(parts) >= 2:
@@ -258,16 +284,13 @@ class Main(Star):
             return
 
         if text in {CMD_LOGIN_OPEN, CMD_LOGIN_CLOSE}:
-            if not self._is_owner(event):
-                return
             enabled = text == CMD_LOGIN_OPEN
             self._set_public_login_enabled(enabled)
             if enabled:
-                yield event.plain_result("\u5df2\u5f00\u542f\u5168\u5458\u7533\u8bf7\u767b\u5f55\u6743\u9650\uff0c\u6240\u6709\u4eba\u90fd\u53ef\u4ee5\u53d1\u9001\u201c\u7533\u8bf7\u767b\u5f55\u201d\u3002")
+                yield event.plain_result("\u5df2\u5f00\u542f\u7533\u8bf7\u767b\u5f55\uff0c\u4f46\u4ecd\u4ec5\u9650\u914d\u7f6e\u7684\u6302\u673a\u5668\u4eba\u53f7\u4e0e\u4e3b\u4eba QQ \u89e6\u53d1\u3002")
             else:
                 yield event.plain_result("\u5df2\u5173\u95ed\u5168\u5458\u7533\u8bf7\u767b\u5f55\u6743\u9650\uff0c\u73b0\u5728\u53ea\u6709\u4e3b\u4eba\u53ef\u4ee5\u7533\u8bf7\u3002")
             return
-        triggers = self._as_str_set(self._cfg("triggers", [TRIGGER_APPLY_LOGIN]))
         if text not in triggers:
             return
         allowed, reason = self._allowed(event)
