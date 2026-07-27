@@ -327,6 +327,6 @@ button{cursor:pointer;touch-action:manipulation}
 /* 2026-07-27 Mobile NapCat and pool pages: normal top breathing room */
 @media(max-width:720px){.nap-hero,.pool-hero{margin-top:10px!important}.ios-safari .nap-hero,.ios-safari .pool-hero,.ipad-os .nap-hero,.ipad-os .pool-hero{margin-top:12px!important}}
 
-/* 2026-07-27 Robot pool mobile bottom room: keep last action row above bottom nav */
-@media(max-width:720px){.content:has(.pool-mobile-list){padding-bottom:calc(154px + var(--safe-bottom))!important}.pool-mobile-list{padding-bottom:calc(48px + var(--safe-bottom))!important}.pool-mobile-card:last-child{margin-bottom:calc(34px + var(--safe-bottom))!important}}
-@media(max-width:390px){.content:has(.pool-mobile-list){padding-bottom:calc(166px + var(--safe-bottom))!important}.pool-mobile-list{padding-bottom:calc(56px + var(--safe-bottom))!important}.pool-mobile-card:last-child{margin-bottom:calc(40px + var(--safe-bottom))!important}}
+/* 2026-07-27 Robot pool mobile bottom room: tight enough to show actions without large blank gap */
+@media(max-width:720px){.content:has(.pool-mobile-list){padding-bottom:calc(108px + var(--safe-bottom))!important}.pool-mobile-list{padding-bottom:calc(6px + var(--safe-bottom))!important}.pool-mobile-card:last-child{margin-bottom:0!important}}
+@media(max-width:390px){.content:has(.pool-mobile-list){padding-bottom:calc(118px + var(--safe-bottom))!important}.pool-mobile-list{padding-bottom:calc(10px + var(--safe-bottom))!important}.pool-mobile-card:last-child{margin-bottom:0!important}}
