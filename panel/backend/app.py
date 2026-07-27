@@ -28,6 +28,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 from urllib import request as urlrequest
 
+try:
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding, rsa
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    LOGIN_CRYPTO_AVAILABLE = True
+except Exception:
+    hashes = serialization = padding = rsa = AESGCM = None
+    LOGIN_CRYPTO_AVAILABLE = False
+
 APP_VERSION = "2.0.0"
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", "/opt/astrbot/AstrBot-Deploy"))
 INSTALL_PREFIX = Path(os.environ.get("INSTALL_PREFIX", "/opt/astrbot"))
@@ -55,6 +64,10 @@ LOGIN_DUMMY_HASH = "pbkdf2_sha256$180000$7f4b2f1379861d0dfb49e36af27e4f4c$gzQf0x
 REMOTE_CREATE_TIMES: dict[str, list[float]] = {}
 REMOTE_CREATE_WINDOW_SECONDS = 300
 REMOTE_CREATE_LIMIT = 30
+LOGIN_CHALLENGES: dict[str, dict] = {}
+LOGIN_CHALLENGE_LOCK = threading.RLock()
+LOGIN_CHALLENGE_TTL = 90
+LOGIN_RSA_PRIVATE = rsa.generate_private_key(public_exponent=65537, key_size=2048) if LOGIN_CRYPTO_AVAILABLE else None
 
 
 def now() -> str:
@@ -289,6 +302,72 @@ def register_login_failure(key: str, now_ts: float) -> int:
 def clear_login_failures(key: str) -> None:
     LOGIN_FAILS.pop(key, None)
     LOGIN_LOCKS.pop(key, None)
+
+
+def cleanup_login_challenges() -> None:
+    if not LOGIN_CRYPTO_AVAILABLE:
+        return
+    now_ts = time.time()
+    with LOGIN_CHALLENGE_LOCK:
+        for cid in list(LOGIN_CHALLENGES.keys()):
+            item = LOGIN_CHALLENGES.get(cid) or {}
+            if float(item.get("expires", 0)) <= now_ts:
+                LOGIN_CHALLENGES.pop(cid, None)
+
+
+def new_login_challenge(ip_key: str) -> dict:
+    if not LOGIN_CRYPTO_AVAILABLE or LOGIN_RSA_PRIVATE is None:
+        return {"enabled": False}
+    cleanup_login_challenges()
+    cid = secrets.token_urlsafe(24)
+    nonce = secrets.token_urlsafe(18)
+    issued = int(time.time())
+    with LOGIN_CHALLENGE_LOCK:
+        LOGIN_CHALLENGES[cid] = {"nonce": nonce, "ip_key": ip_key, "issued": issued, "expires": issued + LOGIN_CHALLENGE_TTL}
+    public_key = LOGIN_RSA_PRIVATE.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("ascii")
+    return {"enabled": True, "id": cid, "nonce": nonce, "issued_at": issued, "expires_in": LOGIN_CHALLENGE_TTL, "rsa_public_key_pem": public_key, "alg": "RSA-OAEP-256+AES-256-GCM+SHA-256"}
+
+
+def decrypt_login_payload(data: dict, ip_key: str) -> dict:
+    if str(data.get("mode") or "") != "crypto":
+        return data
+    if not LOGIN_CRYPTO_AVAILABLE or LOGIN_RSA_PRIVATE is None:
+        raise ValueError("????????")
+    enc = data.get("encrypted") if isinstance(data.get("encrypted"), dict) else {}
+    cid = str(enc.get("challenge_id") or "")
+    with LOGIN_CHALLENGE_LOCK:
+        challenge = LOGIN_CHALLENGES.pop(cid, None)
+    if not challenge:
+        raise ValueError("?????????????")
+    if challenge.get("ip_key") != ip_key or float(challenge.get("expires", 0)) <= time.time():
+        raise ValueError("????????????")
+    try:
+        wrapped_key = base64.b64decode(str(enc.get("key") or ""))
+        iv = base64.b64decode(str(enc.get("iv") or ""))
+        ciphertext = base64.b64decode(str(enc.get("ciphertext") or ""))
+        aad = str(enc.get("aad") or "").encode("utf-8")
+        digest = str(enc.get("digest") or "")
+        aes_key = LOGIN_RSA_PRIVATE.decrypt(
+            wrapped_key,
+            padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
+        )
+        plain = AESGCM(aes_key).decrypt(iv, ciphertext, aad)
+        calc = base64.b64encode(hashlib.sha256(aad + b"." + ciphertext).digest()).decode("ascii")
+        if not hmac.compare_digest(calc, digest):
+            raise ValueError("??????????")
+        payload = json.loads(plain.decode("utf-8"))
+        if str(payload.get("challenge_id") or "") != cid or str(payload.get("nonce") or "") != str(challenge.get("nonce") or ""):
+            raise ValueError("????????")
+        if abs(int(time.time()) - int(payload.get("ts") or 0)) > LOGIN_CHALLENGE_TTL + 30:
+            raise ValueError("???????????")
+        return {"username": str(payload.get("username") or ""), "password": str(payload.get("password") or ""), "crypto": True}
+    except ValueError:
+        raise
+    except Exception:
+        raise ValueError("??????????")
 
 
 def shell_state() -> dict[str, str]:
@@ -1684,6 +1763,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.static(p.path)
             if p.path == "/api/health":
                 return self.send_api(api(True, {"status": "ok"}))
+            if p.path == "/api/login/challenge":
+                return self.send_api(api(True, new_login_challenge(login_key_for_ip(self.client_address[0] if self.client_address else "unknown"))))
             user = self.require_auth()
             if not user:
                 return
@@ -1873,6 +1954,12 @@ class Handler(BaseHTTPRequestHandler):
             audit("anonymous", "login.rate_limited", {"ip_hash": login_key[:12], "retry_after": retry_after}, False)
             return
         LOGIN_FAILS[login_key] = [t for t in LOGIN_FAILS.get(login_key, []) if now_ts - t < LOGIN_FAIL_WINDOW_SECONDS]
+        try:
+            data = decrypt_login_payload(data, login_key)
+        except ValueError as e:
+            fail_count = register_login_failure(login_key, now_ts)
+            audit("anonymous", "login.crypto_failed", {"ip_hash": login_key[:12], "fail_count": fail_count, "reason": str(e)[:120]}, False)
+            return self.send_api(api(False, message=str(e), code="BAD_LOGIN_CRYPTO"), 400)
         supplied_user = str(data.get("username", ""))
         supplied_password = str(data.get("password", ""))
         username_ok = hmac.compare_digest(supplied_user, str(cfg["username"]))
@@ -1888,7 +1975,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-            audit(cfg["username"], "login", {}, True)
+            audit(cfg["username"], "login", {"crypto": bool(data.get("crypto"))}, True)
             return
         fail_count = register_login_failure(login_key, now_ts)
         if fail_count > LOGIN_SLOWDOWN_AFTER:
