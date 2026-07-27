@@ -297,6 +297,6 @@ button{cursor:pointer;touch-action:manipulation}
 @media(max-width:720px){.nap-mobile-card .nap-webui-main{display:flex!important;width:100%!important;grid-column:1/-1!important}.nap-mobile-card .action-pills{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important;width:100%!important}.nap-mobile-card .action-pills .tiny{width:100%!important;min-width:0!important;justify-content:center!important;padding-inline:8px!important}.nap-mobile-card .action-pills .tiny.scan{width:100%!important}}
 @media(max-width:390px){.nap-mobile-card .action-pills{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
 
-/* 2026-07-27 Mobile NapCat page: add extra scroll room so bottom card actions stay above tab bar */
-@media(max-width:720px){.content:has(.nap-mobile-list){padding-bottom:calc(150px + var(--safe-bottom))!important}.nap-mobile-list{padding-bottom:calc(42px + var(--safe-bottom))!important}.nap-mobile-card:last-child{margin-bottom:calc(34px + var(--safe-bottom))!important}}
-@media(max-width:390px){.content:has(.nap-mobile-list){padding-bottom:calc(170px + var(--safe-bottom))!important}.nap-mobile-card:last-child{margin-bottom:calc(46px + var(--safe-bottom))!important}}
+/* 2026-07-27 Mobile NapCat page: balanced scroll room, actions visible without excessive blank space */
+@media(max-width:720px){.content:has(.nap-mobile-list){padding-bottom:calc(118px + var(--safe-bottom))!important}.nap-mobile-list{padding-bottom:calc(12px + var(--safe-bottom))!important}.nap-mobile-card:last-child{margin-bottom:calc(10px + var(--safe-bottom))!important}}
+@media(max-width:390px){.content:has(.nap-mobile-list){padding-bottom:calc(130px + var(--safe-bottom))!important}.nap-mobile-card:last-child{margin-bottom:calc(16px + var(--safe-bottom))!important}}
