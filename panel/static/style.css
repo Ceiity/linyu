@@ -326,3 +326,7 @@ button{cursor:pointer;touch-action:manipulation}
 
 /* 2026-07-27 Mobile NapCat and pool pages: larger top offset per mobile reference */
 @media(max-width:720px){.nap-hero,.pool-hero{margin-top:56px!important}.ios-safari .nap-hero,.ios-safari .pool-hero,.ipad-os .nap-hero,.ipad-os .pool-hero{margin-top:60px!important}}
+
+/* 2026-07-27 Robot pool mobile bottom room: keep last action row above bottom nav */
+@media(max-width:720px){.content:has(.pool-mobile-list){padding-bottom:calc(154px + var(--safe-bottom))!important}.pool-mobile-list{padding-bottom:calc(48px + var(--safe-bottom))!important}.pool-mobile-card:last-child{margin-bottom:calc(34px + var(--safe-bottom))!important}}
+@media(max-width:390px){.content:has(.pool-mobile-list){padding-bottom:calc(166px + var(--safe-bottom))!important}.pool-mobile-list{padding-bottom:calc(56px + var(--safe-bottom))!important}.pool-mobile-card:last-child{margin-bottom:calc(40px + var(--safe-bottom))!important}}
