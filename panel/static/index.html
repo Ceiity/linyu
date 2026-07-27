@@ -32,14 +32,15 @@
       <div class="top-actions">
         <span id="globalStatus" class="status-pill grey">检测中</span>
         <button class="ghost" onclick="refresh(true,true)">刷新</button>
-        <button class="ghost" onclick="toggleTheme()">主题</button>
+        <button id="themeToggle" class="ghost theme-toggle" onclick="toggleThemeMenu(event)" aria-label="&#x5207;&#x6362;&#x4e3b;&#x9898;" aria-haspopup="true" aria-expanded="false">&#x2600;&#xfe0f;</button>
       </div>
     </header>
     <main id="content" class="content"></main>
     <nav id="bottomNav" class="bottom-nav"></nav>
   </div>
 
-  <div id="modal" class="modal hidden"><div class="modal-card"><div id="modalBody"></div><div class="modal-actions"><button onclick="closeModal()">取消</button><button id="modalOk" class="danger">确认</button></div></div></div>
+  <div id="themeMenu" class="theme-menu hidden" role="menu"></div>
+  <div id="modal" class="modal hidden"><div class="modal-card"><div id="modalBody"></div><div class="modal-actions"><button onclick="closeModal()">&#x53d6;&#x6d88;</button><button id="modalOk" class="danger">&#x786e;&#x8ba4;</button></div></div></div>
   <div id="toast" class="toast"></div>
   <script src="/assets/app.js"></script>
 </body>
