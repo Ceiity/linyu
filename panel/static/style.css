@@ -307,3 +307,6 @@ button{cursor:pointer;touch-action:manipulation}
 /* 2026-07-27 Task modal cleanup: remove redundant white title rectangle on glass dialogs */
 .task-modal h3{background:transparent!important;border-bottom:0!important;padding:0!important;margin:0!important;position:static!important}.task-modal{gap:16px!important}.modal-card:has(.task-modal){background:var(--glass-bg)!important}.modal-card:has(.task-modal) #modalBody{background:transparent!important}.task-modal .muted{background:transparent!important}.task-modal .progress{background:color-mix(in srgb,var(--text) 10%,transparent)!important}
 @media(max-width:720px){.task-modal h3{top:auto!important}.modal-card:has(.task-modal){padding-top:24px!important}}
+
+/* 2026-07-27 NapCat delete feedback: remove accepted delete tasks from the list immediately */
+.nap-removing{opacity:.35!important;transform:scale(.985)!important;filter:saturate(.55);pointer-events:none!important;transition:opacity .16s ease,transform .16s ease!important}
