@@ -300,3 +300,6 @@ button{cursor:pointer;touch-action:manipulation}
 /* 2026-07-27 Mobile NapCat page: slightly tighter final scroll room */
 @media(max-width:720px){.content:has(.nap-mobile-list){padding-bottom:calc(94px + var(--safe-bottom))!important}.nap-mobile-list{padding-bottom:0!important}.nap-mobile-card:last-child{margin-bottom:0!important}}
 @media(max-width:390px){.content:has(.nap-mobile-list){padding-bottom:calc(104px + var(--safe-bottom))!important}.nap-mobile-card:last-child{margin-bottom:0!important}}
+
+/* 2026-07-27 AstrBot one-click config area: remove redundant pale rectangle wrapper */
+.astr-action-card .desktop-action-grid .action-group{background:transparent!important;border-color:transparent!important;box-shadow:none!important;padding:0!important}.astr-action-card .desktop-action-grid .action-group>span{padding:0 2px!important}.astr-action-card .desktop-action-grid{gap:14px!important}.astr-action-card .desktop-action-grid .pill-btn{box-shadow:none!important}@media(max-width:720px){.astr-action-card .desktop-action-grid .action-group{background:transparent!important;border:0!important;padding:0!important}}
