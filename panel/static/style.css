@@ -324,5 +324,5 @@ button{cursor:pointer;touch-action:manipulation}
 @media(max-width:720px){.pool-mobile-card .nap-webui-main{display:flex!important;width:100%!important;grid-column:1/-1!important;justify-content:center!important;min-height:46px!important}.pool-mobile-card .action-pills{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important;width:100%!important}.pool-mobile-card .action-pills .tiny{width:100%!important;min-width:0!important;justify-content:center!important;padding-inline:8px!important}.pool-mobile-card .action-pills .tiny.scan{width:100%!important}}
 @media(max-width:390px){.pool-mobile-card .action-pills{grid-template-columns:repeat(2,minmax(0,1fr))!important}.pool-mobile-card .nap-webui-main{grid-column:1/-1!important}}
 
-/* 2026-07-27 Mobile NapCat and pool pages: give first cards a little top breathing room */
-@media(max-width:720px){.nap-hero,.pool-hero{margin-top:10px!important}.ios-safari .nap-hero,.ios-safari .pool-hero,.ipad-os .nap-hero,.ipad-os .pool-hero{margin-top:12px!important}}
+/* 2026-07-27 Mobile NapCat and pool pages: larger top offset per mobile reference */
+@media(max-width:720px){.nap-hero,.pool-hero{margin-top:56px!important}.ios-safari .nap-hero,.ios-safari .pool-hero,.ipad-os .nap-hero,.ipad-os .pool-hero{margin-top:60px!important}}
