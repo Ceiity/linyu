@@ -244,3 +244,32 @@ button,.pill-btn,.tiny,.link-pill,.nav-item{will-change:transform}button:hover,.
   [data-theme=dark] .bottom-nav .nav-item.active,[data-theme=dark] .bottom-nav .nav-item:active{background:rgba(255,255,255,.90)!important;color:#000!important;box-shadow:0 10px 28px rgba(255,255,255,.08),inset 0 1px 0 rgba(255,255,255,.5)!important}
   .bottom-nav .nav-item.active .nav-text,.bottom-nav .nav-item.active .adb-icon,.bottom-nav .nav-item:active .nav-text,.bottom-nav .nav-item:active .adb-icon{color:inherit!important;stroke:currentColor!important}
 }
+
+/* 2026-07-27 iOS Safari compatibility, device classes, safe areas */
+:root{--app-height:100vh;--vh:1vh;--safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px);--safe-left:env(safe-area-inset-left,0px);--safe-right:env(safe-area-inset-right,0px)}
+html{min-height:var(--app-height);-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation;overscroll-behavior:none}
+body{min-height:var(--app-height);-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+.app{min-height:var(--app-height)!important;height:var(--app-height)}
+.login-screen{min-height:var(--app-height)!important;padding-top:max(18px,var(--safe-top));padding-bottom:max(18px,var(--safe-bottom))}
+.topbar{padding-top:max(0px,var(--safe-top));padding-left:max(18px,var(--safe-left));padding-right:max(18px,var(--safe-right));transform:translateZ(0);backface-visibility:hidden;will-change:transform}
+.sidebar{padding-top:calc(24px + var(--safe-top));padding-left:max(18px,var(--safe-left));transform:translateZ(0);backface-visibility:hidden}
+.content{min-height:calc(var(--app-height) - 72px);padding-bottom:calc(36px + var(--safe-bottom))}
+.bottom-nav{padding-bottom:var(--safe-bottom);height:calc(68px + var(--safe-bottom))!important;transform:translateZ(0);backface-visibility:hidden;-webkit-backdrop-filter:blur(24px) saturate(160%);backdrop-filter:blur(24px) saturate(160%)}
+.theme-menu,.modal,.modal-card,.task-floating,.sidebar{backdrop-filter:blur(24px) saturate(160%);-webkit-backdrop-filter:blur(24px) saturate(160%)}
+button,.nav-item,.card,.file-card,.info-line,.kpi,.theme-choice,.link-pill,.status-pill,.pill-btn,.tiny,.side-brand{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+input,textarea,select,.code,pre,kbd,samp,.copyable,.selectable,.compact-url,.value{-webkit-user-select:text!important;user-select:text!important;-webkit-touch-callout:default!important}
+input,textarea,select{font-size:16px!important;line-height:1.35;touch-action:manipulation}
+button,input,textarea,select{appearance:none;-webkit-appearance:none}
+button{cursor:pointer;touch-action:manipulation}
+.scroll-locked body{overflow:hidden!important}
+.modal-card{max-height:min(88vh,calc(var(--app-height) - 32px));overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.modal-card #modalBody,.log-viewer,.code,.table-wrap,.scan-frame-wrap{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.theme-menu{max-height:calc(var(--app-height) - 96px);overflow:auto;overscroll-behavior:contain}
+.device-info-card{overflow:hidden}.device-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:14px}.device-grid>div{border:1px solid var(--line);background:var(--bg);border-radius:16px;padding:11px 12px;min-width:0}.device-grid b{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}.device-grid span{font-weight:800;word-break:break-word}.ua-details{margin-top:12px}.ua-details summary{cursor:pointer;font-weight:800;color:var(--muted);-webkit-user-select:none;user-select:none}.ua-details .code{margin-top:10px;max-height:180px}
+.ios-safari .app{height:var(--app-height)!important;min-height:var(--app-height)!important;overflow:hidden}.ios-safari .content{height:calc(var(--app-height) - 72px);overflow:auto;-webkit-overflow-scrolling:touch}.ios-safari .sidebar nav{height:calc(var(--app-height) - 96px)!important}.ios-safari .modal{height:var(--app-height)}
+.ios-safari .topbar,.ios-safari .bottom-nav,.ios-safari .sidebar,.ios-safari .task-floating{position:fixed;transform:translate3d(0,0,0)}
+.ios-safari input,.ios-safari textarea,.ios-safari select{font-size:16px!important}
+.ipad-os .content{padding-left:max(18px,var(--safe-left));padding-right:max(18px,var(--safe-right))}
+@media(max-width:720px){.app{padding-bottom:calc(76px + var(--safe-bottom))}.topbar{min-height:calc(66px + var(--safe-top));padding-top:calc(12px + var(--safe-top));padding-left:max(14px,var(--safe-left));padding-right:max(14px,var(--safe-right))}.content{padding-left:max(14px,var(--safe-left));padding-right:max(14px,var(--safe-right));padding-bottom:calc(94px + var(--safe-bottom))}.sidebar{bottom:0;height:var(--app-height);padding-bottom:calc(14px + var(--safe-bottom))!important}.modal-card{max-height:calc(var(--app-height) - 24px)!important;padding-bottom:calc(16px + var(--safe-bottom))!important}.modal-actions{bottom:0}.log-viewer,.code{max-height:calc(var(--app-height) - 230px)}.scan-frame-wrap{height:calc(var(--app-height) - 220px)!important}.device-grid{grid-template-columns:1fr 1fr}.device-info-card .section-head{display:grid;gap:10px}.device-info-card .section-head button{width:100%}}
+@media(max-width:390px){.topbar h2{font-size:17px}.content{padding:10px}.card{border-radius:18px;padding:14px}.action-pills,.head-actions,.nap-create,.pool-actions{grid-template-columns:1fr!important}.device-grid{grid-template-columns:1fr}.modal-card{border-radius:22px 22px 0 0!important}.modal-actions{grid-template-columns:1fr!important}.bottom-nav .nav-text{font-size:10px}.bottom-nav .nav-item{padding-inline:1px}}
+@media(orientation:landscape) and (max-height:520px){.login-screen{align-items:start;overflow:auto}.modal-card{max-height:calc(var(--app-height) - 18px)!important}.bottom-nav{height:calc(56px + var(--safe-bottom))!important}.content{padding-bottom:calc(70px + var(--safe-bottom))}.sidebar nav{height:calc(var(--app-height) - 68px)!important}.scan-frame-wrap{height:calc(var(--app-height) - 150px)!important}}

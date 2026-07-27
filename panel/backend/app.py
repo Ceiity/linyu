@@ -106,6 +106,32 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
+def password_strength_error(password: str, old_password: str = "") -> str:
+    value = str(password or "")
+    lower = value.lower()
+    if len(value) < 10:
+        return "\u65b0\u5bc6\u7801\u81f3\u5c11\u9700\u8981 10 \u4f4d"
+    if old_password and hmac.compare_digest(value, str(old_password)):
+        return "\u65b0\u5bc6\u7801\u4e0d\u80fd\u548c\u5f53\u524d\u5bc6\u7801\u76f8\u540c"
+    weak_words = {"password", "admin", "administrator", "qwerty", "123456", "111111", "000000", "letmein", "linyu", "astrbot", "napcat"}
+    if lower in weak_words or any(w in lower for w in ["password", "123456", "qwerty"]):
+        return "\u65b0\u5bc6\u7801\u8fc7\u4e8e\u5e38\u89c1\uff0c\u8bf7\u6362\u4e00\u4e2a\u66f4\u5f3a\u7684\u5bc6\u7801"
+    if re.fullmatch(r"(.)\1{9,}", value):
+        return "\u65b0\u5bc6\u7801\u4e0d\u80fd\u7531\u91cd\u590d\u5b57\u7b26\u7ec4\u6210"
+    classes = sum(bool(re.search(pat, value)) for pat in [r"[a-z]", r"[A-Z]", r"[0-9]", r"[^A-Za-z0-9]"])
+    if classes < 2:
+        return "\u65b0\u5bc6\u7801\u9700\u8981\u5305\u542b\u81f3\u5c11\u4e24\u7c7b\u5b57\u7b26"
+    return ""
+
+
+def bump_auth_epoch(cfg: dict) -> int:
+    epoch = int(time.time())
+    cfg["auth_epoch"] = epoch
+    cfg["password_changed_at"] = now()
+    cfg["session_secret"] = secrets.token_hex(32)
+    return epoch
+
+
 def default_config() -> dict:
     password = os.environ.get("PANEL_DEFAULT_PASSWORD") or secrets.token_urlsafe(12)
     return {
@@ -113,6 +139,8 @@ def default_config() -> dict:
         "password_hash": hash_password(password),
         "initial_password": password,
         "session_secret": secrets.token_hex(32),
+        "auth_epoch": int(time.time()),
+        "password_changed_at": "",
         "install_prefix": str(INSTALL_PREFIX),
         "project_dir": str(PROJECT_DIR),
         "upload_dir": str(INSTALL_PREFIX / "uploads"),
@@ -187,8 +215,7 @@ def save_config_patch(patch: dict) -> dict:
                 v = bool(v) if isinstance(v, bool) else str(v).lower() == "true"
             cfg[k] = v
     if patch.get("password"):
-        cfg["password_hash"] = hash_password(str(patch["password"]))
-        cfg.pop("initial_password", None)
+        raise ValueError("\u8bf7\u5230\u8d26\u53f7\u5b89\u5168\u9875\u4fee\u6539\u5bc6\u7801")
     write_json(PANEL_CONFIG, cfg)
     return cfg
 
@@ -1578,9 +1605,26 @@ class Handler(BaseHTTPRequestHandler):
 
     def make_session(self, user: str) -> str:
         cfg = load_config()
-        payload = base64.urlsafe_b64encode(json.dumps({"sid": secrets.token_urlsafe(18), "exp": time.time() + 86400 * 7}).encode()).decode().rstrip("=")
+        payload_obj = {
+            "sid": secrets.token_urlsafe(18),
+            "exp": time.time() + 86400 * 7,
+            "auth_epoch": int(cfg.get("auth_epoch") or 0),
+        }
+        payload = base64.urlsafe_b64encode(json.dumps(payload_obj, separators=(",", ":")).encode()).decode().rstrip("=")
         sig = hmac.new(cfg["session_secret"].encode(), payload.encode(), hashlib.sha256).hexdigest()
         return payload + "." + sig
+
+    def session_cookie(self, token: str, max_age: int = 86400) -> str:
+        cookie = "adb_session=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d" % (token, max_age)
+        if is_https_request(self):
+            cookie += "; Secure"
+        return cookie
+
+    def clear_session_cookie(self) -> None:
+        cookie = "adb_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"
+        if is_https_request(self):
+            cookie += "; Secure"
+        self.send_header("Set-Cookie", cookie)
 
     def current_user(self) -> str | None:
         cfg = load_config()
@@ -1599,14 +1643,30 @@ class Handler(BaseHTTPRequestHandler):
             return None
         try:
             data = json.loads(base64.urlsafe_b64decode(payload + "===").decode())
-            return cfg.get("username", "admin") if data.get("exp", 0) > time.time() else None
+            if data.get("exp", 0) <= time.time():
+                return None
+            if int(data.get("auth_epoch") or 0) != int(cfg.get("auth_epoch") or 0):
+                return None
+            return cfg.get("username", "admin")
         except Exception:
             return None
 
     def require_auth(self) -> str | None:
         user = self.current_user()
         if not user:
-            self.send_api(api(False, message="\u672a\u767b\u5f55", code="UNAUTHORIZED"), HTTPStatus.UNAUTHORIZED)
+            self.send_response(HTTPStatus.UNAUTHORIZED)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Pragma", "no-cache")
+            self.security_headers()
+            self.clear_session_cookie()
+            body = json.dumps(api(False, message="\u672a\u767b\u5f55\u6216\u767b\u5f55\u5df2\u5931\u6548", code="UNAUTHORIZED"), ensure_ascii=False).encode("utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
         return user
 
     def do_GET(self):
@@ -1653,6 +1713,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_api(api(True, backups_data()))
             if p.path == "/api/backups/download":
                 return self.handle_backup_download(p)
+            if p.path == "/api/device/info":
+                return self.send_api(api(True, self.device_server_info()))
             if p.path == "/api/settings":
                 return self.send_api(api(True, sanitize_config(load_config())))
             if p.path == "/api/https/status":
@@ -1742,6 +1804,8 @@ class Handler(BaseHTTPRequestHandler):
                 res = sync_linyu_remote_plugin_config(self.request_origin())
                 audit(user, "linyu_remote.sync", res, True)
                 return self.send_api(api(True, res, "已同步 QQ 远程登录插件配置"))
+            if p.path == "/api/device/report":
+                return self.device_report(user)
             if p.path == "/api/settings":
                 cfg = save_config_patch(self.read_json())
                 plugin_sync = sync_linyu_remote_plugin_config(self.request_origin())
@@ -1811,10 +1875,7 @@ class Handler(BaseHTTPRequestHandler):
             body = json.dumps(api(True, public_session_payload(cfg["username"])), ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            cookie = "adb_session=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400" % token
-            if is_https_request(self):
-                cookie += "; Secure"
-            self.send_header("Set-Cookie", cookie)
+            self.send_header("Set-Cookie", self.session_cookie(token, 86400))
             self.security_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -2350,20 +2411,56 @@ class Handler(BaseHTTPRequestHandler):
         audit(user, "astrbot.config.save", {"restart": restart}, True)
         self.send_api(api(True, {"output": out}, "配置已保存"))
 
+    def client_ip(self) -> str:
+        return (self.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip() or (self.client_address[0] if self.client_address else "unknown"))
+
+    def short_user_agent(self) -> str:
+        return str(self.headers.get("User-Agent") or "")[:240]
+
+    def device_server_info(self) -> dict:
+        return {"time": now(), "ip": self.client_ip(), "user_agent": self.short_user_agent()}
+
+    def device_report(self, user: str):
+        data = self.read_json()
+        allowed = {"system", "browser", "device_type", "screen", "viewport", "dpr", "user_agent"}
+        detail = {k: data.get(k) for k in allowed if k in data}
+        detail["ip"] = self.client_ip()
+        detail["user_agent"] = str(detail.get("user_agent") or self.short_user_agent())[:240]
+        audit(user, "device.report", detail, True)
+        self.send_api(api(True, {"recorded": True}))
+
     def change_password(self, user: str):
         data = self.read_json()
         old = str(data.get("old_password", ""))
         new = str(data.get("new_password", ""))
-        if len(new) < 8:
-            raise ValueError("新密码至少 8 位")
         cfg = load_config()
         if not verify_password(old, cfg.get("password_hash", "")):
-            raise ValueError("当前密码不正确")
+            audit(user, "password_changed", {"ip": self.client_ip(), "user_agent": self.short_user_agent(), "result": "bad_old_password"}, False)
+            raise ValueError("\u5f53\u524d\u5bc6\u7801\u4e0d\u6b63\u786e")
+        err = password_strength_error(new, old)
+        if err:
+            raise ValueError(err)
         cfg["password_hash"] = hash_password(new)
         cfg.pop("initial_password", None)
+        epoch = bump_auth_epoch(cfg)
         write_json(PANEL_CONFIG, cfg)
-        audit(user, "account.password.change", {}, True)
-        self.send_api(api(True, message="密码已修改，请重新登录"))
+        detail = {"ip": self.client_ip(), "user_agent": self.short_user_agent(), "auth_epoch": epoch}
+        audit(user, "password_changed", detail, True)
+        audit(user, "sessions_revoked", detail, True)
+        audit(user, "logout_all_devices", detail, True)
+        body = json.dumps(api(True, {"reauth_required": True}, message="\u5bc6\u7801\u5df2\u4fee\u6539\uff0c\u6240\u6709\u8bbe\u5907\u5df2\u9000\u51fa\u767b\u5f55\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55", code="REAUTH_REQUIRED"), ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Pragma", "no-cache")
+        self.security_headers()
+        self.clear_session_cookie()
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
 
 class PanelServer(ThreadingHTTPServer):
