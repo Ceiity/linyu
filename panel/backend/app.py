@@ -2183,9 +2183,19 @@ class Handler(BaseHTTPRequestHandler):
         if not self.remote_auth_ok(data):
             audit("remote", "remote.napcat.login_status.denied", {"ip_hash": self.remote_client_key()[:12]}, False)
             return self.send_api(api(False, message="remote auth failed", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
+        if not self.remote_principal_ok(data, allow_public_login=True):
+            audit("remote", "remote.napcat.login_status.principal_denied", {"requester": str(data.get("requester", ""))[:64], "bot_self_id": str(data.get("bot_self_id", ""))[:64]}, False)
+            return self.send_api(api(False, message="remote principal forbidden", code="REMOTE_PRINCIPAL_FORBIDDEN"), HTTPStatus.FORBIDDEN)
         name = safe_name(str(data.get("name") or data.get("container") or ""))
         if not name:
             raise ValueError("name is required")
+        requester = requester_key(str(data.get("requester") or self.remote_client_key()))
+        assigned = assignment_for_requester(requester)
+        owners = set(split_csv_ids(load_config().get("linyu_remote_owner_ids")))
+        is_owner = str(data.get("requester") or "").strip() in owners
+        if not is_owner and (not assigned or safe_name(str(assigned.get("name") or "")) != name):
+            audit("remote", "remote.napcat.login_status.assignment_denied", {"name": name, "requester": requester[:64]}, False)
+            return self.send_api(api(False, message="remote assignment forbidden", code="REMOTE_ASSIGNMENT_FORBIDDEN"), HTTPStatus.FORBIDDEN)
         row = napcat_row(name)
         bundle = napcat_login_status_bundle(row)
         bundle["webui_url"] = url_for_port(self.request_origin(), row["webui_port"], "webui")

@@ -24,7 +24,7 @@ CMD_CREATE_BOT = "\u521b\u5efa\u673a\u5668\u4eba"
     "astrbot_plugin_linyu_remote_admin",
     "linyu",
     "\u53d1\u9001\u7533\u8bf7\u767b\u5f55\uff0c\u81ea\u52a8\u7533\u8bf7\u4e00\u4e2a NapCat \u626b\u7801\u673a\u5668\u4eba\u3002",
-    "1.0.7",
+    "1.0.8",
     "https://github.com/Ceiity/linyu",
 )
 class Main(Star):
@@ -127,7 +127,7 @@ class Main(Star):
             return False
         groups = self._as_str_set(self._cfg("allowed_groups", []))
         group = self._group_id(event)
-        if groups and group and group not in groups:
+        if groups and group not in groups:
             return False
         return True
 
@@ -189,8 +189,15 @@ class Main(Star):
         }
         return await asyncio.to_thread(self._post_json_sync, "/api/remote/napcat/create-login", payload)
 
-    async def _login_status(self, name: str) -> dict:
-        return await asyncio.to_thread(self._post_json_sync, "/api/remote/napcat/login-status", {"name": name})
+    async def _login_status(self, event: AstrMessageEvent, name: str) -> dict:
+        payload = {
+            "name": name,
+            "requester": self._sender_id(event),
+            "group_id": self._group_id(event),
+            "bot_self_id": self._self_id(event),
+            "public_login_enabled": self._public_login_enabled(),
+        }
+        return await asyncio.to_thread(self._post_json_sync, "/api/remote/napcat/login-status", payload)
 
     async def _create_instances(self, event: AstrMessageEvent, count: int) -> dict:
         payload = {
@@ -202,12 +209,12 @@ class Main(Star):
         }
         return await asyncio.to_thread(self._post_json_sync, "/api/remote/napcat/create", payload)
 
-    async def _wait_login_success(self, name: str, timeout_seconds: int = 180, interval_seconds: int = 5) -> dict | None:
+    async def _wait_login_success(self, event: AstrMessageEvent, name: str, timeout_seconds: int = 180, interval_seconds: int = 5) -> dict | None:
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
             await asyncio.sleep(interval_seconds)
             try:
-                data = await self._login_status(name)
+                data = await self._login_status(event, name)
                 if data.get("already_login"):
                     return data
             except Exception:
@@ -330,7 +337,7 @@ class Main(Star):
                 yield event.plain_result("\u68c0\u6d4b\u5230\u767b\u5f55\u72b6\u6001\u5f02\u5e38\uff0c\u5df2\u81ea\u52a8\u91cd\u542f\u5e76\u751f\u6210\u65b0\u4e8c\u7ef4\u7801\u3002")
             else:
                 yield event.plain_result("\u4e8c\u7ef4\u7801\u5df2\u751f\u6210\uff0c\u8bf7\u626b\u7801\u767b\u5f55\u3002")
-            status = await self._wait_login_success(str(data.get("container") or data.get("name") or ""), timeout_seconds=180, interval_seconds=5)
+            status = await self._wait_login_success(event, str(data.get("container") or data.get("name") or ""), timeout_seconds=180, interval_seconds=5)
             if status:
                 login_uin = str(status.get("login_uin") or "")
                 msg = self._login_success_text(status, "\u767b\u5f55\u6210\u529f")
