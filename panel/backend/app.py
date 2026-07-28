@@ -78,6 +78,11 @@ def api(ok: bool, data=None, message: str = "", code: str = "") -> dict:
     return {"ok": ok, "data": data, "message": message, "code": code, "time": now(), "version": APP_VERSION}
 
 
+def b64u_int(n: int) -> str:
+    raw = int(n).to_bytes(max(1, (int(n).bit_length() + 7) // 8), "big")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
 def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -324,18 +329,49 @@ def new_login_challenge(ip_key: str) -> dict:
     issued = int(time.time())
     with LOGIN_CHALLENGE_LOCK:
         LOGIN_CHALLENGES[cid] = {"nonce": nonce, "ip_key": ip_key, "issued": issued, "expires": issued + LOGIN_CHALLENGE_TTL}
-    public_key = LOGIN_RSA_PRIVATE.public_key().public_bytes(
+    public = LOGIN_RSA_PRIVATE.public_key()
+    public_key = public.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     ).decode("ascii")
-    return {"enabled": True, "id": cid, "nonce": nonce, "issued_at": issued, "expires_in": LOGIN_CHALLENGE_TTL, "rsa_public_key_pem": public_key, "alg": "RSA-OAEP-256+AES-256-GCM+SHA-256"}
+    nums = public.public_numbers()
+    return {"enabled": True, "id": cid, "nonce": nonce, "issued_at": issued, "expires_in": LOGIN_CHALLENGE_TTL, "rsa_public_key_pem": public_key, "rsa_n": b64u_int(nums.n), "rsa_e": b64u_int(nums.e), "alg": "RSA-OAEP-256+AES-256-GCM+SHA-256"}
 
 
 def decrypt_login_payload(data: dict, ip_key: str) -> dict:
-    if str(data.get("mode") or "") != "crypto":
+    mode = str(data.get("mode") or "")
+    if mode not in {"crypto", "rsa-direct"}:
         return data
     if not LOGIN_CRYPTO_AVAILABLE or LOGIN_RSA_PRIVATE is None:
         raise ValueError("????????")
+    if mode == "rsa-direct":
+        enc = data.get("encrypted") if isinstance(data.get("encrypted"), dict) else {}
+        cid = str(enc.get("challenge_id") or "")
+        with LOGIN_CHALLENGE_LOCK:
+            challenge = LOGIN_CHALLENGES.pop(cid, None)
+        if not challenge:
+            raise ValueError("?????????????")
+        if challenge.get("ip_key") != ip_key or float(challenge.get("expires", 0)) <= time.time():
+            raise ValueError("????????????")
+        try:
+            plain = LOGIN_RSA_PRIVATE.decrypt(
+                base64.b64decode(str(enc.get("ciphertext") or "")),
+                padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
+            )
+            payload = json.loads(plain.decode("utf-8"))
+            if str(payload.get("c") or "") != cid or str(payload.get("n") or "") != str(challenge.get("nonce") or ""):
+                raise ValueError("????????")
+            if abs(int(time.time()) - int(payload.get("t") or 0)) > LOGIN_CHALLENGE_TTL + 30:
+                raise ValueError("???????????")
+            digest = str(payload.get("d") or "")
+            calc = base64.b64encode(hashlib.sha256((str(payload.get("u") or "") + "." + str(payload.get("n") or "") + "." + str(payload.get("p") or "")).encode("utf-8")).digest()).decode("ascii")
+            if digest and not hmac.compare_digest(calc, digest):
+                raise ValueError("??????????")
+            return {"username": str(payload.get("u") or ""), "password": str(payload.get("p") or ""), "crypto": True}
+        except ValueError:
+            raise
+        except Exception:
+            raise ValueError("??????????")
     enc = data.get("encrypted") if isinstance(data.get("encrypted"), dict) else {}
     cid = str(enc.get("challenge_id") or "")
     with LOGIN_CHALLENGE_LOCK:
