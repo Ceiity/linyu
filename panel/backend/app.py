@@ -341,7 +341,7 @@ def new_login_challenge(ip_key: str) -> dict:
 def decrypt_login_payload(data: dict, ip_key: str) -> dict:
     mode = str(data.get("mode") or "")
     if mode not in {"crypto", "rsa-direct"}:
-        return data
+        raise ValueError("\u767b\u5f55\u5fc5\u987b\u4f7f\u7528\u524d\u7aef\u52a0\u5bc6\uff0c\u8bf7\u5237\u65b0\u9875\u9762\u540e\u91cd\u8bd5")
     if not LOGIN_CRYPTO_AVAILABLE or LOGIN_RSA_PRIVATE is None:
         raise ValueError("????????")
     if mode == "rsa-direct":
@@ -1959,6 +1959,12 @@ class Handler(BaseHTTPRequestHandler):
         if ctype.startswith("text/") or ctype in {"application/javascript", "application/json"}:
             ctype += "; charset=utf-8"
         self.send_header("Content-Type", ctype)
+        if file.name in {"app.js", "style.css", "index.html"}:
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        else:
+            self.send_header("Cache-Control", "public, max-age=3600")
         self.security_headers()
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
