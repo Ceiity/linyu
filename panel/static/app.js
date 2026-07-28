@@ -255,7 +255,7 @@ logs:`<rect x="5" y="3.5" width="14" height="17" rx="2.5"/><path d="M8.5 8h7M8.5
 files:`<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H10l2 2.5h5.5A2.5 2.5 0 0 1 20 9v8.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11Z"/><path d="M7.5 12h9M7.5 15.5h5.5"/>`,
 archive:`<rect x="4" y="5" width="16" height="4" rx="1.5"/><path d="M6 9v9.5A2.5 2.5 0 0 0 8.5 21h7a2.5 2.5 0 0 0 2.5-2.5V9"/><path d="M9.5 13h5"/>`,
 upload:`<path d="M12 15.5V4.5"/><path d="M7.5 9 12 4.5 16.5 9"/><path d="M5 16.5v1.8A2.7 2.7 0 0 0 7.7 21h8.6a2.7 2.7 0 0 0 2.7-2.7v-1.8"/>`,
-settings:`<path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="M12 2.8v2.4M12 18.8v2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M2.8 12h2.4M18.8 12h2.4M4.9 19.1l1.7-1.7M17.4 6.6l1.7-1.7"/>`,
+settings:`<path d="M4 6.5h8.2M16.8 6.5H20"/><path d="M4 12h3.2M11.8 12H20"/><path d="M4 17.5h10.2M18.8 17.5H20"/><circle cx="14.5" cy="6.5" r="2.2"/><circle cx="9.5" cy="12" r="2.2"/><circle cx="16.5" cy="17.5" r="2.2"/>`,
 account:`<circle cx="10" cy="8" r="4"/><path d="M3.5 20a7 7 0 0 1 13 0"/><path d="M16.5 13.5l1.8 1.8 3.7-4.2"/>`,
 docker:`<path d="M4 13.2h15.5l-1.8 4.2A3 3 0 0 1 15 19.2H8a3 3 0 0 1-2.7-1.8L4 13.2Z"/><rect x="6" y="9" width="3" height="3" rx=".8"/><rect x="10" y="9" width="3" height="3" rx=".8"/><rect x="14" y="9" width="3" height="3" rx=".8"/><rect x="10" y="5" width="3" height="3" rx=".8"/>`,
 disk:`<rect x="4.5" y="4" width="15" height="16" rx="3"/><path d="M8 15.5h8M8 9h8"/><circle cx="16" cy="16" r=".8"/>`,
