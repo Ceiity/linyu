@@ -18,6 +18,7 @@ import subprocess
 import threading
 import time
 import traceback
+import uuid
 import zipfile
 from dataclasses import dataclass, field
 from collections import deque
@@ -55,6 +56,7 @@ NAPCAT_CREDENTIAL_CACHE: dict[str, dict] = {}
 NAPCAT_QR_CACHE: dict[str, dict] = {}
 NAPCAT_LOGIN_ASSIGNMENTS: dict[str, dict] = {}
 NAPCAT_LOGIN_ASSIGNMENT_FILE = Path(os.environ.get("NAPCAT_LOGIN_ASSIGNMENT_FILE", str(INSTALL_PREFIX / "napcat_login_assignments.json")))
+FILE_CENTER_INDEX = Path(os.environ.get("FILE_CENTER_INDEX", str(INSTALL_PREFIX / "file_center_index.json")))
 NAPCAT_LOGIN_ASSIGNMENT_TTL = 180
 LOGIN_FAIL_WINDOW_SECONDS = 600
 LOGIN_LOCK_SECONDS = 1800
@@ -174,6 +176,7 @@ def default_config() -> dict:
         "default_reverse_ws_token": "yuyu521521",
         "remote_api_enabled": True,
         "remote_api_token": os.environ.get("PANEL_REMOTE_TOKEN") or secrets.token_urlsafe(24),
+        "file_api_tokens": [],
         "linyu_remote_login_enabled": True,
         "linyu_remote_server_url": "",
         "linyu_remote_owner_ids": os.environ.get("LINYU_REMOTE_OWNER_IDS", "3179806299"),
@@ -1550,6 +1553,195 @@ def list_files(base: Path) -> list[dict]:
     return out
 
 
+def file_kind(filename: str, mime: str = "") -> str:
+    ext = Path(filename).suffix.lower().lstrip(".")
+    low = (mime or "").lower()
+    if low.startswith("image/") or ext in {"png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "heic"}:
+        return "image"
+    if low.startswith("video/") or ext in {"mp4", "webm", "mov", "m4v", "avi", "mkv"}:
+        return "video"
+    if low.startswith("audio/") or ext in {"mp3", "wav", "ogg", "m4a", "flac"}:
+        return "audio"
+    if ext == "pdf" or low == "application/pdf":
+        return "pdf"
+    if ext == "json" or low.endswith("/json"):
+        return "json"
+    if ext in {"txt", "log", "md", "csv", "yaml", "yml", "ini", "conf", "py", "js", "css", "html", "xml"} or low.startswith("text/"):
+        return "text"
+    if ext in {"zip", "tar", "gz", "tgz", "7z", "rar"}:
+        return "archive"
+    return "file"
+
+
+class FileRepository:
+    def __init__(self, index_path: Path):
+        self.index_path = index_path
+        self.lock = threading.RLock()
+
+    def load(self) -> dict:
+        data = read_json(self.index_path, {"files": {}, "version": 1})
+        if not isinstance(data, dict):
+            data = {"files": {}, "version": 1}
+        data.setdefault("files", {})
+        data.setdefault("version", 1)
+        return data
+
+    def save(self, data: dict) -> None:
+        write_json(self.index_path, data)
+
+    def all(self) -> dict:
+        with self.lock:
+            return self.load().get("files", {})
+
+    def upsert(self, item: dict) -> dict:
+        with self.lock:
+            data = self.load()
+            data.setdefault("files", {})[str(item["id"])] = item
+            self.save(data)
+            return item
+
+    def delete(self, file_id: str) -> dict | None:
+        with self.lock:
+            data = self.load()
+            item = data.setdefault("files", {}).pop(str(file_id), None)
+            self.save(data)
+            return item
+
+
+class FileService:
+    """Unified file service for Web UI, AstrBot plugins and future object storage adapters."""
+    def __init__(self, cfg: dict, origin: str = ""):
+        self.cfg = cfg
+        self.origin = (origin or public_origin()).rstrip("/")
+        self.base = Path(cfg.get("upload_dir") or (INSTALL_PREFIX / "uploads"))
+        self.repo = FileRepository(FILE_CENTER_INDEX)
+        self.base.mkdir(parents=True, exist_ok=True)
+        self.sync_existing()
+
+    def safe_filename(self, raw: str) -> str:
+        name = Path(raw or "").name.strip().replace("\x00", "")
+        name = re.sub(r"[^0-9A-Za-z._\-\u4e00-\u9fff]+", "_", name).strip("._ ")[:160]
+        return name or ("file_" + secrets.token_hex(4))
+
+    def file_path(self, item: dict) -> Path:
+        return path_under(self.base, str(item.get("stored_name") or item.get("filename") or ""))
+
+    def public_url(self, item: dict) -> str:
+        return "%s/files/%s/%s" % (self.origin, quote(str(item.get("id"))), quote(str(item.get("filename") or "file")))
+
+    def api_download_url(self, item: dict) -> str:
+        return "/api/files/%s/download" % quote(str(item.get("id")))
+
+    def sync_existing(self) -> None:
+        data = self.repo.load()
+        files = data.setdefault("files", {})
+        known = {str(v.get("stored_name") or v.get("filename")) for v in files.values() if isinstance(v, dict)}
+        changed = False
+        for p in self.base.iterdir():
+            if not p.is_file() or p.name.startswith(".") or p.name in known:
+                continue
+            st = p.stat()
+            fid = uuid.uuid4().hex
+            mime = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
+            files[fid] = {"id": fid, "filename": p.name, "stored_name": p.name, "size": st.st_size, "mime": mime, "kind": file_kind(p.name, mime), "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)), "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)), "downloads": 0, "views": 0, "public": True, "access": "public", "expires_at": 0, "max_downloads": 0}
+            changed = True
+        if changed:
+            self.repo.save(data)
+
+    def serialize(self, item: dict) -> dict:
+        out = dict(item)
+        out["url"] = self.public_url(item)
+        out["download_url"] = self.api_download_url(item)
+        out["type"] = out.get("mime") or "application/octet-stream"
+        out["name"] = out.get("filename")
+        return out
+
+    def list(self, query: str = "") -> list[dict]:
+        qv = (query or "").lower().strip()
+        rows = []
+        for item in self.repo.all().values():
+            if not isinstance(item, dict):
+                continue
+            path = self.file_path(item)
+            if not path.exists():
+                continue
+            if qv and qv not in str(item.get("filename", "")).lower() and qv not in str(item.get("mime", "")).lower() and qv not in str(item.get("kind", "")).lower():
+                continue
+            rows.append(self.serialize(item))
+        return sorted(rows, key=lambda x: str(x.get("created_at", "")), reverse=True)
+
+    def get(self, file_id: str) -> dict:
+        item = self.repo.all().get(str(file_id))
+        if not item:
+            raise FileNotFoundError("file not found")
+        if not self.file_path(item).exists():
+            raise FileNotFoundError("file not found")
+        return item
+
+    def upload_field(self, item, visibility: str = "public") -> dict:
+        filename = self.safe_filename(getattr(item, "filename", ""))
+        fid = uuid.uuid4().hex
+        stored = "%s-%s" % (fid[:12], filename)
+        max_size = int(self.cfg.get("max_upload_mb", 256)) * 1024 * 1024
+        data = item.file.read(max_size + 1)
+        if len(data) > max_size:
+            raise ValueError("????????")
+        dest = path_under(self.base, stored)
+        dest.write_bytes(data)
+        mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        now_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        meta = {"id": fid, "filename": filename, "stored_name": stored, "size": len(data), "mime": mime, "kind": file_kind(filename, mime), "created_at": now_text, "updated_at": now_text, "downloads": 0, "views": 0, "public": visibility != "private", "access": visibility or "public", "expires_at": 0, "max_downloads": 0}
+        return self.serialize(self.repo.upsert(meta))
+
+    def delete(self, file_id: str) -> dict:
+        item = self.get(file_id)
+        path = self.file_path(item)
+        removed = self.repo.delete(str(file_id)) or item
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return self.serialize(removed)
+
+    def touch(self, file_id: str, field: str) -> dict:
+        item = dict(self.get(file_id))
+        item[field] = int(item.get(field, 0) or 0) + 1
+        self.repo.upsert(item)
+        return item
+
+    def preview(self, file_id: str) -> dict:
+        item = self.touch(file_id, "views")
+        path = self.file_path(item)
+        kind = item.get("kind") or file_kind(str(item.get("filename")), str(item.get("mime")))
+        out = self.serialize(item)
+        out["preview_kind"] = kind
+        if kind in {"text", "json"}:
+            text = path.read_text(encoding="utf-8", errors="replace")[:200000]
+            out["content"] = text
+            if kind == "json":
+                try:
+                    out["json"] = json.loads(text)
+                except Exception:
+                    out["json"] = None
+        elif kind == "archive" and path.suffix.lower() == ".zip":
+            try:
+                with zipfile.ZipFile(path) as z:
+                    out["zip"] = {"count": len(z.infolist()), "files": [{"name": x.filename, "size": x.file_size} for x in z.infolist()[:80]]}
+            except Exception as e:
+                out["zip"] = {"error": str(e)}
+        return out
+
+    def storage(self) -> dict:
+        usage = shutil.disk_usage(str(self.base))
+        used = sum(int(x.get("size", 0) or 0) for x in self.repo.all().values() if isinstance(x, dict))
+        return {"base": str(self.base), "used": used, "total": usage.total, "free": usage.free, "remaining": usage.free}
+
+    def statistics(self) -> dict:
+        rows = self.list()
+        today = time.strftime("%Y-%m-%d")
+        return {"count": len(rows), "used": sum(int(x.get("size", 0) or 0) for x in rows), "today_uploads": sum(1 for x in rows if str(x.get("created_at", "")).startswith(today)), "downloads": sum(int(x.get("downloads", 0) or 0) for x in rows), "views": sum(int(x.get("views", 0) or 0) for x in rows), "by_kind": {k: sum(1 for x in rows if x.get("kind") == k) for k in sorted({str(x.get("kind")) for x in rows})}}
+
+
 def task_shell(task: Task, title: str, script: str, timeout: int) -> dict:
     task.line(title, 15)
     def on_line(line: str):
@@ -1701,6 +1893,28 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip() or self.client_address[0]
         return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()
 
+    def file_service(self) -> FileService:
+        return FileService(load_config(), self.request_origin())
+
+    def file_api_user(self) -> str | None:
+        auth = self.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            return None
+        supplied = auth[7:].strip()
+        if not supplied:
+            return None
+        cfg = load_config()
+        for tok in cfg.get("file_api_tokens", []) or []:
+            if not isinstance(tok, dict) or tok.get("disabled"):
+                continue
+            digest = str(tok.get("hash") or "")
+            if digest and hmac.compare_digest(digest, hashlib.sha256(supplied.encode()).hexdigest()):
+                return "api-token:" + str(tok.get("name") or tok.get("id") or "file")
+        return None
+
+    def require_file_access(self) -> str | None:
+        return self.current_user() or self.file_api_user()
+
     def remote_auth_ok(self, data: dict) -> bool:
         cfg = load_config()
         if not bool(cfg.get("remote_api_enabled", True)):
@@ -1801,10 +2015,15 @@ class Handler(BaseHTTPRequestHandler):
             p = urlparse(self.path)
             if p.path == "/" or p.path.startswith("/assets/"):
                 return self.static(p.path)
+            if p.path.startswith("/files/"):
+                return self.handle_public_file(p)
             if p.path == "/api/health":
                 return self.send_api(api(True, {"status": "ok"}))
             if p.path == "/api/login/challenge":
                 return self.send_api(api(True, new_login_challenge(login_key_for_ip(self.client_address[0] if self.client_address else "unknown"))))
+            api_user = self.file_api_user()
+            if api_user and (p.path == "/api/files" or (p.path.startswith("/api/files/") and p.path != "/api/files/tokens")):
+                return self.handle_files_get(p, api_user)
             user = self.require_auth()
             if not user:
                 return
@@ -1831,13 +2050,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.handle_logs(p)
             if p.path == "/api/logs/stream":
                 return self.handle_log_stream(p)
-            if p.path == "/api/files":
-                base = Path(load_config()["upload_dir"])
-                return self.send_api(api(True, {"base": str(base), "files": list_files(base)}))
             if p.path == "/api/files/view":
                 return self.handle_file_view(p)
             if p.path == "/api/files/download":
                 return self.handle_file_download(p)
+            if p.path == "/api/files" or p.path.startswith("/api/files/"):
+                return self.handle_files_get(p, user)
             if p.path == "/api/backups":
                 return self.send_api(api(True, backups_data()))
             if p.path == "/api/backups/download":
@@ -1866,6 +2084,26 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_api(api(False, message=str(e), code="SERVER_ERROR"), 500)
 
+    def do_DELETE(self):
+        try:
+            p = urlparse(self.path)
+            user = self.require_file_access()
+            if not user:
+                return self.require_auth()
+            if p.path.startswith("/api/files/"):
+                parts = [x for x in p.path.split("/") if x]
+                if len(parts) >= 3:
+                    item = self.file_service().delete(parts[2])
+                    audit(user, "file_center.delete", {"id": parts[2], "filename": item.get("filename")}, True)
+                    return self.send_api(api(True, item, "???"))
+            self.send_error(404)
+        except PermissionError as e:
+            self.send_api(api(False, message=str(e), code="FORBIDDEN"), 403)
+        except ValueError as e:
+            self.send_api(api(False, message=str(e), code="BAD_REQUEST"), 400)
+        except Exception as e:
+            self.send_api(api(False, message=str(e), code="SERVER_ERROR"), 500)
+
     def do_POST(self):
         try:
             p = urlparse(self.path)
@@ -1877,6 +2115,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.remote_napcat_login_status()
             if p.path == "/api/login":
                 return self.login()
+            api_user = self.file_api_user()
+            if api_user and p.path == "/api/files/upload":
+                return self.upload(api_user)
+            if api_user and p.path.startswith("/api/files/") and p.path != "/api/files/tokens":
+                return self.handle_files_post(p, api_user)
             user = self.require_auth()
             if not user:
                 return
@@ -1935,6 +2178,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_api(api(True, res, "已同步 QQ 远程登录插件配置"))
             if p.path == "/api/device/report":
                 return self.device_report(user)
+            if p.path == "/api/files/tokens":
+                return self.file_token_action(user)
+            if p.path.startswith("/api/files/"):
+                return self.handle_files_post(p, user)
             if p.path == "/api/settings":
                 cfg = save_config_patch(self.read_json())
                 plugin_sync = sync_linyu_remote_plugin_config(self.request_origin())
@@ -2372,6 +2619,115 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             return
 
+    def handle_files_get(self, p, user: str):
+        svc = self.file_service()
+        parts = [x for x in p.path.split("/") if x]
+        if p.path == "/api/files":
+            qs = parse_qs(p.query)
+            return self.send_api(api(True, {"base": str(svc.base), "files": svc.list(qs.get("q", [""])[0]), "statistics": svc.statistics(), "storage": svc.storage()}))
+        if p.path == "/api/files/storage":
+            return self.send_api(api(True, svc.storage()))
+        if p.path == "/api/files/statistics":
+            return self.send_api(api(True, svc.statistics()))
+        if p.path == "/api/files/tokens":
+            cfg = load_config()
+            rows = []
+            for t in cfg.get("file_api_tokens", []) or []:
+                if isinstance(t, dict):
+                    rows.append({"id": t.get("id"), "name": t.get("name"), "disabled": bool(t.get("disabled")), "created_at": t.get("created_at"), "last4": t.get("last4", "")})
+            return self.send_api(api(True, {"tokens": rows}))
+        if len(parts) >= 3:
+            fid = parts[2]
+            if len(parts) >= 4 and parts[3] == "download":
+                return self.send_file_center_download(fid, attachment=True)
+            if len(parts) >= 4 and parts[3] == "url":
+                item = svc.get(fid)
+                return self.send_api(api(True, {"id": fid, "url": svc.public_url(item)}))
+            if len(parts) >= 4 and parts[3] == "preview":
+                return self.send_api(api(True, svc.preview(fid)))
+            item = svc.get(fid)
+            return self.send_api(api(True, svc.serialize(item)))
+        self.send_error(404)
+
+    def handle_files_post(self, p, user: str):
+        parts = [x for x in p.path.split("/") if x]
+        if len(parts) >= 4 and parts[3] == "delete":
+            return self.handle_files_delete_id(parts[2], user)
+        self.send_error(404)
+
+    def handle_files_delete_id(self, file_id: str, user: str):
+        data = self.read_json()
+        if data.get("confirm") not in {file_id, "DELETE"}:
+            raise ValueError("???????")
+        item = self.file_service().delete(file_id)
+        audit(user, "file_center.delete", {"id": file_id, "filename": item.get("filename")}, True)
+        return self.send_api(api(True, item, "???"))
+
+    def file_token_action(self, user: str):
+        data = self.read_json()
+        action = str(data.get("action") or "create")
+        cfg = load_config()
+        tokens = [x for x in (cfg.get("file_api_tokens", []) or []) if isinstance(x, dict)]
+        if action in {"create", "regenerate"}:
+            if action == "regenerate":
+                tid = str(data.get("id") or "")
+                tokens = [x for x in tokens if str(x.get("id")) != tid]
+            raw = "fc_" + secrets.token_urlsafe(32)
+            tid = uuid.uuid4().hex[:12]
+            item = {"id": tid, "name": str(data.get("name") or "AstrBot Plugin"), "hash": hashlib.sha256(raw.encode()).hexdigest(), "last4": raw[-4:], "created_at": now(), "disabled": False}
+            tokens.append(item)
+            cfg["file_api_tokens"] = tokens
+            write_json(PANEL_CONFIG, cfg)
+            audit(user, "file_center.token." + action, {"id": tid}, True)
+            return self.send_api(api(True, {"token": raw, "item": {k: item[k] for k in ["id", "name", "last4", "created_at", "disabled"]}}, "Token ???????????"))
+        if action in {"delete", "disable", "enable"}:
+            tid = str(data.get("id") or "")
+            out = []
+            for item in tokens:
+                if str(item.get("id")) == tid:
+                    if action == "delete":
+                        continue
+                    item["disabled"] = action == "disable"
+                out.append(item)
+            cfg["file_api_tokens"] = out
+            write_json(PANEL_CONFIG, cfg)
+            audit(user, "file_center.token." + action, {"id": tid}, True)
+            return self.send_api(api(True, {"id": tid}))
+        raise ValueError("unsupported token action")
+
+    def send_file_center_download(self, file_id: str, attachment: bool = True):
+        svc = self.file_service()
+        item = svc.touch(file_id, "downloads" if attachment else "views")
+        path = svc.file_path(item)
+        body = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", item.get("mime") or mimetypes.guess_type(str(path))[0] or "application/octet-stream")
+        self.security_headers()
+        if attachment:
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(str(item.get("filename") or path.name)))
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
+    def handle_public_file(self, p):
+        parts = [x for x in p.path.split("/") if x]
+        if len(parts) < 2:
+            return self.send_error(404)
+        svc = self.file_service()
+        item = svc.get(parts[1])
+        if not item.get("public", True):
+            return self.send_api(api(False, message="file is private", code="PRIVATE_FILE"), 403)
+        expires = float(item.get("expires_at", 0) or 0)
+        if expires and expires <= time.time():
+            return self.send_api(api(False, message="file expired", code="FILE_EXPIRED"), 410)
+        max_dl = int(item.get("max_downloads", 0) or 0)
+        if max_dl and int(item.get("downloads", 0) or 0) >= max_dl:
+            return self.send_api(api(False, message="download limit reached", code="DOWNLOAD_LIMIT"), 403)
+        return self.send_file_center_download(str(item.get("id")), attachment=False)
+
     def handle_file_view(self, p):
         qs = parse_qs(p.query)
         f = path_under(Path(load_config()["upload_dir"]), qs.get("path", [""])[0])
@@ -2475,30 +2831,23 @@ class Handler(BaseHTTPRequestHandler):
         return name
 
     def upload(self, user: str):
-        cfg = load_config()
-        base = Path(cfg["upload_dir"])
-        base.mkdir(parents=True, exist_ok=True)
-        max_size = int(cfg.get("max_upload_mb", 256)) * 1024 * 1024
+        svc = self.file_service()
         ctype = self.headers.get("Content-Type", "")
         form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": ctype})
-        fields = form["files"] if "files" in form else []
+        fields = form["files"] if "files" in form else (form["file"] if "file" in form else [])
         if not isinstance(fields, list):
             fields = [fields]
+        visibility = "private" if str(form.getvalue("access") or form.getvalue("visibility") or "public") == "private" else "public"
         saved = []
         for item in fields:
             if not getattr(item, "filename", ""):
                 continue
-            name = self.safe_upload_filename(item.filename)
-            data = item.file.read(max_size + 1)
-            if len(data) > max_size:
-                raise ValueError("文件超过大小限制")
-            if name.lower().endswith(".json"):
-                json.loads(data.decode("utf-8"))
-            dest = path_under(base, name)
-            dest.write_bytes(data)
-            saved.append({"name": name, "size": len(data)})
-        audit(user, "files.upload", {"files": saved}, True)
-        self.send_api(api(True, {"files": saved}))
+            saved.append(svc.upload_field(item, visibility=visibility))
+        if not saved:
+            raise ValueError("??????")
+        audit(user, "file_center.upload", {"files": [{"id": x.get("id"), "filename": x.get("filename"), "size": x.get("size")} for x in saved]}, True)
+        first = saved[0]
+        self.send_api(api(True, {"success": True, "id": first.get("id"), "filename": first.get("filename"), "size": first.get("size"), "url": first.get("url"), "files": saved}))
 
     def delete_file(self, user: str):
         data = self.read_json()
