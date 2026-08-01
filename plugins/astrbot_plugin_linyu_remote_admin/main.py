@@ -18,13 +18,20 @@ DEFAULT_OWNER_ID = "3179806299"
 CMD_LOGIN_OPEN = "\u767b\u5f55\u5f00\u542f"
 CMD_LOGIN_CLOSE = "\u767b\u5f55\u5173\u95ed"
 CMD_CREATE_BOT = "\u521b\u5efa\u673a\u5668\u4eba"
+CMD_NO_PREFIX_ALIASES = {
+    "\u65e0\u9700@\u65e0\u9700\u524d\u7f00",
+    "\u65e0\u9700at\u65e0\u9700\u524d\u7f00",
+    "\u65e0\u9700at\u65e0\u9700\u524d\u6233",
+    "\u514d@\u514d\u524d\u7f00",
+    "\u514dat\u514d\u524d\u7f00",
+}
 
 
 @register(
     "astrbot_plugin_linyu_remote_admin",
     "linyu",
     "\u53d1\u9001\u7533\u8bf7\u767b\u5f55\uff0c\u81ea\u52a8\u7533\u8bf7\u4e00\u4e2a NapCat \u626b\u7801\u673a\u5668\u4eba\u3002",
-    "1.0.8",
+    "1.0.9",
     "https://github.com/Ceiity/linyu",
 )
 class Main(Star):
@@ -209,6 +216,15 @@ class Main(Star):
         }
         return await asyncio.to_thread(self._post_json_sync, "/api/remote/napcat/create", payload)
 
+    async def _apply_no_prefix(self, event: AstrMessageEvent) -> dict:
+        payload = {
+            "requester": self._sender_id(event),
+            "group_id": self._group_id(event),
+            "bot_self_id": self._self_id(event),
+            "source": "astrbot_plugin_linyu_remote_admin",
+        }
+        return await asyncio.to_thread(self._post_json_sync, "/api/remote/astrbot/no-prefix", payload)
+
     async def _wait_login_success(self, event: AstrMessageEvent, name: str, timeout_seconds: int = 180, interval_seconds: int = 5) -> dict | None:
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
@@ -256,9 +272,23 @@ class Main(Star):
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         text = (event.message_str or "").strip()
+        normalized = "".join(text.split()).lower()
+        no_prefix_command = normalized in CMD_NO_PREFIX_ALIASES
         triggers = self._as_str_set(self._cfg("triggers", [TRIGGER_APPLY_LOGIN]))
-        owner_command = text.startswith(CMD_CREATE_BOT) or text in {CMD_LOGIN_OPEN, CMD_LOGIN_CLOSE}
+        owner_command = text.startswith(CMD_CREATE_BOT) or text in {CMD_LOGIN_OPEN, CMD_LOGIN_CLOSE} or no_prefix_command
         if owner_command and not self._hard_allowed(event):
+            return
+        if no_prefix_command:
+            yield event.plain_result("\u6b63\u5728\u5e94\u7528 AstrBot \u7fa4\u804a\u65e0\u9700 @ / \u65e0\u9700\u524d\u7f00\u914d\u7f6e\u2026\u2026")
+            try:
+                task = await self._apply_no_prefix(event)
+                yield event.plain_result(
+                    "\u914d\u7f6e\u4efb\u52a1\u5df2\u63d0\u4ea4\uff0c\u5b8c\u6210\u540e AstrBot \u4f1a\u81ea\u52a8\u5e94\u7528\u65b0\u8bbe\u7f6e\u3002\n"
+                    f"\u4efb\u52a1 ID\uff1a{task.get('id', '')}"
+                )
+            except Exception as e:
+                logger.exception("AstrBot no-prefix command failed")
+                yield event.plain_result(f"\u5e94\u7528\u5931\u8d25\uff1a{e}")
             return
         if text.startswith(CMD_CREATE_BOT):
             parts = text.split()

@@ -14,6 +14,7 @@ Owner commands:
 
 - `\u767b\u5f55\u5f00\u542f`: allow everyone to use `\u7533\u8bf7\u767b\u5f55`.
 - `\u767b\u5f55\u5173\u95ed`: only owner can use `\u7533\u8bf7\u767b\u5f55`.
+- `\u65e0\u9700@\u65e0\u9700\u524d\u7f00` (also accepts `\u65e0\u9700at\u65e0\u9700\u524d\u7f00`): apply AstrBot group-chat no-mention/no-prefix wake settings.
 
 Owner is `3179806299` by default. Bot self account is restricted to `2141945863`.
 
@@ -30,3 +31,9 @@ QR refresh behavior:
 
 - `qr_retry_seconds` defaults to 60 seconds. If the first QR code expires or was not scanned in time, the user can send the trigger again after 60 seconds to get a fresh QR code.
 - The panel remote API still has server-side rate limiting to prevent abuse.
+
+Remote API used by the no-prefix owner command:
+
+`POST /api/remote/astrbot/no-prefix`
+
+The request must include a valid `X-Remote-Token`, configured owner QQ as `requester`, and configured managed bot QQ as `bot_self_id`. Public-login users cannot call this endpoint.
