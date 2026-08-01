@@ -10,10 +10,18 @@ if [[ ! -f "$SCRIPT_DIR/scripts/install-core.sh" ]]; then
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     git_auth_args=(-c "http.https://github.com/.extraheader=Authorization: Bearer ${GITHUB_TOKEN}")
   fi
+  git_retry(){
+    local attempt
+    for attempt in 1 2 3; do
+      "$@" && return 0
+      [[ "$attempt" -lt 3 ]] && sleep "$((attempt * 3))"
+    done
+    return 1
+  }
   if [[ -d "$PREFIX/AstrBot-Deploy/.git" ]]; then
-    git "${git_auth_args[@]}" -C "$PREFIX/AstrBot-Deploy" pull --ff-only
+    git_retry git "${git_auth_args[@]}" -C "$PREFIX/AstrBot-Deploy" pull --ff-only
   else
-    git "${git_auth_args[@]}" clone "$BOOTSTRAP_REPO" "$PREFIX/AstrBot-Deploy"
+    git_retry git "${git_auth_args[@]}" clone "$BOOTSTRAP_REPO" "$PREFIX/AstrBot-Deploy"
   fi
   exec bash "$PREFIX/AstrBot-Deploy/scripts/install-core.sh"
 fi
