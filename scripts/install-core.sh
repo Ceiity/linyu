@@ -22,6 +22,7 @@ install_full_stack(){
   local napcat_count; if [[ -n "${NAPCAT_COUNT:-}" ]]; then napcat_count="$NAPCAT_COUNT"; else read -r -p $'\u8bf7\u8f93\u5165 NapCat \u6570\u91cf\uff1a' napcat_count; fi; [[ -n "$napcat_count" ]] || napcat_count=1
   deploy_astrbot
   apply_astrbot_default_config
+  install_linyu_remote_plugin
   add_napcat_instances "$napcat_count"
   bash "$PROJECT_DIR/scripts/web-admin.sh" setup
   step "Running health checks"; retry 3 5 check_health || warn "Some health checks failed; inspect logs."

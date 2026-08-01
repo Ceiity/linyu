@@ -2574,7 +2574,7 @@ class Handler(BaseHTTPRequestHandler):
             ": \"${ASTRBOT_WS_PORT:=$(find_free_port 6199)}\"; "
             "save_state_var ASTRBOT_WEB_PORT \"$ASTRBOT_WEB_PORT\"; "
             "save_state_var ASTRBOT_WS_PORT \"$ASTRBOT_WS_PORT\"; "
-            "ensure_network; deploy_astrbot; apply_astrbot_default_config; "
+            "ensure_network; deploy_astrbot; apply_astrbot_default_config; install_linyu_remote_plugin; "
             % sh_quote(token)
         )
         if count > 0:
