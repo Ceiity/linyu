@@ -14,7 +14,9 @@ import secrets
 import re
 import shutil
 import socket
+import stat
 import subprocess
+import tarfile
 import threading
 import time
 import traceback
@@ -25,8 +27,8 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from urllib.parse import parse_qs, quote, urlparse
+from pathlib import Path, PurePosixPath
+from urllib.parse import parse_qs, quote, urlparse, urlsplit
 from urllib import request as urlrequest
 
 try:
@@ -38,7 +40,7 @@ except Exception:
     hashes = serialization = padding = rsa = AESGCM = None
     LOGIN_CRYPTO_AVAILABLE = False
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", "/opt/astrbot/AstrBot-Deploy"))
 INSTALL_PREFIX = Path(os.environ.get("INSTALL_PREFIX", "/opt/astrbot"))
 STATE_FILE = Path(os.environ.get("STATE_FILE", str(INSTALL_PREFIX / ".env")))
@@ -52,6 +54,7 @@ IP_CACHE = {"public": "", "ts": 0.0}
 IP_GEO_CACHE: dict[str, dict] = {}
 LOGIN_FAILS: dict[str, list[float]] = {}
 LOGIN_LOCKS: dict[str, float] = {}
+LOGIN_RATE_LOCK = threading.RLock()
 NAPCAT_CREDENTIAL_CACHE: dict[str, dict] = {}
 NAPCAT_QR_CACHE: dict[str, dict] = {}
 NAPCAT_LOGIN_ASSIGNMENTS: dict[str, dict] = {}
@@ -64,12 +67,22 @@ LOGIN_LOCK_THRESHOLD = 5
 LOGIN_SLOWDOWN_AFTER = 2
 LOGIN_DUMMY_HASH = "pbkdf2_sha256$180000$7f4b2f1379861d0dfb49e36af27e4f4c$gzQf0xR39bWn5zL6tIRkwQmL8kUmVJYzgbDbRKBS2F0="
 REMOTE_CREATE_TIMES: dict[str, list[float]] = {}
+REMOTE_RATE_LOCK = threading.RLock()
 REMOTE_CREATE_WINDOW_SECONDS = 300
 REMOTE_CREATE_LIMIT = 30
 LOGIN_CHALLENGES: dict[str, dict] = {}
 LOGIN_CHALLENGE_LOCK = threading.RLock()
 LOGIN_CHALLENGE_TTL = 90
+LOGIN_CHALLENGE_ISSUES: dict[str, list[float]] = {}
+LOGIN_CHALLENGE_WINDOW_SECONDS = 60
+LOGIN_CHALLENGE_LIMIT = 30
+MAX_LOGIN_CHALLENGES = 2048
+MAX_JSON_BODY_BYTES = 1024 * 1024
 LOGIN_RSA_PRIVATE = rsa.generate_private_key(public_exponent=65537, key_size=2048) if LOGIN_CRYPTO_AVAILABLE else None
+
+
+class PayloadTooLarge(ValueError):
+    pass
 
 
 def now() -> str:
@@ -178,6 +191,7 @@ def default_config() -> dict:
         "remote_api_token": os.environ.get("PANEL_REMOTE_TOKEN") or secrets.token_urlsafe(24),
         "file_api_tokens": [],
         "linyu_remote_login_enabled": True,
+        "linyu_remote_public_login_enabled": False,
         "linyu_remote_server_url": "",
         "linyu_remote_owner_ids": os.environ.get("LINYU_REMOTE_OWNER_IDS", "3179806299"),
         "linyu_remote_bot_self_ids": os.environ.get("LINYU_REMOTE_BOT_SELF_IDS", "2141945863"),
@@ -200,6 +214,14 @@ def load_config() -> dict:
         return cfg
     base = default_config()
     changed = False
+    # One-time migration: older plugin releases kept this switch beside the
+    # plugin. Preserve the administrator's existing choice, then make the
+    # panel config the only authority for subsequent authorization checks.
+    if "linyu_remote_public_login_enabled" not in cfg:
+        legacy_state = INSTALL_PREFIX / "data" / "plugins" / "astrbot_plugin_linyu_remote_admin" / "linyu_remote_admin_state.json"
+        legacy = read_json(legacy_state, {})
+        cfg["linyu_remote_public_login_enabled"] = bool(legacy.get("public_login_enabled", False)) if isinstance(legacy, dict) else False
+        changed = True
     for key, value in base.items():
         if key not in cfg:
             cfg[key] = value
@@ -209,9 +231,24 @@ def load_config() -> dict:
     return cfg
 
 
+def validated_http_url(value: object, field: str) -> str:
+    text = str(value or "").strip().rstrip("/")
+    if not text:
+        return ""
+    try:
+        parsed = urlsplit(text)
+    except Exception as exc:
+        raise ValueError("%s 地址格式不正确" % field) from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("%s 必须是有效的 HTTP/HTTPS 地址，且不能包含账号密码" % field)
+    if parsed.query or parsed.fragment:
+        raise ValueError("%s 不能包含查询参数或片段" % field)
+    return text
+
+
 def save_config_patch(patch: dict) -> dict:
     cfg = load_config()
-    allowed = {"install_prefix", "network_name", "default_reverse_ws_token", "upload_dir", "astrbot_plugin_dir", "napcat_watchdog_enabled", "napcat_watchdog_interval", "napcat_watchdog_abnormal_threshold", "napcat_recovery_max", "napcat_recovery_window", "napcat_recovery_wait", "max_upload_mb", "public_base_url", "allow_dangerous", "theme_color", "username", "linyu_remote_login_enabled", "linyu_remote_server_url", "linyu_remote_owner_ids", "linyu_remote_bot_self_ids", "linyu_remote_allowed_groups", "linyu_remote_triggers", "linyu_remote_qr_retry_seconds", "linyu_remote_cooldown_seconds"}
+    allowed = {"install_prefix", "network_name", "default_reverse_ws_token", "upload_dir", "astrbot_plugin_dir", "napcat_watchdog_enabled", "napcat_watchdog_interval", "napcat_watchdog_abnormal_threshold", "napcat_recovery_max", "napcat_recovery_window", "napcat_recovery_wait", "max_upload_mb", "public_base_url", "allow_dangerous", "theme_color", "linyu_remote_login_enabled", "linyu_remote_server_url", "linyu_remote_owner_ids", "linyu_remote_bot_self_ids", "linyu_remote_allowed_groups", "linyu_remote_triggers", "linyu_remote_qr_retry_seconds", "linyu_remote_cooldown_seconds"}
     numeric_limits = {
         "max_upload_mb": (1, 2048),
         "napcat_watchdog_interval": (30, 3600),
@@ -234,6 +271,14 @@ def save_config_patch(patch: dict) -> dict:
                     raise ValueError("%s \u5fc5\u987b\u5728 %s-%s \u4e4b\u95f4" % (k, lo, hi))
             if k in {"allow_dangerous", "napcat_watchdog_enabled", "linyu_remote_login_enabled"}:
                 v = bool(v) if isinstance(v, bool) else str(v).lower() == "true"
+            if k in {"public_base_url", "linyu_remote_server_url"}:
+                v = validated_http_url(v, k)
+            if k == "theme_color" and not re.fullmatch(r"#[0-9A-Fa-f]{6}", str(v or "")):
+                raise ValueError("主题色格式不正确")
+            if k == "network_name" and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}", str(v or "")):
+                raise ValueError("Docker 网络名称格式不正确")
+            if k == "default_reverse_ws_token" and not re.fullmatch(r"[A-Za-z0-9._+=-]{4,128}", str(v or "")):
+                raise ValueError("连接 Token 格式不正确")
             cfg[k] = v
     if patch.get("password"):
         raise ValueError("\u8bf7\u5230\u8d26\u53f7\u5b89\u5168\u9875\u4fee\u6539\u5bc6\u7801")
@@ -259,6 +304,7 @@ def sync_linyu_remote_plugin_config(origin: str | None = None) -> dict:
         server_url = "http://127.0.0.1:%s" % str(shell_state().get("WEB_ADMIN_PORT", "7070"))
     payload = {
         "enabled": bool(cfg.get("linyu_remote_login_enabled", True)),
+        "public_login_enabled": bool(cfg.get("linyu_remote_public_login_enabled", False)),
         "server_url": server_url,
         "remote_token": str(cfg.get("remote_api_token") or ""),
         "owner_ids": split_csv_ids(cfg.get("linyu_remote_owner_ids")),
@@ -300,16 +346,18 @@ def login_key_for_ip(ip: str) -> str:
 
 
 def register_login_failure(key: str, now_ts: float) -> int:
-    LOGIN_FAILS[key] = [t for t in LOGIN_FAILS.get(key, []) if now_ts - t < LOGIN_FAIL_WINDOW_SECONDS]
-    LOGIN_FAILS[key].append(now_ts)
-    if len(LOGIN_FAILS[key]) >= LOGIN_LOCK_THRESHOLD:
-        LOGIN_LOCKS[key] = now_ts + LOGIN_LOCK_SECONDS
-    return len(LOGIN_FAILS[key])
+    with LOGIN_RATE_LOCK:
+        LOGIN_FAILS[key] = [t for t in LOGIN_FAILS.get(key, []) if now_ts - t < LOGIN_FAIL_WINDOW_SECONDS]
+        LOGIN_FAILS[key].append(now_ts)
+        if len(LOGIN_FAILS[key]) >= LOGIN_LOCK_THRESHOLD:
+            LOGIN_LOCKS[key] = now_ts + LOGIN_LOCK_SECONDS
+        return len(LOGIN_FAILS[key])
 
 
 def clear_login_failures(key: str) -> None:
-    LOGIN_FAILS.pop(key, None)
-    LOGIN_LOCKS.pop(key, None)
+    with LOGIN_RATE_LOCK:
+        LOGIN_FAILS.pop(key, None)
+        LOGIN_LOCKS.pop(key, None)
 
 
 def cleanup_login_challenges() -> None:
@@ -323,6 +371,23 @@ def cleanup_login_challenges() -> None:
                 LOGIN_CHALLENGES.pop(cid, None)
 
 
+def login_challenge_allowed(ip_key: str) -> tuple[bool, int]:
+    now_ts = time.time()
+    with LOGIN_CHALLENGE_LOCK:
+        rows = [t for t in LOGIN_CHALLENGE_ISSUES.get(ip_key, []) if now_ts - t < LOGIN_CHALLENGE_WINDOW_SECONDS]
+        if len(rows) >= LOGIN_CHALLENGE_LIMIT:
+            LOGIN_CHALLENGE_ISSUES[ip_key] = rows
+            retry = max(1, int(LOGIN_CHALLENGE_WINDOW_SECONDS - (now_ts - rows[0])))
+            return False, retry
+        rows.append(now_ts)
+        LOGIN_CHALLENGE_ISSUES[ip_key] = rows
+        if len(LOGIN_CHALLENGE_ISSUES) > 4096:
+            for key in list(LOGIN_CHALLENGE_ISSUES)[:1024]:
+                if key != ip_key:
+                    LOGIN_CHALLENGE_ISSUES.pop(key, None)
+        return True, 0
+
+
 def new_login_challenge(ip_key: str) -> dict:
     if not LOGIN_CRYPTO_AVAILABLE or LOGIN_RSA_PRIVATE is None:
         return {"enabled": False}
@@ -331,6 +396,10 @@ def new_login_challenge(ip_key: str) -> dict:
     nonce = secrets.token_urlsafe(18)
     issued = int(time.time())
     with LOGIN_CHALLENGE_LOCK:
+        if len(LOGIN_CHALLENGES) >= MAX_LOGIN_CHALLENGES:
+            oldest = sorted(LOGIN_CHALLENGES, key=lambda key: float((LOGIN_CHALLENGES.get(key) or {}).get("issued", 0)))
+            for key in oldest[: max(1, len(LOGIN_CHALLENGES) - MAX_LOGIN_CHALLENGES + 1)]:
+                LOGIN_CHALLENGES.pop(key, None)
         LOGIN_CHALLENGES[cid] = {"nonce": nonce, "ip_key": ip_key, "issued": issued, "expires": issued + LOGIN_CHALLENGE_TTL}
     public = LOGIN_RSA_PRIVATE.public_key()
     public_key = public.public_bytes(
@@ -649,15 +718,43 @@ def _host_without_port(host: str) -> str:
     return host
 
 
+def _host_is_trusted(host: str, cfg: dict) -> bool:
+    clean = _clean_host(host)
+    if not clean:
+        return False
+    try:
+        hostname = (urlsplit("//" + clean).hostname or "").lower().rstrip(".")
+    except Exception:
+        return False
+    if hostname in {"localhost", "localhost.localdomain"}:
+        return True
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+    allowed = set()
+    for key in ("public_base_url", "linyu_remote_server_url"):
+        try:
+            configured = urlsplit(str(cfg.get(key) or "")).hostname
+            if configured:
+                allowed.add(configured.lower().rstrip("."))
+        except Exception:
+            continue
+    return hostname in allowed
+
+
 def origin_from_headers(headers=None, fallback_port: int | None = None) -> str:
     cfg = load_config()
     base = str(cfg.get("public_base_url") or "").strip().rstrip("/")
-    if headers is None and base.startswith(("http://", "https://")):
+    if base.startswith(("http://", "https://")):
         return base
     headers = headers or {}
     fwd = _split_forwarded(headers.get("Forwarded", "")) if hasattr(headers, "get") else {}
     proto = _first_header(fwd.get("proto") or headers.get("X-Forwarded-Proto", ""))
     host = _clean_host(fwd.get("host") or headers.get("X-Forwarded-Host", "") or headers.get("Host", ""))
+    if host and not _host_is_trusted(host, cfg):
+        host = ""
     if not proto:
         cf_visitor = headers.get("CF-Visitor", "") if hasattr(headers, "get") else ""
         try:
@@ -1485,16 +1582,31 @@ def safe_extract_zip(zip_path: Path, dest: Path) -> list[str]:
         total_size = sum(max(0, m.file_size) for m in members)
         if total_size > max_total:
             raise ValueError("\u63d2\u4ef6\u89e3\u538b\u540e\u8fc7\u5927\uff0c\u8bf7\u63a7\u5236\u5728 120MB \u4ee5\u5185")
-        root_names = {Path(m.filename.replace("\\", "/")).parts[0] for m in members if Path(m.filename.replace("\\", "/")).parts and not Path(m.filename.replace("\\", "/")).parts[0].startswith("__MACOSX")}
+        root_names = set()
+        for member in members:
+            clean_name = member.filename.replace("\\", "/")
+            parts = PurePosixPath(clean_name).parts
+            raw_parts = clean_name.split("/")
+            if not parts or any(part in {"", ".", ".."} for part in raw_parts) or "\x00" in clean_name:
+                raise ValueError("插件压缩包包含不安全路径：" + clean_name)
+            mode = (member.external_attr >> 16) & 0o170000
+            if mode and mode != stat.S_IFREG:
+                raise ValueError("插件压缩包不允许包含链接或特殊文件：" + clean_name)
+            if not parts[0].startswith("__MACOSX"):
+                root_names.add(parts[0])
         backup_suffix = ".bak." + time.strftime("%Y%m%d_%H%M%S")
         for info in z.infolist():
             name = info.filename.replace("\\", "/")
             if info.file_size > max_one:
                 raise ValueError("\u63d2\u4ef6\u5355\u4e2a\u6587\u4ef6\u8fc7\u5927\uff1a" + name)
-            if not name or name.startswith("/") or ".." in Path(name).parts:
+            parts = PurePosixPath(name).parts
+            raw_parts = name.split("/")
+            if not name or name.startswith("/") or any(part in {"", ".", ".."} for part in raw_parts) or "\x00" in name:
                 raise ValueError("\u63d2\u4ef6\u538b\u7f29\u5305\u5305\u542b\u4e0d\u5b89\u5168\u8def\u5f84\uff1a" + name)
         for root in sorted(root_names):
             target = (dest / root).resolve()
+            if target == dest.resolve():
+                raise ValueError("插件压缩包顶层路径不安全")
             if target.exists():
                 shutil.move(str(target), str(target) + backup_suffix)
         for info in z.infolist():
@@ -1512,6 +1624,30 @@ def safe_extract_zip(zip_path: Path, dest: Path) -> list[str]:
                 shutil.copyfileobj(src, dst)
             extracted.append(str(target))
     return extracted
+
+
+def validate_backup_archive(path: Path) -> None:
+    max_files = 20000
+    max_total = 20 * 1024 * 1024 * 1024
+    try:
+        with tarfile.open(path, "r:*") as archive:
+            members = archive.getmembers()
+            if not members or len(members) > max_files:
+                raise ValueError("备份压缩包为空或文件数量过多")
+            total = 0
+            for member in members:
+                name = str(member.name or "").replace("\\", "/")
+                parts = PurePosixPath(name).parts
+                raw_parts = name.split("/")
+                if not name or name.startswith("/") or any(part in {"", ".", ".."} for part in raw_parts) or "\x00" in name:
+                    raise ValueError("备份压缩包包含不安全路径：" + name)
+                if member.issym() or member.islnk() or member.isdev() or member.isfifo():
+                    raise ValueError("备份压缩包不允许包含链接或特殊文件：" + name)
+                total += max(0, int(member.size or 0))
+                if total > max_total:
+                    raise ValueError("备份解压后大小超过 20GB 安全限制")
+    except (tarfile.TarError, OSError) as exc:
+        raise ValueError("备份压缩包格式无效") from exc
 
 def plugins_data() -> dict:
     cfg = load_config()
@@ -1571,6 +1707,12 @@ def file_kind(filename: str, mime: str = "") -> str:
     if ext in {"zip", "tar", "gz", "tgz", "7z", "rar"}:
         return "archive"
     return "file"
+
+
+def untrusted_file_requires_download(mime: str, filename: str) -> bool:
+    media_type = str(mime or "").lower().split(";", 1)[0].strip()
+    active_types = {"text/html", "application/xhtml+xml", "image/svg+xml", "text/xml", "application/xml"}
+    return media_type in active_types or Path(str(filename or "")).suffix.lower() in {".html", ".htm", ".xhtml", ".svg", ".xml"}
 
 
 class FileRepository:
@@ -1643,7 +1785,7 @@ class FileService:
             st = p.stat()
             fid = uuid.uuid4().hex
             mime = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
-            files[fid] = {"id": fid, "filename": p.name, "stored_name": p.name, "size": st.st_size, "mime": mime, "kind": file_kind(p.name, mime), "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)), "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)), "downloads": 0, "views": 0, "public": True, "access": "public", "expires_at": 0, "max_downloads": 0}
+            files[fid] = {"id": fid, "filename": p.name, "stored_name": p.name, "size": st.st_size, "mime": mime, "kind": file_kind(p.name, mime), "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)), "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)), "downloads": 0, "views": 0, "public": False, "access": "private", "expires_at": 0, "max_downloads": 0}
             changed = True
         if changed:
             self.repo.save(data)
@@ -1857,12 +1999,18 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
-    def security_headers(self):
+    def security_headers(self, untrusted_content: bool = False):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "same-origin")
         self.send_header("X-Frame-Options", "SAMEORIGIN")
         self.send_header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; connect-src 'self'; frame-src http: https:; object-src 'none'; base-uri 'self'")
+        if is_https_request(self):
+            self.send_header("Strict-Transport-Security", "max-age=31536000")
+        if untrusted_content:
+            self.send_header("Content-Security-Policy", "sandbox; default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+            self.send_header("X-Download-Options", "noopen")
+        else:
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; connect-src 'self'; frame-src http: https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'")
 
     def send_api(self, payload: dict, status: int = 200):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -1881,22 +2029,35 @@ class Handler(BaseHTTPRequestHandler):
     def request_origin(self) -> str:
         return origin_from_headers(self.headers, getattr(self.server, "server_port", None))
 
-    def read_body(self) -> bytes:
-        n = int(self.headers.get("Content-Length", "0") or 0)
+    def read_body(self, max_bytes: int = MAX_JSON_BODY_BYTES) -> bytes:
+        try:
+            n = int(self.headers.get("Content-Length", "0") or 0)
+        except Exception as exc:
+            raise ValueError("Content-Length 格式不正确") from exc
+        if n < 0:
+            raise ValueError("Content-Length 格式不正确")
+        if n > max_bytes:
+            raise PayloadTooLarge("请求体过大")
         return self.rfile.read(n) if n else b""
 
     def read_json(self) -> dict:
+        content_type = str(self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            raise ValueError("请求必须使用 application/json")
         b = self.read_body()
-        return json.loads(b.decode("utf-8")) if b else {}
+        data = json.loads(b.decode("utf-8")) if b else {}
+        if not isinstance(data, dict):
+            raise ValueError("JSON 请求体必须是对象")
+        return data
 
     def remote_client_key(self) -> str:
-        raw = self.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip() or self.client_address[0]
+        raw = self.client_address[0] if self.client_address else "unknown"
         return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()
 
     def file_service(self) -> FileService:
         return FileService(load_config(), self.request_origin())
 
-    def file_api_user(self) -> str | None:
+    def file_api_user(self, required_scope: str = "files:upload") -> str | None:
         auth = self.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             return None
@@ -1909,6 +2070,12 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             digest = str(tok.get("hash") or "")
             if digest and hmac.compare_digest(digest, hashlib.sha256(supplied.encode()).hexdigest()):
+                scopes = tok.get("scopes")
+                if not isinstance(scopes, list):
+                    scopes = ["files:upload"]
+                scopes = {str(scope) for scope in scopes}
+                if required_scope not in scopes and "files:*" not in scopes:
+                    return None
                 return "api-token:" + str(tok.get("name") or tok.get("id") or "file")
         return None
 
@@ -1920,7 +2087,7 @@ class Handler(BaseHTTPRequestHandler):
         if not bool(cfg.get("remote_api_enabled", True)):
             return False
         expected = str(cfg.get("remote_api_token") or "")
-        supplied = str(self.headers.get("X-Remote-Token") or data.get("remote_token") or data.get("token") or "")
+        supplied = str(self.headers.get("X-Remote-Token") or "")
         return bool(expected) and hmac.compare_digest(supplied, expected)
 
     def remote_principal_ok(self, data: dict, allow_public_login: bool = False) -> bool:
@@ -1933,16 +2100,56 @@ class Handler(BaseHTTPRequestHandler):
             return False
         if bool(owners) and requester in owners:
             return True
-        return bool(allow_public_login and data.get("public_login_enabled"))
+        return bool(allow_public_login and cfg.get("linyu_remote_public_login_enabled", False))
+
+    def same_origin_request_ok(self) -> bool:
+        source = str(self.headers.get("Origin") or "").strip()
+        if not source:
+            referer = str(self.headers.get("Referer") or "").strip()
+            source = referer if referer else ""
+        if not source:
+            return True
+        if source == "null":
+            return False
+        try:
+            actual = urlsplit(source)
+            actual_host = (actual.hostname or "").lower().rstrip(".")
+            actual_port = actual.port or (443 if actual.scheme == "https" else 80)
+        except Exception:
+            return False
+        expected: set[tuple[str, int]] = set()
+        cfg = load_config()
+        for raw in (
+            str(cfg.get("public_base_url") or ""),
+            str(self.headers.get("X-Forwarded-Host") or ""),
+            str(self.headers.get("Host") or ""),
+        ):
+            if not raw:
+                continue
+            try:
+                parsed = urlsplit(raw if "://" in raw else "//" + _first_header(raw))
+                host = (parsed.hostname or "").lower().rstrip(".")
+                scheme = parsed.scheme or ("https" if is_https_request(self) else "http")
+                port = parsed.port or (443 if scheme == "https" else 80)
+                if host:
+                    expected.add((host, port))
+            except Exception:
+                continue
+        return (actual_host, actual_port) in expected
 
     def check_remote_rate_limit(self) -> None:
         key = self.remote_client_key()
         now_ts = time.time()
-        items = [t for t in REMOTE_CREATE_TIMES.get(key, []) if now_ts - t < REMOTE_CREATE_WINDOW_SECONDS]
-        if len(items) >= REMOTE_CREATE_LIMIT:
-            raise ValueError("创建太频繁，请稍后再试。")
-        items.append(now_ts)
-        REMOTE_CREATE_TIMES[key] = items
+        with REMOTE_RATE_LOCK:
+            items = [t for t in REMOTE_CREATE_TIMES.get(key, []) if now_ts - t < REMOTE_CREATE_WINDOW_SECONDS]
+            if len(items) >= REMOTE_CREATE_LIMIT:
+                raise ValueError("创建太频繁，请稍后再试。")
+            items.append(now_ts)
+            REMOTE_CREATE_TIMES[key] = items
+            if len(REMOTE_CREATE_TIMES) > 4096:
+                for old_key in list(REMOTE_CREATE_TIMES)[:1024]:
+                    if old_key != key:
+                        REMOTE_CREATE_TIMES.pop(old_key, None)
 
     def make_session(self, user: str) -> str:
         cfg = load_config()
@@ -2020,8 +2227,8 @@ class Handler(BaseHTTPRequestHandler):
             if p.path == "/api/health":
                 return self.send_api(api(True, {"status": "ok"}))
             if p.path == "/api/login/challenge":
-                return self.send_api(api(True, new_login_challenge(login_key_for_ip(self.client_address[0] if self.client_address else "unknown"))))
-            api_user = self.file_api_user()
+                return self.login_challenge()
+            api_user = self.file_api_user("files:read")
             if api_user and (p.path == "/api/files" or (p.path.startswith("/api/files/") and p.path != "/api/files/tokens")):
                 return self.handle_files_get(p, api_user)
             user = self.require_auth()
@@ -2077,32 +2284,38 @@ class Handler(BaseHTTPRequestHandler):
             if p.path == "/api/server-files/download":
                 return self.handle_server_file_download(p)
             self.send_error(404)
+        except PayloadTooLarge as e:
+            self.send_api(api(False, message=str(e), code="PAYLOAD_TOO_LARGE"), 413)
         except PermissionError as e:
             self.send_api(api(False, message=str(e), code="FORBIDDEN"), 403)
         except ValueError as e:
             self.send_api(api(False, message=str(e), code="BAD_REQUEST"), 400)
         except Exception as e:
-            self.send_api(api(False, message=str(e), code="SERVER_ERROR"), 500)
+            traceback.print_exc()
+            self.send_api(api(False, message="服务器内部错误", code="SERVER_ERROR"), 500)
 
     def do_DELETE(self):
         try:
             p = urlparse(self.path)
-            user = self.require_file_access()
+            user = self.current_user() or self.file_api_user("files:delete")
             if not user:
                 return self.require_auth()
+            if not self.same_origin_request_ok():
+                return self.send_api(api(False, message="跨站请求已拒绝", code="CSRF_REJECTED"), 403)
             if p.path.startswith("/api/files/"):
                 parts = [x for x in p.path.split("/") if x]
                 if len(parts) >= 3:
-                    item = self.file_service().delete(parts[2])
-                    audit(user, "file_center.delete", {"id": parts[2], "filename": item.get("filename")}, True)
-                    return self.send_api(api(True, item, "???"))
+                    return self.handle_files_delete_id(parts[2], user)
             self.send_error(404)
+        except PayloadTooLarge as e:
+            self.send_api(api(False, message=str(e), code="PAYLOAD_TOO_LARGE"), 413)
         except PermissionError as e:
             self.send_api(api(False, message=str(e), code="FORBIDDEN"), 403)
         except ValueError as e:
             self.send_api(api(False, message=str(e), code="BAD_REQUEST"), 400)
         except Exception as e:
-            self.send_api(api(False, message=str(e), code="SERVER_ERROR"), 500)
+            traceback.print_exc()
+            self.send_api(api(False, message="服务器内部错误", code="SERVER_ERROR"), 500)
 
     def do_POST(self):
         try:
@@ -2115,16 +2328,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self.remote_napcat_login_status()
             if p.path == "/api/remote/astrbot/no-prefix":
                 return self.remote_astrbot_no_prefix()
+            if p.path == "/api/remote/login/public-access":
+                return self.remote_set_public_login()
             if p.path == "/api/login":
                 return self.login()
-            api_user = self.file_api_user()
+            api_user = self.file_api_user("files:upload")
             if api_user and p.path == "/api/files/upload":
                 return self.upload(api_user)
-            if api_user and p.path.startswith("/api/files/") and p.path != "/api/files/tokens":
-                return self.handle_files_post(p, api_user)
+            delete_api_user = self.file_api_user("files:delete")
+            if delete_api_user and p.path.startswith("/api/files/") and p.path != "/api/files/tokens":
+                return self.handle_files_post(p, delete_api_user)
             user = self.require_auth()
             if not user:
                 return
+            if not self.same_origin_request_ok():
+                return self.send_api(api(False, message="跨站请求已拒绝", code="CSRF_REJECTED"), 403)
             if p.path == "/api/astrbot/action":
                 return self.astrbot_action(user)
             if p.path == "/api/astrbot/no-prefix":
@@ -2152,6 +2370,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not load_config()["allow_dangerous"]:
                     raise ValueError("系统设置未开启危险操作")
                 archive = path_under(INSTALL_PREFIX / "backups", data.get("file", ""))
+                validate_backup_archive(archive)
                 t = create_task("恢复备份", "backup.restore", task_shell, user, "开始恢复", "restore_backup %s" % sh_quote(str(archive)), 1800)
                 return self.send_api(api(True, t.to_dict()))
             if p.path == "/api/update":
@@ -2194,12 +2413,15 @@ class Handler(BaseHTTPRequestHandler):
             if p.path == "/api/config/astrbot":
                 return self.save_astrbot_config(user)
             self.send_error(404)
+        except PayloadTooLarge as e:
+            self.send_api(api(False, message=str(e), code="PAYLOAD_TOO_LARGE"), 413)
         except PermissionError as e:
             self.send_api(api(False, message=str(e), code="FORBIDDEN"), 403)
         except ValueError as e:
             self.send_api(api(False, message=str(e), code="BAD_REQUEST"), 400)
         except Exception as e:
-            self.send_api(api(False, message=str(e), code="SERVER_ERROR"), 500)
+            traceback.print_exc()
+            self.send_api(api(False, message="服务器内部错误", code="SERVER_ERROR"), 500)
 
     def static(self, path: str):
         rel = "index.html" if path == "/" else path.removeprefix("/assets/")
@@ -2226,13 +2448,31 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             return
 
+    def login_challenge(self):
+        ip = self.client_address[0] if self.client_address else "unknown"
+        key = login_key_for_ip(ip)
+        allowed, retry_after = login_challenge_allowed(key)
+        if not allowed:
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Retry-After", str(retry_after))
+            self.send_header("Cache-Control", "no-store")
+            self.security_headers()
+            body = json.dumps(api(False, message="登录初始化过于频繁，请稍后再试", code="RATE_LIMIT"), ensure_ascii=False).encode("utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        return self.send_api(api(True, new_login_challenge(key)))
+
     def login(self):
         data = self.read_json()
         cfg = load_config()
         ip = self.client_address[0] if self.client_address else "unknown"
         login_key = login_key_for_ip(ip)
         now_ts = time.time()
-        lock_until = LOGIN_LOCKS.get(login_key, 0)
+        with LOGIN_RATE_LOCK:
+            lock_until = LOGIN_LOCKS.get(login_key, 0)
         if lock_until > now_ts:
             retry_after = max(1, int(lock_until - now_ts))
             time.sleep(0.35)
@@ -2248,7 +2488,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             audit("anonymous", "login.rate_limited", {"ip_hash": login_key[:12], "retry_after": retry_after}, False)
             return
-        LOGIN_FAILS[login_key] = [t for t in LOGIN_FAILS.get(login_key, []) if now_ts - t < LOGIN_FAIL_WINDOW_SECONDS]
+        with LOGIN_RATE_LOCK:
+            LOGIN_FAILS[login_key] = [t for t in LOGIN_FAILS.get(login_key, []) if now_ts - t < LOGIN_FAIL_WINDOW_SECONDS]
         try:
             data = decrypt_login_payload(data, login_key)
         except ValueError as e:
@@ -2314,6 +2555,7 @@ class Handler(BaseHTTPRequestHandler):
                 False,
             )
             return self.send_api(api(False, message="remote principal forbidden", code="REMOTE_PRINCIPAL_FORBIDDEN"), HTTPStatus.FORBIDDEN)
+        self.check_remote_rate_limit()
         requester = str(data.get("requester") or "remote")[:64]
         t = create_task(
             "QQ \u6307\u4ee4\u5e94\u7528\u514d @ / \u514d\u524d\u7f00\u914d\u7f6e",
@@ -2323,6 +2565,31 @@ class Handler(BaseHTTPRequestHandler):
         )
         audit("remote", "remote.astrbot.no_prefix", {"requester": requester, "task": t.id}, True)
         return self.send_api(api(True, t.to_dict()))
+
+    def remote_set_public_login(self):
+        data = self.read_json()
+        if not self.remote_auth_ok(data):
+            audit("remote", "remote.login.public_access.denied", {"ip_hash": self.remote_client_key()[:12]}, False)
+            return self.send_api(api(False, message="remote auth failed", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
+        if not self.remote_principal_ok(data):
+            audit(
+                "remote",
+                "remote.login.public_access.principal_denied",
+                {"requester": str(data.get("requester", ""))[:64], "bot_self_id": str(data.get("bot_self_id", ""))[:64]},
+                False,
+            )
+            return self.send_api(api(False, message="remote principal forbidden", code="REMOTE_PRINCIPAL_FORBIDDEN"), HTTPStatus.FORBIDDEN)
+        self.check_remote_rate_limit()
+        enabled = data.get("enabled")
+        if not isinstance(enabled, bool):
+            raise ValueError("enabled 必须是布尔值")
+        cfg = load_config()
+        cfg["linyu_remote_public_login_enabled"] = enabled
+        write_json(PANEL_CONFIG, cfg)
+        sync_linyu_remote_plugin_config(None)
+        requester = str(data.get("requester") or "remote")[:64]
+        audit("remote", "remote.login.public_access", {"requester": requester, "enabled": enabled}, True)
+        return self.send_api(api(True, {"enabled": enabled}))
 
     def remote_napcat_create_login(self):
         data = self.read_json()
@@ -2662,7 +2929,8 @@ class Handler(BaseHTTPRequestHandler):
             rows = []
             for t in cfg.get("file_api_tokens", []) or []:
                 if isinstance(t, dict):
-                    rows.append({"id": t.get("id"), "name": t.get("name"), "disabled": bool(t.get("disabled")), "created_at": t.get("created_at"), "last4": t.get("last4", "")})
+                    scopes = t.get("scopes") if isinstance(t.get("scopes"), list) else ["files:upload"]
+                    rows.append({"id": t.get("id"), "name": t.get("name"), "disabled": bool(t.get("disabled")), "created_at": t.get("created_at"), "last4": t.get("last4", ""), "scopes": scopes})
             return self.send_api(api(True, {"tokens": rows}))
         if len(parts) >= 3:
             fid = parts[2]
@@ -2697,17 +2965,25 @@ class Handler(BaseHTTPRequestHandler):
         cfg = load_config()
         tokens = [x for x in (cfg.get("file_api_tokens", []) or []) if isinstance(x, dict)]
         if action in {"create", "regenerate"}:
+            requested_scopes = data.get("scopes", ["files:upload"])
+            if not isinstance(requested_scopes, list):
+                raise ValueError("scopes 必须是数组")
+            allowed_scopes = {"files:upload", "files:read", "files:delete"}
+            scopes = sorted({str(x) for x in requested_scopes if str(x) in allowed_scopes}) or ["files:upload"]
             if action == "regenerate":
                 tid = str(data.get("id") or "")
+                old = next((x for x in tokens if str(x.get("id")) == tid), None)
+                if old and "scopes" not in data:
+                    scopes = old.get("scopes") if isinstance(old.get("scopes"), list) else ["files:upload"]
                 tokens = [x for x in tokens if str(x.get("id")) != tid]
             raw = "fc_" + secrets.token_urlsafe(32)
             tid = uuid.uuid4().hex[:12]
-            item = {"id": tid, "name": str(data.get("name") or "AstrBot Plugin"), "hash": hashlib.sha256(raw.encode()).hexdigest(), "last4": raw[-4:], "created_at": now(), "disabled": False}
+            item = {"id": tid, "name": str(data.get("name") or "AstrBot Plugin")[:80], "hash": hashlib.sha256(raw.encode()).hexdigest(), "last4": raw[-4:], "created_at": now(), "disabled": False, "scopes": scopes}
             tokens.append(item)
             cfg["file_api_tokens"] = tokens
             write_json(PANEL_CONFIG, cfg)
             audit(user, "file_center.token." + action, {"id": tid}, True)
-            return self.send_api(api(True, {"token": raw, "item": {k: item[k] for k in ["id", "name", "last4", "created_at", "disabled"]}}, "Token ???????????"))
+            return self.send_api(api(True, {"token": raw, "item": {k: item[k] for k in ["id", "name", "last4", "created_at", "disabled", "scopes"]}}, "Token 仅显示一次，请立即保存"))
         if action in {"delete", "disable", "enable"}:
             tid = str(data.get("id") or "")
             out = []
@@ -2728,9 +3004,13 @@ class Handler(BaseHTTPRequestHandler):
         item = svc.touch(file_id, "downloads" if attachment else "views")
         path = svc.file_path(item)
         body = path.read_bytes()
+        mime = str(item.get("mime") or mimetypes.guess_type(str(path))[0] or "application/octet-stream").lower()
+        if untrusted_file_requires_download(mime, str(item.get("filename") or path.name)):
+            attachment = True
         self.send_response(200)
-        self.send_header("Content-Type", item.get("mime") or mimetypes.guess_type(str(path))[0] or "application/octet-stream")
-        self.security_headers()
+        self.send_header("Content-Type", mime)
+        self.send_header("Cache-Control", "no-store")
+        self.security_headers(untrusted_content=True)
         if attachment:
             self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(str(item.get("filename") or path.name)))
         self.send_header("Content-Length", str(len(body)))
@@ -2861,10 +3141,21 @@ class Handler(BaseHTTPRequestHandler):
     def upload(self, user: str):
         svc = self.file_service()
         ctype = self.headers.get("Content-Type", "")
+        if not ctype.lower().startswith("multipart/form-data"):
+            raise ValueError("上传请求必须使用 multipart/form-data")
+        try:
+            content_length = int(self.headers.get("Content-Length", "0") or 0)
+        except Exception as exc:
+            raise ValueError("Content-Length 格式不正确") from exc
+        max_request = int(load_config().get("max_upload_mb", 256)) * 1024 * 1024 + 8 * 1024 * 1024
+        if content_length <= 0 or content_length > max_request:
+            raise PayloadTooLarge("上传总大小超过限制")
         form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": ctype})
         fields = form["files"] if "files" in form else (form["file"] if "file" in form else [])
         if not isinstance(fields, list):
             fields = [fields]
+        if len(fields) > 50:
+            raise ValueError("单次最多上传 50 个文件")
         visibility = "private" if str(form.getvalue("access") or form.getvalue("visibility") or "public") == "private" else "public"
         saved = []
         for item in fields:

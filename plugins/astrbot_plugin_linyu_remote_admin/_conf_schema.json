@@ -4,6 +4,11 @@
     "type": "bool",
     "default": true
   },
+  "public_login_enabled": {
+    "description": "是否允许非主人用户申请登录；由主人指令和面板 Remote API 统一控制。",
+    "type": "bool",
+    "default": false
+  },
   "server_url": {
     "description": "AstrBot-Deploy Web 面板地址，例如 http://server-ip:7070。",
     "type": "string",

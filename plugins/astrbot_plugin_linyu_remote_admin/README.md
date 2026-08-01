@@ -37,3 +37,9 @@ Remote API used by the no-prefix owner command:
 `POST /api/remote/astrbot/no-prefix`
 
 The request must include a valid `X-Remote-Token`, configured owner QQ as `requester`, and configured managed bot QQ as `bot_self_id`. Public-login users cannot call this endpoint.
+
+Public login access is now controlled by the panel as the security source of truth. Owner commands call:
+
+`POST /api/remote/login/public-access`
+
+Remote API authentication accepts the token only from the `X-Remote-Token` header. Tokens in JSON bodies are rejected.

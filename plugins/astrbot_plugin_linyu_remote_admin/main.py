@@ -31,7 +31,7 @@ CMD_NO_PREFIX_ALIASES = {
     "astrbot_plugin_linyu_remote_admin",
     "linyu",
     "\u53d1\u9001\u7533\u8bf7\u767b\u5f55\uff0c\u81ea\u52a8\u7533\u8bf7\u4e00\u4e2a NapCat \u626b\u7801\u673a\u5668\u4eba\u3002",
-    "1.0.9",
+    "1.1.0",
     "https://github.com/Ceiity/linyu",
 )
 class Main(Star):
@@ -110,7 +110,7 @@ class Main(Star):
             data = json.loads(self._state_path().read_text(encoding="utf-8"))
             return bool(data.get("public_login_enabled", False))
         except Exception:
-            return False
+            return bool(self._cfg("public_login_enabled", False))
 
     def _set_public_login_enabled(self, enabled: bool) -> None:
         path = self._state_path()
@@ -225,6 +225,16 @@ class Main(Star):
         }
         return await asyncio.to_thread(self._post_json_sync, "/api/remote/astrbot/no-prefix", payload)
 
+    async def _set_public_login_remote(self, event: AstrMessageEvent, enabled: bool) -> dict:
+        payload = {
+            "requester": self._sender_id(event),
+            "group_id": self._group_id(event),
+            "bot_self_id": self._self_id(event),
+            "source": "astrbot_plugin_linyu_remote_admin",
+            "enabled": bool(enabled),
+        }
+        return await asyncio.to_thread(self._post_json_sync, "/api/remote/login/public-access", payload)
+
     async def _wait_login_success(self, event: AstrMessageEvent, name: str, timeout_seconds: int = 180, interval_seconds: int = 5) -> dict | None:
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
@@ -314,7 +324,17 @@ class Main(Star):
 
         if text in {CMD_LOGIN_OPEN, CMD_LOGIN_CLOSE}:
             enabled = text == CMD_LOGIN_OPEN
+            try:
+                await self._set_public_login_remote(event, enabled)
+            except Exception as e:
+                logger.exception("Remote public login switch failed")
+                yield event.plain_result(f"登录权限切换失败：{e}")
+                return
             self._set_public_login_enabled(enabled)
+            try:
+                self.config["public_login_enabled"] = enabled
+            except Exception:
+                pass
             if enabled:
                 yield event.plain_result("\u5df2\u5f00\u542f\u5168\u5458\u7533\u8bf7\u767b\u5f55\uff0c\u6240\u6709\u7528\u6237\u90fd\u53ef\u4ee5\u5411\u6302\u673a\u5668\u4eba\u53f7\u53d1\u9001\u201c\u7533\u8bf7\u767b\u5f55\u201d\u83b7\u53d6\u4e8c\u7ef4\u7801\u3002")
             else:

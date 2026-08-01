@@ -8,6 +8,7 @@ for f in "${files[@]}"; do
   grep -q 'set -Eeuo pipefail' "$f"
 done
 python3 -m py_compile panel/backend/app.py plugins/astrbot_plugin_linyu_remote_admin/main.py
+python3 scripts/security-check.py
 grep -q 'install_linyu_remote_plugin' scripts/install-core.sh
 grep -q 'install_linyu_remote_plugin' panel/backend/app.py
 grep -q '/api/remote/astrbot/no-prefix' panel/backend/app.py

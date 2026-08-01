@@ -264,6 +264,7 @@ PY
   cat > "$plugin_cfg" <<JSON
 {
   "enabled": true,
+  "public_login_enabled": false,
   "server_url": "$server_url",
   "remote_token": "$remote_token",
   "owner_ids": ["${LINYU_REMOTE_OWNER_ID:-3179806299}"],
