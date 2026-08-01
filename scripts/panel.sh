@@ -34,6 +34,8 @@ setup_panel(){
   if ! python3 - <<'PY' >/dev/null 2>&1
 import qrcode
 import PIL.Image
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 PY
   then
     apt-get update -y >/dev/null
