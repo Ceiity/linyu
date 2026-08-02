@@ -399,3 +399,28 @@ button{cursor:pointer;touch-action:manipulation}
     backdrop-filter:none!important;
   }
 }
+
+/* 2026-08-03 Desktop brand polish: avoid the visually heavy square badge. */
+@media(min-width:721px){
+  .app>.sidebar .side-brand .logo-mark.small{
+    width:40px!important;
+    height:40px!important;
+    padding:0!important;
+    border-radius:50%!important;
+    background:#0b0f19!important;
+    border:1px solid color-mix(in srgb,var(--line) 72%,transparent)!important;
+    box-shadow:0 6px 18px rgba(15,23,42,.12)!important;
+  }
+  .app>.sidebar .side-brand .logo-mark.small:after{display:none!important}
+  .app>.sidebar .side-brand .logo-mark.small img{
+    width:100%!important;
+    height:100%!important;
+    border-radius:50%!important;
+    transform:scale(1.34);
+    filter:none!important;
+  }
+  .sidebar-collapsed .app>.sidebar .side-brand .logo-mark.small{
+    width:38px!important;
+    height:38px!important;
+  }
+}
