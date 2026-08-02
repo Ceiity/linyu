@@ -365,3 +365,10 @@ button{cursor:pointer;touch-action:manipulation}
     color:#fff!important;
   }
 }
+
+/* 2026-08-03 Apple-style task modal actions */
+.modal-card:has(.task-modal) .modal-actions{display:grid!important;grid-template-columns:1fr 1fr!important;gap:10px!important;background:transparent!important}
+.modal-card:has(.task-modal) .modal-actions button{min-height:46px!important;border-radius:14px!important;font-weight:750!important}
+.modal-card:has(.task-modal) .modal-actions button:first-child{background:var(--panel2)!important;color:var(--text)!important;border:1px solid var(--line)!important}
+.modal-card:has(.task-modal) #modalOk.primary{background:#007aff!important;color:#fff!important;border:1px solid #007aff!important;box-shadow:none!important}
+@media(max-width:390px){.modal-card:has(.task-modal) .modal-actions{grid-template-columns:1fr 1fr!important}}
