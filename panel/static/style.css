@@ -424,3 +424,25 @@ button{cursor:pointer;touch-action:manipulation}
     height:38px!important;
   }
 }
+
+/* 2026-08-03 Desktop sidebar toggle: remove the conspicuous white rectangle. */
+@media(min-width:721px){
+  .app>.sidebar .side-collapse{
+    background:transparent!important;
+    border-color:transparent!important;
+    box-shadow:none!important;
+  }
+  .app>.sidebar .side-collapse:hover,
+  .app>.sidebar .side-collapse:focus-visible{
+    background:color-mix(in srgb,var(--text) 7%,transparent)!important;
+    border-color:transparent!important;
+  }
+  .sidebar-collapsed .app>.sidebar .side-collapse{
+    width:42px!important;
+    height:42px!important;
+    min-height:42px!important;
+    margin:0 auto 10px!important;
+    padding:0!important;
+    border-radius:50%!important;
+  }
+}
