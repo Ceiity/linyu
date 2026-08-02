@@ -345,3 +345,23 @@ button{cursor:pointer;touch-action:manipulation}
 
 /* 2026-07-29 File Center slight lift: a little more room above bottom nav */
 @media(max-width:720px){.content:has(.file-center){padding-bottom:calc(118px + var(--safe-bottom))!important}.file-center{padding-bottom:36px!important}.file-center>.card:last-child{margin-bottom:24px!important}.server-browser,#filePreview{margin-bottom:18px!important}}@media(max-width:390px){.content:has(.file-center){padding-bottom:calc(126px + var(--safe-bottom))!important}.file-center{padding-bottom:40px!important}}@media(max-width:720px){.ios-safari .content:has(.file-center),.ipad-os .content:has(.file-center){padding-bottom:calc(130px + var(--safe-bottom))!important}.ios-safari .file-center,.ipad-os .file-center{padding-bottom:42px!important}}
+
+/* 2026-08-03 Mobile bottom navigation: selected tab must turn black on the first tap. */
+@media(max-width:720px){
+  :root:not([data-theme=dark]) .bottom-nav .nav-item.active,
+  :root[data-theme=dark] .bottom-nav .nav-item.active,
+  :root:not([data-theme=dark]) .bottom-nav .nav-item:active,
+  :root[data-theme=dark] .bottom-nav .nav-item:active{
+    background:#000!important;
+    color:#fff!important;
+    box-shadow:none!important;
+    opacity:1!important;
+    filter:none!important;
+  }
+  :root:not([data-theme=dark]) .bottom-nav .nav-item.active svg,
+  :root[data-theme=dark] .bottom-nav .nav-item.active svg,
+  :root:not([data-theme=dark]) .bottom-nav .nav-item:active svg,
+  :root[data-theme=dark] .bottom-nav .nav-item:active svg{
+    color:#fff!important;
+  }
+}
