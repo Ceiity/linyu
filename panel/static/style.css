@@ -380,7 +380,7 @@ button{cursor:pointer;touch-action:manipulation}
   .app{height:auto!important;min-height:100vh!important;overflow:visible!important;grid-template-rows:72px minmax(calc(100vh - 72px),auto)!important}
   .content{height:auto!important;min-height:calc(100vh - 72px)!important;overflow:visible!important;align-content:start!important;padding-bottom:48px!important}
   .topbar{position:sticky!important;top:0!important}
-  .sidebar{height:100vh!important;max-height:100vh!important;overflow:hidden!important;transform:none!important;backface-visibility:visible!important;will-change:auto!important;background:var(--panel2)!important}
+  .sidebar{height:100vh!important;max-height:100vh!important;overflow:hidden!important;transform:none!important;backface-visibility:visible!important;will-change:auto!important;background:transparent!important;border-right:0!important;box-shadow:none!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
   .sidebar nav{max-height:calc(100vh - 88px)!important;overflow-y:auto!important;overscroll-behavior:contain!important;scrollbar-width:none!important;-ms-overflow-style:none!important}
   .sidebar nav::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}
   .modal{overflow-y:auto!important;overscroll-behavior:contain!important;padding:24px!important}
