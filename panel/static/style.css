@@ -372,3 +372,17 @@ button{cursor:pointer;touch-action:manipulation}
 .modal-card:has(.task-modal) .modal-actions button:first-child{background:var(--panel2)!important;color:var(--text)!important;border:1px solid var(--line)!important}
 .modal-card:has(.task-modal) #modalOk.primary{background:#007aff!important;color:#fff!important;border:1px solid #007aff!important;box-shadow:none!important}
 @media(max-width:390px){.modal-card:has(.task-modal) .modal-actions{grid-template-columns:1fr 1fr!important}}
+
+/* 2026-08-03 Desktop scrolling and viewport stability */
+@media(min-width:721px){
+  html{height:auto!important;min-height:100%!important;overflow-y:auto!important;overscroll-behavior-y:auto!important}
+  body{height:auto!important;min-height:100vh!important;overflow-y:auto!important;overscroll-behavior-y:auto!important}
+  .app{height:auto!important;min-height:100vh!important;overflow:visible!important;grid-template-rows:72px minmax(calc(100vh - 72px),auto)!important}
+  .content{height:auto!important;min-height:calc(100vh - 72px)!important;overflow:visible!important;align-content:start!important;padding-bottom:48px!important}
+  .topbar{position:sticky!important;top:0!important}
+  .sidebar{height:100vh!important;max-height:100vh!important;overflow:hidden!important}
+  .sidebar nav{max-height:calc(100vh - 88px)!important;overflow-y:auto!important;overscroll-behavior:contain!important}
+  .modal{overflow-y:auto!important;overscroll-behavior:contain!important;padding:24px!important}
+  .modal-card{max-height:calc(100vh - 48px)!important;overflow-y:auto!important}
+  .table-wrap{max-width:100%;overflow:auto!important}
+}
