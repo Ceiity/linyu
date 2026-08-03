@@ -18,6 +18,7 @@ DEFAULT_OWNER_ID = "3179806299"
 CMD_LOGIN_OPEN = "\u767b\u5f55\u5f00\u542f"
 CMD_LOGIN_CLOSE = "\u767b\u5f55\u5173\u95ed"
 CMD_CREATE_BOT = "\u521b\u5efa\u673a\u5668\u4eba"
+CMD_DELETE_BOT = "\u5220\u9664\u673a\u5668\u4eba"
 CMD_NO_PREFIX_ALIASES = {
     "\u65e0\u9700@\u65e0\u9700\u524d\u7f00",
     "\u65e0\u9700at\u65e0\u9700\u524d\u7f00",
@@ -216,6 +217,17 @@ class Main(Star):
         }
         return await asyncio.to_thread(self._post_json_sync, "/api/remote/napcat/create", payload)
 
+    async def _delete_instance(self, event: AstrMessageEvent, name: str) -> dict:
+        payload = {
+            "requester": self._sender_id(event),
+            "group_id": self._group_id(event),
+            "bot_self_id": self._self_id(event),
+            "source": "astrbot_plugin_linyu_remote_admin",
+            "name": name,
+            "keep_data": True,
+        }
+        return await asyncio.to_thread(self._post_json_sync, "/api/remote/napcat/delete", payload)
+
     async def _apply_no_prefix(self, event: AstrMessageEvent) -> dict:
         payload = {
             "requester": self._sender_id(event),
@@ -285,7 +297,7 @@ class Main(Star):
         normalized = "".join(text.split()).lower()
         no_prefix_command = normalized in CMD_NO_PREFIX_ALIASES
         triggers = self._as_str_set(self._cfg("triggers", [TRIGGER_APPLY_LOGIN]))
-        owner_command = text.startswith(CMD_CREATE_BOT) or text in {CMD_LOGIN_OPEN, CMD_LOGIN_CLOSE} or no_prefix_command
+        owner_command = text.startswith(CMD_CREATE_BOT) or text.startswith(CMD_DELETE_BOT) or text in {CMD_LOGIN_OPEN, CMD_LOGIN_CLOSE} or no_prefix_command
         if owner_command and not self._hard_allowed(event):
             return
         if no_prefix_command:
@@ -320,6 +332,24 @@ class Main(Star):
             except Exception as e:
                 logger.exception("NapCat create command failed")
                 yield event.plain_result(f"\u521b\u5efa\u5931\u8d25\uff1a{e}")
+            return
+
+        if text.startswith(CMD_DELETE_BOT):
+            name = text[len(CMD_DELETE_BOT):].strip()
+            if not name:
+                yield event.plain_result("请发送：删除机器人 机器人名称，例如：删除机器人 napcat-1")
+                return
+            yield event.plain_result(f"正在删除机器人 {name}，默认保留数据目录，请稍等……")
+            try:
+                task = await self._delete_instance(event, name)
+                yield event.plain_result(
+                    f"删除任务已提交：{task.get('title', 'NapCat')}\n"
+                    f"任务 ID：{task.get('id', '')}\n"
+                    "可在 Web 面板的任务进度里查看。"
+                )
+            except Exception as e:
+                logger.exception("NapCat delete command failed")
+                yield event.plain_result(f"删除失败：{e}")
             return
 
         if text in {CMD_LOGIN_OPEN, CMD_LOGIN_CLOSE}:

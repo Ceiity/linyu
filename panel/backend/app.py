@@ -424,7 +424,7 @@ def decrypt_login_payload(data: dict, ip_key: str) -> dict:
         if not challenge:
             raise ValueError("?????????????")
         if challenge.get("ip_key") != ip_key or float(challenge.get("expires", 0)) <= time.time():
-            raise ValueError("????????????")
+            raise ValueError("\u8bf7\u8f93\u5165\u8981\u5220\u9664\u7684\u673a\u5668\u4eba\u540d\u79f0")
         try:
             plain = LOGIN_RSA_PRIVATE.decrypt(
                 base64.b64decode(str(enc.get("ciphertext") or "")),
@@ -451,7 +451,7 @@ def decrypt_login_payload(data: dict, ip_key: str) -> dict:
     if not challenge:
         raise ValueError("?????????????")
     if challenge.get("ip_key") != ip_key or float(challenge.get("expires", 0)) <= time.time():
-        raise ValueError("????????????")
+        raise ValueError("\u8bf7\u8f93\u5165\u8981\u5220\u9664\u7684\u673a\u5668\u4eba\u540d\u79f0")
     try:
         wrapped_key = base64.b64decode(str(enc.get("key") or ""))
         iv = base64.b64decode(str(enc.get("iv") or ""))
@@ -2360,6 +2360,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.remote_napcat_create_login()
             if p.path == "/api/remote/napcat/create":
                 return self.remote_napcat_create_instances()
+            if p.path == "/api/remote/napcat/delete":
+                return self.remote_napcat_delete_instance()
             if p.path == "/api/remote/napcat/login-status":
                 return self.remote_napcat_login_status()
             if p.path == "/api/remote/astrbot/no-prefix":
@@ -2573,6 +2575,45 @@ class Handler(BaseHTTPRequestHandler):
         requester = str(data.get("requester") or "remote")[:64]
         t = create_task("\u0051\u0051 \u6307\u4ee4\u521b\u5efa NapCat x%d" % count, "remote.napcat.create", task_add_napcat, "remote:" + requester, count)
         audit("remote", "remote.napcat.create", {"count": count, "requester": requester, "task": t.id}, True)
+        return self.send_api(api(True, t.to_dict()))
+
+    def remote_napcat_delete_instance(self):
+        data = self.read_json()
+        if not self.remote_auth_ok(data):
+            audit("remote", "remote.napcat.delete.denied", {"ip_hash": self.remote_client_key()[:12]}, False)
+            return self.send_api(api(False, message="remote auth failed", code="REMOTE_FORBIDDEN"), HTTPStatus.FORBIDDEN)
+        if not self.remote_principal_ok(data):
+            audit("remote", "remote.napcat.delete.principal_denied", {"requester": str(data.get("requester", ""))[:64], "bot_self_id": str(data.get("bot_self_id", ""))[:64]}, False)
+            return self.send_api(api(False, message="remote principal forbidden", code="REMOTE_PRINCIPAL_FORBIDDEN"), HTTPStatus.FORBIDDEN)
+        self.check_remote_rate_limit()
+        raw = str(data.get("name") or "").strip()
+        if not raw:
+            raise ValueError("\u8bf7\u8f93\u5165\u8981\u5220\u9664\u7684\u673a\u5668\u4eba\u540d\u79f0")
+        rows = parse_napcat_index(expose_secret=True)
+        target = ""
+        for row in rows:
+            name = str(row.get("name") or "")
+            display = str(row.get("display_name") or napcat_display_name(name))
+            if raw == name or raw == display:
+                target = name
+                break
+        if not target and raw.isdigit():
+            suffix = raw.lstrip("0") or "0"
+            for row in rows:
+                name = str(row.get("name") or "")
+                if name.endswith(suffix):
+                    target = name
+                    break
+        if not target:
+            target = safe_name(raw)
+            if not any(str(row.get("name") or "") == target for row in rows):
+                raise ValueError("\u673a\u5668\u4eba\u4e0d\u5b58\u5728\uff1a%s" % raw)
+        keep_data = bool(data.get("keep_data", True))
+        if not keep_data and not load_config()["allow_dangerous"]:
+            raise ValueError("\u5b8c\u5168\u5220\u9664\u6570\u636e\u9700\u8981\u5148\u5728\u7cfb\u7edf\u8bbe\u7f6e\u91cc\u5f00\u542f\u5371\u9669\u64cd\u4f5c")
+        requester = str(data.get("requester") or "remote")[:64]
+        t = create_task("QQ \u6307\u4ee4\u5220\u9664 %s" % target, "remote.napcat.delete", task_delete_napcat, "remote:" + requester, target, keep_data)
+        audit("remote", "remote.napcat.delete", {"name": target, "keep_data": keep_data, "requester": requester, "task": t.id}, True)
         return self.send_api(api(True, t.to_dict()))
 
     def remote_astrbot_no_prefix(self):

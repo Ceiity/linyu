@@ -1,13 +1,13 @@
-﻿# AstrBot-Deploy Web 面板接口文档
+# AstrBot-Deploy Web 面板接口文档
 
 本文档按当前后端入口 `panel/backend/app.py` 的实际路由整理。
 
 - 面板基础地址：`http://<host>:7070`
 - 普通 API 返回格式：`{ ok, data, message, code, time, version }`
 - 统计口径：只统计 `/api/...` 后端接口，不把 `/`、`/assets/...` 静态资源和 `/files/...` 公开文件链接算入 API。
-- 当前共 **63 个 API 入口**：
+- 当前共 **64 个 API 入口**：
   - `GET`：34 个
-  - `POST`：28 个
+  - `POST`：29 个
   - `DELETE`：1 个
   - 另有 1 个 `GET /api/logs/stream` 是 SSE 长连接接口，已计入 GET。
 
@@ -79,6 +79,7 @@
 |---|---|---|---|
 | POST | `/api/remote/napcat/create-login` | Remote Token | 远程申请机器人并返回扫码登录信息。 |
 | POST | `/api/remote/napcat/create` | Remote Token | 远程创建 NapCat 机器人实例。 |
+| POST | `/api/remote/napcat/delete` | Remote Token | 远程删除指定 NapCat 机器人实例，默认保留数据目录。 |
 | POST | `/api/remote/napcat/login-status` | Remote Token | 远程查询扫码登录/实例分配状态。 |
 | POST | `/api/remote/astrbot/no-prefix` | Remote Token | 远程触发 AstrBot 免 @ / 免前缀配置。 |
 | POST | `/api/remote/login/public-access` | Remote Token | 远程开关公开登录入口能力。 |
@@ -209,7 +210,7 @@
 | 当前用户与总览 | 4 |
 | AstrBot 管理 | 7 |
 | NapCat / 机器人实例 | 6 |
-| QQ 远程管理插件 | 6 |
+| QQ 远程管理插件 | 7 |
 | 任务 | 2 |
 | 日志 | 2 |
 | 文件中心新接口 | 12 |
@@ -217,7 +218,7 @@
 | 服务器文件浏览 | 3 |
 | 部署、备份、更新 | 6 |
 | 系统设置、安全与维护 | 8 |
-| **合计** | **63** |
+| **合计** | **64** |
 
-> 注：如果按“后端 HTTP 入口”而不是“API 接口”统计，再加上 `/`、`/assets/...`、`/files/...` 这 3 类非 API 入口，总入口类型是 66 类。
+> 注：如果按“后端 HTTP 入口”而不是“API 接口”统计，再加上 `/`、`/assets/...`、`/files/...` 这 3 类非 API 入口，总入口类型是 67 类。
 
