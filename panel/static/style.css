@@ -636,3 +636,12 @@ button{cursor:pointer;touch-action:manipulation}
     border-bottom-color:rgba(255,255,255,.10)!important;
   }
 }
+
+
+/* 2026-08-04 Task panel stability: avoid flashing during task polling. */
+.task-item{
+  animation:none!important;
+}
+.nap-create-card input:focus{
+  min-width:0!important;
+}
