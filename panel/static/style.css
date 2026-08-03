@@ -603,3 +603,36 @@ button{cursor:pointer;touch-action:manipulation}
     box-shadow:0 14px 34px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.55);
   }
 }
+
+
+/* 2026-08-04 Sidebar tooltip color polish: blend bubbles with the panel background. */
+@media(min-width:721px){
+  .sidebar-collapsed .app>.sidebar .nav-item::after,
+  .sidebar-collapsed .app>.sidebar .side-collapse::after{
+    background:color-mix(in srgb,var(--panel2) 88%,transparent)!important;
+    color:var(--text)!important;
+    border:1px solid color-mix(in srgb,var(--line) 88%,transparent)!important;
+    -webkit-backdrop-filter:blur(18px) saturate(160%)!important;
+    backdrop-filter:blur(18px) saturate(160%)!important;
+    box-shadow:0 12px 30px rgba(15,23,42,.12),inset 0 1px 0 rgba(255,255,255,.55)!important;
+  }
+  .sidebar-collapsed .app>.sidebar .nav-item::before,
+  .sidebar-collapsed .app>.sidebar .side-collapse::before{
+    background:color-mix(in srgb,var(--panel2) 88%,transparent)!important;
+    border-left:1px solid color-mix(in srgb,var(--line) 80%,transparent)!important;
+    border-bottom:1px solid color-mix(in srgb,var(--line) 80%,transparent)!important;
+  }
+  :root[data-theme=dark] .sidebar-collapsed .app>.sidebar .nav-item::after,
+  :root[data-theme=dark] .sidebar-collapsed .app>.sidebar .side-collapse::after{
+    background:color-mix(in srgb,var(--panel2) 82%,transparent)!important;
+    color:var(--text)!important;
+    border-color:rgba(255,255,255,.11)!important;
+    box-shadow:0 14px 34px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.08)!important;
+  }
+  :root[data-theme=dark] .sidebar-collapsed .app>.sidebar .nav-item::before,
+  :root[data-theme=dark] .sidebar-collapsed .app>.sidebar .side-collapse::before{
+    background:color-mix(in srgb,var(--panel2) 82%,transparent)!important;
+    border-left-color:rgba(255,255,255,.10)!important;
+    border-bottom-color:rgba(255,255,255,.10)!important;
+  }
+}
