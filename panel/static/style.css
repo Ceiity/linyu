@@ -490,3 +490,34 @@ button{cursor:pointer;touch-action:manipulation}
 .skeleton-card span{width:44px;height:44px;border-radius:14px}.skeleton-card b{width:58%;height:16px}.skeleton-card em{width:86%;height:12px}
 @keyframes skeletonSweep{0%{background-position:120% 0}100%{background-position:-120% 0}}
 @media(prefers-reduced-motion:reduce){.skeleton-card span,.skeleton-card b,.skeleton-card em{animation:none!important}}
+
+/* 2026-08-03 Mobile log center: leave extra scroll room above the floating bottom nav. */
+@media(max-width:720px){
+  .content:has(.log-center-card){
+    padding-bottom:calc(132px + var(--safe-bottom))!important;
+  }
+  .log-center-card{
+    margin-bottom:34px!important;
+  }
+  .log-viewer{
+    max-height:calc(var(--app-height) - 250px)!important;
+  }
+}
+@media(max-width:390px){
+  .content:has(.log-center-card){
+    padding-bottom:calc(144px + var(--safe-bottom))!important;
+  }
+  .log-center-card{
+    margin-bottom:42px!important;
+  }
+}
+@media(max-width:720px){
+  .ios-safari .content:has(.log-center-card),
+  .ipad-os .content:has(.log-center-card){
+    padding-bottom:calc(148px + var(--safe-bottom))!important;
+  }
+  .ios-safari .log-center-card,
+  .ipad-os .log-center-card{
+    margin-bottom:48px!important;
+  }
+}
