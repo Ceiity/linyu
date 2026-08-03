@@ -521,3 +521,85 @@ button{cursor:pointer;touch-action:manipulation}
     margin-bottom:5px!important;
   }
 }
+
+
+/* 2026-08-04 Desktop collapsed sidebar tooltips: OpenAI-like hover bubbles for icon-only nav. */
+@media(min-width:721px){
+  .sidebar-collapsed .app>.sidebar{
+    overflow:visible!important;
+    z-index:24!important;
+  }
+  .sidebar-collapsed .app>.sidebar nav{
+    overflow:visible!important;
+  }
+  .sidebar-collapsed .app>.sidebar .nav-item,
+  .sidebar-collapsed .app>.sidebar .side-collapse{
+    position:relative!important;
+  }
+  .sidebar-collapsed .app>.sidebar .nav-item::after,
+  .sidebar-collapsed .app>.sidebar .side-collapse::after{
+    content:attr(data-tip);
+    position:absolute;
+    left:calc(100% + 12px);
+    top:50%;
+    transform:translateY(-50%) translateX(-4px) scale(.98);
+    transform-origin:left center;
+    min-width:max-content;
+    max-width:220px;
+    padding:8px 11px;
+    border-radius:12px;
+    background:rgba(17,17,17,.94);
+    color:#fff;
+    font-size:13px;
+    font-weight:650;
+    line-height:1.2;
+    letter-spacing:-.01em;
+    box-shadow:0 12px 34px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.10);
+    opacity:0;
+    pointer-events:none;
+    white-space:nowrap;
+    z-index:80;
+    transition:opacity .14s ease,transform .14s ease;
+  }
+  .sidebar-collapsed .app>.sidebar .nav-item::before,
+  .sidebar-collapsed .app>.sidebar .side-collapse::before{
+    content:"";
+    position:absolute;
+    left:calc(100% + 7px);
+    top:50%;
+    width:10px;
+    height:10px;
+    border-radius:2px;
+    background:rgba(17,17,17,.94);
+    transform:translateY(-50%) rotate(45deg) scale(.9);
+    opacity:0;
+    pointer-events:none;
+    z-index:79;
+    transition:opacity .14s ease,transform .14s ease;
+  }
+  .sidebar-collapsed .app>.sidebar .nav-item:hover::after,
+  .sidebar-collapsed .app>.sidebar .nav-item:focus-visible::after,
+  .sidebar-collapsed .app>.sidebar .side-collapse:hover::after,
+  .sidebar-collapsed .app>.sidebar .side-collapse:focus-visible::after,
+  .sidebar-collapsed .app>.sidebar .nav-item:hover::before,
+  .sidebar-collapsed .app>.sidebar .nav-item:focus-visible::before,
+  .sidebar-collapsed .app>.sidebar .side-collapse:hover::before,
+  .sidebar-collapsed .app>.sidebar .side-collapse:focus-visible::before{
+    opacity:1;
+    transform:translateY(-50%) translateX(0) scale(1);
+  }
+  .sidebar-collapsed .app>.sidebar .nav-item:hover::before,
+  .sidebar-collapsed .app>.sidebar .nav-item:focus-visible::before,
+  .sidebar-collapsed .app>.sidebar .side-collapse:hover::before,
+  .sidebar-collapsed .app>.sidebar .side-collapse:focus-visible::before{
+    transform:translateY(-50%) rotate(45deg) scale(1);
+  }
+  :root[data-theme=dark] .sidebar-collapsed .app>.sidebar .nav-item::after,
+  :root[data-theme=dark] .sidebar-collapsed .app>.sidebar .side-collapse::after,
+  :root[data-theme=dark] .sidebar-collapsed .app>.sidebar .nav-item::before,
+  :root[data-theme=dark] .sidebar-collapsed .app>.sidebar .side-collapse::before{
+    background:rgba(245,245,245,.94);
+    color:#050505;
+    box-shadow:0 14px 34px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.55);
+  }
+}
