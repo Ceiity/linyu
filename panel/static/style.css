@@ -638,10 +638,47 @@ button{cursor:pointer;touch-action:manipulation}
 }
 
 
-/* 2026-08-04 Task panel stability: avoid flashing during task polling. */
+
+
+/* 2026-08-04 NapCat pending state polish: show row-level progress instead of guessing. */
+.nap-processing{
+  position:relative;
+  opacity:.82;
+}
+.nap-processing td,
+.nap-processing .nap-card-top,
+.nap-processing .pool-info-grid{
+  transition:opacity .18s ease,filter .18s ease;
+}
+.nap-processing .nap-row-actions,
+.nap-processing .action-pills{
+  opacity:.58;
+  filter:saturate(.75);
+}
+.nap-inline-pending{
+  margin-top:7px;
+  min-height:0;
+}
+.nap-pending-badge{
+  width:max-content;
+  max-width:100%;
+  gap:6px!important;
+  box-shadow:none!important;
+}
+.mini-spin{
+  width:10px!important;
+  height:10px!important;
+  border-width:2px!important;
+  margin:0!important;
+}
 .task-item{
   animation:none!important;
 }
 .nap-create-card input:focus{
   min-width:0!important;
+}
+.modal-actions button:disabled{
+  opacity:.62!important;
+  cursor:not-allowed!important;
+  transform:none!important;
 }
