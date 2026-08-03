@@ -457,3 +457,28 @@ button{cursor:pointer;touch-action:manipulation}
     backdrop-filter:none!important;
   }
 }
+
+/* 2026-08-03 Desktop dashboard title strip: force the title/subtitle header area fully transparent. */
+@media(min-width:721px){
+  :root:not([data-theme=dark]) .app>.topbar,
+  :root[data-theme=dark] .app>.topbar,
+  html .app>.topbar{
+    background:transparent!important;
+    background-color:transparent!important;
+    border-bottom-color:transparent!important;
+    box-shadow:none!important;
+    -webkit-backdrop-filter:none!important;
+    backdrop-filter:none!important;
+  }
+  .app>.topbar>div:first-of-type,
+  .app>.topbar h2,
+  .app>.topbar #pageTitle,
+  .app>.topbar #pageSub{
+    background:transparent!important;
+    background-color:transparent!important;
+    border-color:transparent!important;
+    box-shadow:none!important;
+    -webkit-backdrop-filter:none!important;
+    backdrop-filter:none!important;
+  }
+}
