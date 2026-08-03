@@ -494,30 +494,30 @@ button{cursor:pointer;touch-action:manipulation}
 /* 2026-08-03 Mobile log center: leave extra scroll room above the floating bottom nav. */
 @media(max-width:720px){
   .content:has(.log-center-card){
-    padding-bottom:calc(112px + var(--safe-bottom))!important;
+    padding-bottom:calc(102px + var(--safe-bottom))!important;
   }
   .log-center-card{
-    margin-bottom:16px!important;
+    margin-bottom:8px!important;
   }
   .log-viewer{
-    max-height:calc(var(--app-height) - 236px)!important;
+    max-height:calc(var(--app-height) - 228px)!important;
   }
 }
 @media(max-width:390px){
   .content:has(.log-center-card){
-    padding-bottom:calc(122px + var(--safe-bottom))!important;
+    padding-bottom:calc(112px + var(--safe-bottom))!important;
   }
   .log-center-card{
-    margin-bottom:22px!important;
+    margin-bottom:12px!important;
   }
 }
 @media(max-width:720px){
   .ios-safari .content:has(.log-center-card),
   .ipad-os .content:has(.log-center-card){
-    padding-bottom:calc(124px + var(--safe-bottom))!important;
+    padding-bottom:calc(114px + var(--safe-bottom))!important;
   }
   .ios-safari .log-center-card,
   .ipad-os .log-center-card{
-    margin-bottom:24px!important;
+    margin-bottom:14px!important;
   }
 }
