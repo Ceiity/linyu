@@ -204,7 +204,7 @@ async function pollNapQr(name){
       if(st)st.textContent="机器人在线，可以直接使用，窗口即将关闭";
       toast("QQ 登录成功");
       clearInterval(state.qrTimer);state.qrTimer=null;
-      setTimeout(()=>{closeModal();invalidateCache("dashboard","napcat","pool");refresh(true,true)},1200);
+      invalidateCache("dashboard","napcat","pool");setTimeout(()=>{closeModal();refresh(true,true)},450);setTimeout(()=>{invalidateCache("dashboard","napcat","pool");refresh(state.page==="napcat"||state.page==="pool",true)},1800);
       return
     }
     if(data.isOffline){if(st)st.textContent="账号离线，请重新扫码";return}

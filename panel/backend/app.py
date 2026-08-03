@@ -976,6 +976,40 @@ def recovery_status() -> dict:
     return {}
 
 
+def mark_napcat_recovery_online(name: str, reason: str = "QQ login confirmed") -> None:
+    """Immediately clear stale watchdog states after a successful QR login."""
+    clean = safe_name(str(name or ""))
+    if not clean:
+        return
+    now_text = time.strftime("%F %T %Z")
+    item = {
+        "name": clean,
+        "health": "online",
+        "reason": reason,
+        "action": "login confirmed",
+        "abnormal_count": 0,
+        "limited": False,
+        "updated_at": now_text,
+        "source": "panel.qq_login",
+    }
+    state_dir = INSTALL_PREFIX / "logs" / "napcat-watchdog-state"
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        write_json(state_dir / (clean + ".status.json"), item)
+        (state_dir / (clean + ".abnormal")).write_text("0\n", encoding="utf-8")
+    except Exception:
+        pass
+    status_file = INSTALL_PREFIX / "napcat_recovery_status.json"
+    try:
+        current = read_json(status_file, {})
+        bots = current.get("bots") if isinstance(current, dict) else {}
+        if not isinstance(bots, dict):
+            bots = {}
+        bots[clean] = item
+        write_json(status_file, {"updated_at": now_text, "bots": bots})
+    except Exception:
+        pass
+
 def watchdog_status() -> dict:
     cfg = load_config()
     status_file = INSTALL_PREFIX / "napcat_recovery_status.json"
@@ -1299,6 +1333,7 @@ def napcat_login_bundle(row: dict) -> dict:
     status = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
     if int(status.get("code", -1)) == 0 and (status.get("data") or {}).get("isLogin"):
         NAPCAT_QR_CACHE.pop(name, None)
+        mark_napcat_recovery_online(name)
         info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
         login_info = (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {}
         login_name, login_uin = napcat_login_identity(login_info)
@@ -1338,6 +1373,7 @@ def napcat_login_status_bundle(row: dict) -> dict:
     status = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
     if int(status.get("code", -1)) == 0 and (status.get("data") or {}).get("isLogin"):
         NAPCAT_QR_CACHE.pop(name, None)
+        mark_napcat_recovery_online(name)
         info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
         login_info = (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {}
         login_name, login_uin = napcat_login_identity(login_info)
@@ -2775,6 +2811,7 @@ class Handler(BaseHTTPRequestHandler):
         if action == "status":
             res = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
             if int(res.get("code", -1)) == 0 and (res.get("data") or {}).get("isLogin"):
+                mark_napcat_recovery_online(name)
                 info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
                 if int(info.get("code", -1)) == 0:
                     res.setdefault("data", {})["loginInfo"] = info.get("data") or {}
@@ -2783,6 +2820,7 @@ class Handler(BaseHTTPRequestHandler):
         if action == "qrcode":
             status = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
             if int(status.get("code", -1)) == 0 and (status.get("data") or {}).get("isLogin"):
+                mark_napcat_recovery_online(name)
                 info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
                 audit(user, "napcat.qq.already_login", {"name": name}, True)
                 return self.send_api(api(True, {"name": name, "already_login": True, "status": status, "login_info": (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {}}))
