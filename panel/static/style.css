@@ -482,3 +482,11 @@ button{cursor:pointer;touch-action:manipulation}
     backdrop-filter:none!important;
   }
 }
+
+/* 2026-08-03 Page switching performance: instant skeletons while data warms in background. */
+.page-skeleton .page-head{min-height:92px}
+.skeleton-card{min-height:128px;display:grid;gap:12px;align-content:start;overflow:hidden}
+.skeleton-card span,.skeleton-card b,.skeleton-card em{display:block;border-radius:999px;background:linear-gradient(90deg,color-mix(in srgb,var(--line) 62%,transparent),color-mix(in srgb,var(--panel2) 88%,var(--line)),color-mix(in srgb,var(--line) 62%,transparent));background-size:220% 100%;animation:skeletonSweep 1.05s ease-in-out infinite}
+.skeleton-card span{width:44px;height:44px;border-radius:14px}.skeleton-card b{width:58%;height:16px}.skeleton-card em{width:86%;height:12px}
+@keyframes skeletonSweep{0%{background-position:120% 0}100%{background-position:-120% 0}}
+@media(prefers-reduced-motion:reduce){.skeleton-card span,.skeleton-card b,.skeleton-card em{animation:none!important}}
