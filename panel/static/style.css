@@ -655,6 +655,18 @@ button{cursor:pointer;touch-action:manipulation}
   opacity:.58;
   filter:saturate(.75);
 }
+
+.nap-processing .nap-row-actions button,
+.nap-processing .action-pills button{
+  pointer-events:none!important;
+  cursor:not-allowed!important;
+  transform:none!important;
+  box-shadow:none!important;
+}
+.nap-processing .nap-row-actions,
+.nap-processing .action-pills{
+  cursor:not-allowed!important;
+}
 .nap-inline-pending{
   margin-top:7px;
   min-height:0;
