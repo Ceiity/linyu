@@ -768,3 +768,8 @@ body{background:var(--bg)!important;position:relative}
 
 /* 2026-08-05 Remove accidental extra device pill; system theme icon itself adapts to phone/desktop. */
 #clientDevicePill,.client-device-pill{display:none!important}
+
+
+/* 2026-08-05 Phone theme icon refinement */
+.theme-toggle .phone-theme-svg{width:22px!important;height:22px!important;stroke-width:1.72!important}
+.theme-toggle[data-mode=system] .phone-theme-svg{filter:drop-shadow(0 1px 0 rgba(255,255,255,.18))}
