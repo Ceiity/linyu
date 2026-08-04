@@ -16,6 +16,7 @@ Owner commands:
 - `\u767b\u5f55\u5173\u95ed`: only owner can use `\u7533\u8bf7\u767b\u5f55`.
 - `\u65e0\u9700@\u65e0\u9700\u524d\u7f00` (also accepts `\u65e0\u9700at\u65e0\u9700\u524d\u7f00`): apply AstrBot group-chat no-mention/no-prefix wake settings.
 - `\u5220\u9664\u673a\u5668\u4eba napcat-1`: delete one NapCat instance from QQ, keeping the data directory by default.
+- `\u5220\u9664\u673a\u5668\u4eba 1`: delete the first NapCat instance in the panel index order.
 
 Owner is `3179806299` by default. Bot self account is restricted to `2141945863`.
 

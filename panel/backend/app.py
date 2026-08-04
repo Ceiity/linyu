@@ -2591,17 +2591,16 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("\u8bf7\u8f93\u5165\u8981\u5220\u9664\u7684\u673a\u5668\u4eba\u540d\u79f0")
         rows = parse_napcat_index(expose_secret=True)
         target = ""
-        for row in rows:
-            name = str(row.get("name") or "")
-            display = str(row.get("display_name") or napcat_display_name(name))
-            if raw == name or raw == display:
-                target = name
-                break
-        if not target and raw.isdigit():
-            suffix = raw.lstrip("0") or "0"
+        if raw.isdigit():
+            idx = int(raw)
+            if idx < 1 or idx > len(rows):
+                raise ValueError("\u673a\u5668\u4eba\u5e8f\u53f7\u4e0d\u5b58\u5728\uff1a%s" % raw)
+            target = str(rows[idx - 1].get("name") or "")
+        if not target:
             for row in rows:
                 name = str(row.get("name") or "")
-                if name.endswith(suffix):
+                display = str(row.get("display_name") or napcat_display_name(name))
+                if raw == name or raw == display:
                     target = name
                     break
         if not target:
