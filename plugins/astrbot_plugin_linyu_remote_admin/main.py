@@ -196,7 +196,9 @@ class Main(Star):
         return False, ""
 
     def _cooldown_ok(self, sender: str) -> tuple[bool, int]:
-        seconds = int(self._cfg("qr_retry_seconds", 60) or 60)
+        seconds = int(self._cfg("cooldown_seconds", self._cfg("qr_retry_seconds", 60)) or 0)
+        if seconds <= 0:
+            return True, 0
         now_ts = time.time()
         last = self.cooldowns.get(sender, 0)
         left = int(seconds - (now_ts - last))
