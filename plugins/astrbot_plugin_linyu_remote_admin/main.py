@@ -40,12 +40,50 @@ class Main(Star):
         super().__init__(context)
         self.config = config or {}
         self.cooldowns: dict[str, float] = {}
+        self._external_config_cache: dict = {}
+        self._external_config_mtime = 0.0
 
-    def _cfg(self, key: str, default=None):
+    def _external_config_path(self) -> Path:
+        env_path = self._cfg_static("external_config_path", "")
+        if env_path:
+            return Path(str(env_path)).expanduser()
+        here = Path(__file__).resolve()
+        candidates = []
+        # Runtime install: /opt/astrbot/data/plugins/<plugin>/main.py -> /opt/astrbot/data/config/...
+        try:
+            candidates.append(here.parents[2] / "config" / "astrbot_plugin_linyu_remote_admin_config.json")
+        except Exception:
+            pass
+        # Development/project fallback: <repo>/plugins/<plugin>/main.py -> /opt/astrbot/data/config/...
+        candidates.append(Path("/opt/astrbot/data/config/astrbot_plugin_linyu_remote_admin_config.json"))
+        for path in candidates:
+            if path.exists():
+                return path
+        return candidates[0]
+
+    def _cfg_static(self, key: str, default=None):
         try:
             return self.config.get(key, default)
         except Exception:
             return default
+
+    def _external_config(self) -> dict:
+        path = self._external_config_path()
+        try:
+            mtime = path.stat().st_mtime
+            if mtime != self._external_config_mtime:
+                data = json.loads(path.read_text(encoding="utf-8-sig"))
+                self._external_config_cache = data if isinstance(data, dict) else {}
+                self._external_config_mtime = mtime
+        except Exception:
+            return self._external_config_cache or {}
+        return self._external_config_cache or {}
+
+    def _cfg(self, key: str, default=None):
+        external = self._external_config()
+        if key in external:
+            return external.get(key, default)
+        return self._cfg_static(key, default)
 
     @staticmethod
     def _as_str_set(value) -> set[str]:
