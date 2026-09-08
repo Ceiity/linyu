@@ -1,72 +1,160 @@
 #!/usr/bin/env node
-// 网易云音乐 UID 释放检测工具（linuxapi 加密通道，无需登录，无频控）
+// 网易云 ID/昵称 释放检测 —— 多通道无频控版
+//
+// 通道:
+//   linuxapi  POST /api/linux/forward (AES-128-ECB, Linux客户端协议)  50连发零风控
+//   eapi      POST /eapi/* (AES-128-ECB, PC客户端协议 + 随机化cookie指纹) 15连发零风控
+//   明文       /api/* 直调 (备用, 高频会触发 -462 风控)
 //
 // 用法:
-//   node uid_check.js <uid> [uid2 uid3 ...]      单次/批量检测
-//   node uid_check.js --watch <uid> [间隔秒]     轮询蹲守模式，释放即报警
-//
-// 判定逻辑:
-//   code 404 (无 message)          => 已释放（账号不存在或已注销，ID 可用）
-//   code 404 + "该账号已被封禁"     => 被封禁（ID 仍被占用）
-//   code 200 + profile             => 账号正常存在
+//   node uid_check.js uid 12345678 [12345679 ...]     检测 UID 是否释放
+//   node uid_check.js nick 名字 [名字2 ...]           检测昵称是否被占用
+//   node uid_check.js watch-uid 12345678 [间隔秒]     蹲守 UID, 释放即报警
+//   node uid_check.js watch-nick 名字 [间隔秒]        蹲守昵称, 释放即报警
 const crypto = require('crypto');
 
-const LINUX_KEY = Buffer.from('rFgB&h#%2?^eDg:Q', 'utf8');
-const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36';
+// ---------- 通道实现 ----------
 
-const eparams = (obj) => {
-  const cipher = crypto.createCipheriv('aes-128-ecb', LINUX_KEY, null);
-  return Buffer.concat([cipher.update(Buffer.from(JSON.stringify(obj), 'utf8')), cipher.final()])
-    .toString('hex').toUpperCase();
-};
-
-const checkUid = async (uid) => {
-  const body = 'eparams=' + eparams({
-    method: 'POST',
-    url: `https://music.163.com/api/v1/user/detail/${uid}`,
-    params: {},
-  });
+// 通道A: linuxapi
+const LKEY = Buffer.from('rFgB&h#%2?^eDg:Q', 'utf8');
+const LINUX_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36';
+const linuxForward = async (url, params = {}) => {
+  const text = JSON.stringify({ method: 'POST', url, params });
+  const c = crypto.createCipheriv('aes-128-ecb', LKEY, null);
+  const eparams = Buffer.concat([c.update(Buffer.from(text, 'utf8')), c.final()]).toString('hex').toUpperCase();
   const res = await fetch('https://music.163.com/api/linux/forward', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
-    body,
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': LINUX_UA },
+    body: 'eparams=' + eparams,
   });
-  const j = await res.json();
-  if (j.code === 200 && j.profile) {
-    return { uid, status: 'OCCUPIED', nickname: j.profile.nickname };
-  }
-  if (j.code === 404) {
-    return { uid, status: j.message ? 'BANNED' : 'RELEASED', note: j.message || '账号不存在/已注销，ID 已释放' };
-  }
-  return { uid, status: 'UNKNOWN', raw: JSON.stringify(j).slice(0, 120) };
+  return res.json();
 };
 
-const fmt = (r) => {
-  const tag = { RELEASED: '[已释放]', OCCUPIED: '[占用中]', BANNED: '[已封禁]', UNKNOWN: '[未知]' }[r.status];
-  return `${tag} uid=${r.uid}` + (r.nickname ? ` 昵称=${r.nickname}` : '') + (r.note ? ` (${r.note})` : '');
+// 通道B: eapi (每次请求随机化 cookie 指纹以绕过按指纹的风控计数)
+const EKEY = Buffer.from('e82ckenh8dichen8', 'utf8');
+const PC_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
+const rnd = (n) => crypto.randomBytes(n).toString('hex');
+const eapiCall = async (path, url, data) => {
+  const text = JSON.stringify(data);
+  const digest = crypto.createHash('md5').update(`nobody${url}use${text}md5forencrypt`).digest('hex');
+  const payload = `${url}-36cd479b6b5-${text}-36cd479b6b5-${digest}`;
+  const c = crypto.createCipheriv('aes-128-ecb', EKEY, null);
+  const params = Buffer.concat([c.update(Buffer.from(payload, 'utf8')), c.final()]).toString('hex').toUpperCase();
+  const cookie = `os=pc; appver=9.1.115; channel=netease; NMTID=${rnd(16)}; __remember_me=true; _ntes_nuid=${rnd(16)}; requestId=${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const res = await fetch('https://music.163.com/eapi' + path, {
+    method: 'POST',
+    headers: { 'User-Agent': PC_UA, 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookie },
+    body: 'params=' + params,
+  });
+  return res.json();
+};
+
+// ---------- 检测逻辑 ----------
+
+const checkUidVia = {
+  linuxapi: (uid) => linuxForward(`https://music.163.com/api/v1/user/detail/${uid}`, {}),
+  eapi: (uid) => eapiCall(`/v1/user/detail/${uid}`, `/api/v1/user/detail/${uid}`, {}),
+  plain: async (uid) => {
+    const res = await fetch(`https://music.163.com/api/v1/user/detail/${uid}`, {
+      headers: { Referer: 'https://music.163.com/', 'User-Agent': PC_UA },
+    });
+    return res.json();
+  },
+};
+
+const checkNickVia = {
+  linuxapi: (nickname) => linuxForward('https://music.163.com/api/nickname/duplicated', { nickname }),
+  eapi: (nickname) => eapiCall('/nickname/duplicated', '/api/nickname/duplicated', { nickname }),
+  plain: async (nickname) => {
+    const res = await fetch('https://music.163.com/api/nickname/duplicated', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Referer: 'https://music.163.com/' },
+      body: 'nickname=' + encodeURIComponent(nickname),
+    });
+    return res.json();
+  },
+};
+
+const parseUid = (uid, j) => {
+  if (j.code === 200 && j.profile) return { uid, status: 'OCCUPIED', nickname: j.profile.nickname };
+  if (j.code === 404) return { uid, status: j.message ? 'BANNED' : 'RELEASED', note: j.message || '账号不存在/已注销，ID 已释放' };
+  return null; // 非预期(如 -462)，交由上层降级
+};
+
+const parseNick = (nickname, j) => {
+  if (j.code === 200 && j.duplicated === false) return { nickname, status: 'RELEASED', note: '昵称未被占用，可以使用' };
+  if (j.code === 200 && j.duplicated === true) return { nickname, status: 'OCCUPIED' };
+  return null;
+};
+
+// 多通道自动降级 + -462 风控退避重试
+// 风控为短滑动窗口(实测几秒~1分钟), 遇 -462 等待后重试即可穿透
+const CHANNELS = ['linuxapi', 'eapi', 'plain'];
+const sleep = (ms) => new Promise((s) => setTimeout(s, ms));
+const runWithFallback = async (fn, parse, arg, maxRetry = 4) => {
+  const errors = [];
+  for (let attempt = 0; attempt <= maxRetry; attempt++) {
+    const blocked = [];
+    for (const ch of CHANNELS) {
+      try {
+        const j = await fn[ch](arg);
+        const r = parse(arg, j);
+        if (r) return { ...r, channel: ch };
+        if (j.code === -462) blocked.push(ch); // 风控，稍后重试
+        else errors.push(`${ch}: ${JSON.stringify(j).slice(0, 80)}`);
+      } catch (e) {
+        errors.push(`${ch}: ${e.message}`);
+      }
+    }
+    if (!blocked.length) break; // 不是风控问题，直接失败
+    if (attempt < maxRetry) {
+      const wait = 3000 * (attempt + 1); // 3s, 6s, 9s, 12s 退避
+      await sleep(wait);
+    }
+  }
+  return { status: 'UNKNOWN', note: errors.join(' | ') };
+};
+
+const TAG = { RELEASED: '[已释放]', OCCUPIED: '[占用中]', BANNED: '[已封禁]', UNKNOWN: '[未知]' };
+const fmt = (r, isUid) => {
+  const id = isUid ? `uid=${r.uid}` : `昵称=${r.nickname}`;
+  return `${TAG[r.status]} ${id}` + (r.nickname && !isUid ? '' : r.nickname ? ` 昵称=${r.nickname}` : '') +
+    (r.note ? ` (${r.note})` : '') + (r.channel ? ` via ${r.channel}` : '');
 };
 
 (async () => {
   const args = process.argv.slice(2);
-  if (!args.length) {
-    console.error('用法: node uid_check.js <uid> [...] | --watch <uid> [间隔秒]');
+  const cmd = args[0];
+  if (!cmd) {
+    console.error('用法: node uid_check.js uid <id>... | nick <名>... | watch-uid <id> [秒] | watch-nick <名> [秒]');
     process.exit(1);
   }
 
-  if (args[0] === '--watch') {
-    const uid = args[1];
+  if (cmd === 'watch-uid' || cmd === 'watch-nick') {
+    const isUid = cmd === 'watch-uid';
+    const target = args[1];
     const interval = parseInt(args[2] || '60', 10);
-    console.error(`蹲守 uid=${uid}，每 ${interval}s 检测一次，释放即退出`);
+    const fn = isUid ? checkUidVia : checkNickVia;
+    const parse = isUid ? parseUid : parseNick;
+    console.error(`蹲守 ${isUid ? 'uid' : '昵称'}=${target}，每 ${interval}s 检测一次（多通道降级），释放即报警`);
     while (true) {
-      const r = await checkUid(uid);
-      console.log(new Date().toLocaleTimeString(), fmt(r));
-      if (r.status === 'RELEASED') { console.error(`>>> uid=${uid} 已释放！`); process.exit(0); }
-      await new Promise(s => setTimeout(s, interval * 1000));
+      const r = await runWithFallback(fn, parse, target);
+      console.log(new Date().toLocaleTimeString(), fmt(r, isUid));
+      if (r.status === 'RELEASED') { console.error(`>>> ${target} 已释放！快去注册/修改！`); process.exit(0); }
+      await new Promise((s) => setTimeout(s, interval * 1000));
     }
   }
 
-  for (const uid of args) {
-    try { console.log(fmt(await checkUid(uid))); }
-    catch (e) { console.log(`[错误] uid=${uid} ${e.message}`); }
+  if (cmd === 'uid' || cmd === 'nick') {
+    const isUid = cmd === 'uid';
+    const fn = isUid ? checkUidVia : checkNickVia;
+    const parse = isUid ? parseUid : parseNick;
+    for (const t of args.slice(1)) {
+      console.log(fmt(await runWithFallback(fn, parse, t), isUid));
+    }
+    process.exit(0);
   }
+
+  console.error('未知命令: ' + cmd);
+  process.exit(1);
 })();
