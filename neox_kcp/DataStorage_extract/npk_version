@@ -1,0 +1,152 @@
+{
+  "version": "758409_android", 
+  "res_rev": "758379", 
+  "script_rev": "758409", 
+  "engine_ver": "1639560407", 
+  "package_version": "1.0.8", 
+  "min_client_version": "9", 
+  "max_client_version": "9", 
+  "ab_srv": "auto", 
+  "files": {
+    "char_file_list": [
+      197396, 
+      "d3422926d2ed6f0bb1d3e82ee98f601e"
+    ], 
+    "scene_file_list": [
+      11465, 
+      "826afb30037af8a96d535e23f16c7022"
+    ], 
+    "script.npk": [
+      8995580, 
+      "563bfd30667264bf514bc1c4036d8520"
+    ], 
+    "full_indices_props_zhucheng": [
+      21627, 
+      "8890c601dc3cafc68572e14d514a24f5"
+    ], 
+    "props_file_list": [
+      200278, 
+      "547bfc0310b7156a15e3b1bf01836949"
+    ], 
+    "props_zhucheng_file_list": [
+      54476, 
+      "33abd2cf831e97c26805723026eac650"
+    ], 
+    "full_indices_char": [
+      79013, 
+      "4c7d6a0a51723f2534e4dd657817cb23"
+    ], 
+    "full_indices_scene": [
+      4520, 
+      "fd64566e2ec57bcaacc09033b8cd5bcf"
+    ], 
+    "char.npk": [
+      74208908, 
+      "f980a6f7f3a4951fe0446ce7ad765941"
+    ], 
+    "char_loading_file_list": [
+      28403, 
+      "a047d3c0bda67d588ea5d1083bc1a268"
+    ], 
+    "props_ui_model.npk": [
+      28744176, 
+      "10d12f5774245703e2fa2e03754f83eb"
+    ], 
+    "script_file_list": [
+      156968, 
+      "a36615d93c9c26124345c41caad6acb7"
+    ], 
+    "scene.npk": [
+      67317044, 
+      "a5c3e2d7b0bf5ffd6b0632d7477b94c1"
+    ], 
+    "props_ui_model_file_list": [
+      47717, 
+      "1455ce5f2638a7e59e2329fdbfe9ae24"
+    ], 
+    "props.npk": [
+      77334644, 
+      "d1ea7f9304b790f439af3ba7dc8e4250"
+    ], 
+    "res.npk": [
+      52382180, 
+      "2273c13939963479b7fac00de4c9546b"
+    ], 
+    "gui2_file_list": [
+      233638, 
+      "1a142c469e49d4733b2dff8b5d420470"
+    ], 
+    "gui2.npk": [
+      87185368, 
+      "8d9f0af054fc9148761ffd785d4302f8"
+    ], 
+    "props_zhucheng.npk": [
+      26760900, 
+      "c33ce2a7c8819c12363f20c633f39f87"
+    ], 
+    "wwise_file_list": [
+      12089, 
+      "3f04676d98c0a086ec80c09c28ac437f"
+    ], 
+    "full_indices_props": [
+      80859, 
+      "1a4b7520989772bb34508aa6bd894ee6"
+    ], 
+    "full_indices_gui2": [
+      92529, 
+      "47b05df6018e3607433e4f6781ed6ab1"
+    ], 
+    "full_indices_wwise": [
+      4926, 
+      "2432eba1601d5077ed7b0dec55407f1b"
+    ], 
+    "full_indices_char_loading": [
+      11153, 
+      "8767d53998836bd549108f005512308f"
+    ], 
+    "full_indices_script": [
+      42171, 
+      "b26e70a5b6f9d29c8babe871d280db9c"
+    ], 
+    "wwise.npk": [
+      86011952, 
+      "a3b419dfaee314cacac6af9069119469"
+    ], 
+    "full_indices_props_ui_model": [
+      18965, 
+      "132a867098c554289847ad8d8d83a9b9"
+    ], 
+    "full_indices_res": [
+      189960, 
+      "ebeeaee1653c789b429d396e6de0ba50"
+    ], 
+    "res_file_list": [
+      475807, 
+      "df64900673fcac9605cf7b6f38ce75ca"
+    ], 
+    "char_loading.npk": [
+      51176632, 
+      "f37cf9ef8e2b591e1d8582a7aa1fa22d"
+    ], 
+    "res/video/login.mp4": [
+      10343609, 
+      "58849473871c458e83982b7c9475cbed"
+    ], 
+    "res/video/login_video.mp4": [
+      15258244, 
+      "0622c3de4b88f59fe835886ecd693bfe"
+    ], 
+    "res/unpack/map_lightmap/football/football.lumlightmaps": [
+      6325, 
+      "bb9b868f03ce586782c5a19a36567824"
+    ], 
+    "res/unpack/map_lightmap/dodgeball/dodgeball.lumlightmaps": [
+      32491, 
+      "420412e5b2e4c87fb898ba0a2ca0ca2c"
+    ], 
+    "res/unpack/map_lightmap/demo_guntong/demo_guntong.lumlightmaps": [
+      24847, 
+      "0e2665203c866d03867d7e540909bd0d"
+    ]
+  }
+}
