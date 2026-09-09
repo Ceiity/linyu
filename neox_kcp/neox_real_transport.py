@@ -33,10 +33,11 @@ Business frame layout (CONFIRMED from libclient.so static analysis):
   len = total_size - 4 (the u32 counts every byte after itself, including
   the 2 id bytes). Mobile handshake RPC frame ids (send_seed_request,
   send_session_key, send_connect_server, ...) are runtime indices into the
-  message-type registry built from client_gate.proto (init @0x21a55fc,
-  48-byte entries, index = (descriptor - base)/48); the registration order
-  follows the proto file's message order. The defaults below assume that
-  order and stay overridable via --frame-base for live calibration.
+  48-byte service-method descriptor/handler registry built from
+  client_gate.proto (init @0x21a55fc, index = (descriptor - base)/48); the
+  registration order follows the proto service method order, not the
+  message_type order. The defaults below use that order and stay
+  overridable via --frame-base for live calibration.
 
 Business layer (confirmed inner framing from script analysis):
   uint32_le(len) + uint16_le(0x8000) + AreaMessage, one KCP message each.
@@ -73,6 +74,7 @@ from neox_rename_protocol_replay import (
     rsa_oaep_decrypt,
     rsa_oaep_encrypt,
     parse_encrypt_string,
+    parse_fields,
     parse_session_key_message,
     seed_session_digest,
     digest64,
@@ -221,10 +223,8 @@ class MiniKCP:
         self.rcv_next = 0
         self.snd_buf: List[Dict[str, Any]] = []
         self.rcv_buf: Dict[int, Tuple[int, bytes]] = {}
-        self.delivered: List[Tuple[int, bytes]] = []  # (frg, payload) in order
         self.ready_msgs: List[bytes] = []
         self._pending_msg: List[bytes] = []
-        self.rto = 0.3
         self._lock = threading.Lock()
 
     # -- send ---------------------------------------------------------------
@@ -236,8 +236,8 @@ class MiniKCP:
                     "sn": self.snd_next,
                     "frg": len(frags) - 1 - i,
                     "data": payload,
-                    "ts": time.monotonic(),
-                    "sent": False,
+                    "sent_at": None,
+                    "rto": 0.3,
                 })
                 self.snd_next += 1
 
@@ -258,15 +258,18 @@ class MiniKCP:
         if conv != self.conv:
             return
         with self._lock:
-            # process una: drop acked segments
+            # una: every segment numbered below it has been received by the peer
             self.snd_buf = [s for s in self.snd_buf if s["sn"] >= una]
             payload = pkt[IKCP_HEADER:IKCP_HEADER + ln]
             if cmd == IKCP_PUSH:
-                self.rcv_buf.setdefault(sn, (frg, payload))
+                if sn >= self.rcv_next:
+                    self.rcv_buf.setdefault(sn, (frg, payload))
+                # mirror ikcp: always acknowledge a push, including duplicates
+                self.on_output(self._seg(IKCP_ACK, 0, sn, b""))
             elif cmd == IKCP_ACK:
                 self.snd_buf = [s for s in self.snd_buf if s["sn"] != sn]
             elif cmd == IKCP_WASK:
-                pass  # handled in flush: emit WINS
+                self.on_output(self._seg(IKCP_WINS, 0, 0, b""))
             self._assemble()
 
     def _assemble(self) -> None:
@@ -284,23 +287,15 @@ class MiniKCP:
 
     # -- pump ---------------------------------------------------------------
     def flush(self) -> None:
+        """Transmit/retransmit outstanding PUSH segments (never emits stray ACKs)."""
         with self._lock:
             now = time.monotonic()
             for seg in self.snd_buf:
-                if not seg["sent"] or now - seg["ts"] > self.rto:
-                    seg["ts"] = now
-                    seg["sent"] = True
+                if seg["sent_at"] is None or now - seg["sent_at"] > seg["rto"]:
+                    if seg["sent_at"] is not None:
+                        seg["rto"] = min(seg["rto"] * 1.5, 5.0)
+                    seg["sent_at"] = now
                     self.on_output(self._seg(IKCP_PUSH, seg["frg"], seg["sn"], seg["data"]))
-                    self.on_output(self._seg(IKCP_ACK, 0, seg["sn"], b""))  # piggyback-ish
-            if self.snd_buf:
-                self.rto = min(self.rto * 1.5, 5.0)
-
-    def ack_pending(self) -> None:
-        with self._lock:
-            for sn in list(self.rcv_buf.keys()):
-                self.on_output(self._seg(IKCP_ACK, 0, sn, b""))
-            if self.rcv_buf:
-                self.on_output(self._seg(IKCP_WINS, 0, 0, b""))
 
 
 # ---------------------------------------------------------------------------
@@ -309,16 +304,33 @@ class MiniKCP:
 # ---------------------------------------------------------------------------
 FRAME_ID_ENTITY_METHOD = 0x8000  # confirmed (entity builder 0x1fdc140)
 
-# Mobile handshake RPC frame ids: indices into the client_gate.proto message
-# registry (init @0x21a55fc). Sequential defaults assuming proto message
-# order EncryptString, SessionSeed, SessionKey, ...; calibrate against a live
-# gate with --frame-base / per-id overrides if needed.
-FRAME_ID_SEED_REQUEST = 1
-FRAME_ID_SEED_REPLY = 2
-FRAME_ID_SESSION_KEY = 3
-FRAME_ID_SESSION_KEY_OK = 4
-FRAME_ID_CONNECT_SERVER = 5
-FRAME_ID_CONNECT_REPLY = 6
+# Handshake RPC frame ids. The send_* wrapper order in libclient.so matches
+# IGateService's method order exactly (send_seed_request, send_session_key,
+# send_connect_server, send_entity_message, ...), and frame ids are indices
+# into the connection's 48-byte service-method descriptor/handler array
+# ((descriptor-base)/48 from 0x1fdc1b8), so client->server handshake frames
+# are 0,1,2 with entity traffic special-cased to 0x8000. Server->client
+# follows IGateClient order (seed_reply=0, session_key_ok=1,
+# connect_reply=2, ...). All overridable via --frame-base for live-gate
+# calibration.
+FRAME_ID_SEED_REQUEST = 0
+FRAME_ID_SESSION_KEY = 1
+FRAME_ID_CONNECT_SERVER = 2
+FRAME_ID_SEED_REPLY = 0
+FRAME_ID_SESSION_KEY_OK = 1
+FRAME_ID_CONNECT_REPLY = 2
+
+
+def set_frame_base(base: int) -> None:
+    """Calibrate handshake RPC ids for gates whose service registry differs."""
+    global FRAME_ID_SEED_REQUEST, FRAME_ID_SESSION_KEY, FRAME_ID_CONNECT_SERVER
+    global FRAME_ID_SEED_REPLY, FRAME_ID_SESSION_KEY_OK, FRAME_ID_CONNECT_REPLY
+    FRAME_ID_SEED_REQUEST = base
+    FRAME_ID_SESSION_KEY = base + 1
+    FRAME_ID_CONNECT_SERVER = base + 2
+    FRAME_ID_SEED_REPLY = base
+    FRAME_ID_SESSION_KEY_OK = base + 1
+    FRAME_ID_CONNECT_REPLY = base + 2
 
 
 def native_frame(frame_id: int, body: bytes = b"") -> bytes:
@@ -334,6 +346,74 @@ def parse_native_frame(data: bytes) -> Tuple[int, bytes]:
     if size != len(data) - 4:
         raise ValueError(f"bad frame length: header={size}, actual={len(data) - 4}")
     return struct.unpack("<H", data[4:6])[0], data[6:]
+
+
+# ---------------------------------------------------------------------------
+# Protobuf payloads recovered from the embedded (deobfuscated) descriptors:
+#   client_gate.proto @0x31aafe9, common.proto @0x31ac060
+#     EncryptString  { encryptstr(1): bytes }
+#     SessionSeed    { seed(1): int64, crypto(2): int32 }
+#     SessionKey     { random_padding_header(1): bytes, session_key(2): bytes,
+#                      seed(3): int64, random_padding_tail(4): bytes,
+#                      crypto(5): int32 }
+#     ConnectServerRequest { routes(1): bytes,
+#                             type(2): RequestType(NEW_CONNECTION=0/RE_CONNECTION=1),
+#                             clientid(3): bytes, entityid(4): bytes,
+#                             reconnectkey(5): bytes, opt(6): uint32 }
+#     ConnectServerReply   { routes(1): bytes,
+#                             type(2): ReplyType(BUSY=0,CONNECTED=1,
+#                                                RECONNECT_SUCCEEDED=2,
+#                                                RECONNECT_FAILED=3,
+#                                                FORBIDDEN=4, MAX_CONNECTION=5,
+#                                                CONNECTION_OVER=6) }
+# ---------------------------------------------------------------------------
+REQ_NEW_CONNECTION = 0
+REQ_RE_CONNECTION = 1
+REPLY_BUSY = 0
+REPLY_CONNECTED = 1
+
+
+def session_seed_message(seed: int, crypto: int) -> bytes:
+    """SessionSeed{seed(1): varint, crypto(2): varint}."""
+    return uvar_field(1, seed) + uvar_field(2, crypto)
+
+
+def encrypt_string_message(ciphertext: bytes) -> bytes:
+    """EncryptString{encryptstr(1): bytes} wrapping the RSA ciphertext."""
+    return bytes_field(1, ciphertext)
+
+
+def connect_server_request(conn_type: int, clientid: bytes,
+                           entityid: bytes = b"", reconnectkey: bytes = b"") -> bytes:
+    """ConnectServerRequest with the recovered field numbers (type=2, id=3)."""
+    out = uvar_field(2, conn_type) + bytes_field(3, clientid)
+    if entityid:
+        out += bytes_field(4, entityid)
+    if reconnectkey:
+        out += bytes_field(5, reconnectkey)
+    return out
+
+
+def parse_connect_server_reply(data: bytes) -> Dict[str, Any]:
+    """ConnectServerReply{routes(1): bytes, type(2): varint}."""
+    out: Dict[str, Any] = {"routes_hex": "", "type": None}
+    for fn, wt, v in parse_fields(data):
+        if fn == 1 and wt == 2:
+            out["routes_hex"] = v.hex()
+        elif fn == 2 and wt == 0:
+            out["type"] = v
+    return out
+
+
+def parse_session_seed(data: bytes) -> Dict[str, Any]:
+    """SessionSeed{seed(1): varint, crypto(2): varint}."""
+    out: Dict[str, Any] = {"seed": 0, "crypto": 0}
+    for fn, wt, v in parse_fields(data):
+        if fn == 1 and wt == 0:
+            out["seed"] = v
+        elif fn == 2 and wt == 0:
+            out["crypto"] = v
+    return out
 
 
 class BusinessLayer:
@@ -353,19 +433,24 @@ class BusinessLayer:
 
     # client side -------------------------------------------------------------
     def build_seed_request(self) -> bytes:
-        return native_frame(FRAME_ID_SEED_REQUEST)
+        return native_frame(FRAME_ID_SEED_REQUEST)  # IGateService.seed_request(Void)
 
-    def build_session_key(self, seed: int) -> Tuple[bytes, bytes]:
+    def build_session_key(self, seed: int, crypto_mode: Optional[int] = None) -> Tuple[bytes, bytes]:
+        if crypto_mode is not None:
+            self.crypto_mode = crypto_mode
         material = make_random_session_material(
             seed=seed, session_key_hex="", crypto_mode=self.crypto_mode,
             digest_layout="seed-key", session_layout="key-in-field2",
         )
         encrypted = rsa_oaep_encrypt(self.public_key_pem, material["session_key_message"])
         self.session_key = material["session_key"]
-        return native_frame(FRAME_ID_SESSION_KEY, encrypted), material["session_key"]
+        # body = EncryptString{encryptstr(1)} wrapping the RSA ciphertext
+        return (native_frame(FRAME_ID_SESSION_KEY, encrypt_string_message(encrypted)),
+                material["session_key"])
 
     def build_connect_server(self, clientid: str) -> bytes:
-        return native_frame(FRAME_ID_CONNECT_SERVER, uvar_field(1, 0) + bytes_field(2, clientid.encode()))
+        body = connect_server_request(REQ_NEW_CONNECTION, clientid.encode())
+        return native_frame(FRAME_ID_CONNECT_SERVER, body)
 
     def build_encrypted_rpc(self, frame: bytes) -> bytes:
         assert self.send_stream is not None
@@ -539,7 +624,6 @@ class UdpTransport:
             last_hb = time.monotonic()
             while self._alive:
                 self.kcp.flush()
-                self.kcp.ack_pending()
                 if self.is_server:
                     self._server_pump()
                 if time.monotonic() - last_hb > 10.0:
@@ -566,10 +650,11 @@ class UdpTransport:
         if frame_id == FRAME_ID_SEED_REQUEST:
             seed = secrets.randbits(63)
             self.server_state["seed"] = seed
-            self.send_ctrl(FRAME_ID_SEED_REPLY, seed.to_bytes(8, "little"))
-            log("rpc->", "seed_reply")
+            self.send_ctrl(FRAME_ID_SEED_REPLY, session_seed_message(seed, self.biz.crypto_mode))
+            log("rpc->", f"seed_reply seed={seed} crypto={self.biz.crypto_mode}")
         elif frame_id == FRAME_ID_SESSION_KEY:
-            session_msg = rsa_oaep_decrypt(self.private_key_pem, payload)
+            ciphertext = parse_encrypt_string(payload)
+            session_msg = rsa_oaep_decrypt(self.private_key_pem, ciphertext)
             fields = parse_session_key_message(session_msg)
             session_key = bytes.fromhex(fields["field2_hex"])
             digest_ok = fields.get("field3") == digest64(
@@ -583,7 +668,8 @@ class UdpTransport:
             log("rpc->", f"session_key_ok (digest {'ok' if digest_ok else 'BAD'}, "
                          f"crypto mode {negotiated})")
         elif frame_id == FRAME_ID_CONNECT_SERVER:
-            self.send_ctrl(FRAME_ID_CONNECT_REPLY, bytes([1]))
+            self.send_ctrl(FRAME_ID_CONNECT_REPLY,
+                           uvar_field(2, REPLY_CONNECTED))
             log("rpc->", "connect_reply (connected)")
 
     def server_handle_frames(self, on_frame) -> None:
@@ -629,7 +715,9 @@ class UdpTransport:
 # ---------------------------------------------------------------------------
 def run_client(host: str, port: int, nickname: str, token: str, sdkuid: str,
                crypto_mode: int, verbose: bool,
-               public_key_pem: Optional[bytes] = None) -> Dict[str, Any]:
+               public_key_pem: Optional[bytes] = None,
+               frame_base: int = 0) -> Dict[str, Any]:
+    set_frame_base(frame_base)
     if public_key_pem is None:
         # default: the mock gate writes its public key next to this script
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mock_gate_public.pem")
@@ -679,8 +767,9 @@ def run_client(host: str, port: int, nickname: str, token: str, sdkuid: str,
         tp.send_ctrl(FRAME_ID_SEED_REQUEST)
         frame_id, payload = ctrl_reply(tp, "seed_reply")
         assert frame_id == FRAME_ID_SEED_REPLY, f"expected seed_reply id, got 0x{frame_id:04x}"
-        seed = int.from_bytes(payload, "little")
-        frame, session_key = tp.biz.build_session_key(seed)
+        seed_info = parse_session_seed(payload)
+        seed = seed_info["seed"]
+        frame, session_key = tp.biz.build_session_key(seed, seed_info["crypto"] or crypto_mode)
         tp.send_frame(frame)
         frame_id, payload = ctrl_reply(tp, "session_key_ok")
         assert frame_id == FRAME_ID_SESSION_KEY_OK, f"expected session_key_ok id, got 0x{frame_id:04x}"
@@ -691,7 +780,9 @@ def run_client(host: str, port: int, nickname: str, token: str, sdkuid: str,
         tp.send_frame(tp.biz.build_connect_server(clientid))
         frame_id, payload = ctrl_reply(tp, "connect_reply")
         assert frame_id == FRAME_ID_CONNECT_REPLY, f"expected connect_reply id, got 0x{frame_id:04x}"
-        result["steps"].append({"step": "connect_server", "ret_type": payload[0], "clientid": clientid})
+        connect_info = parse_connect_server_reply(payload)
+        assert connect_info["type"] == REPLY_CONNECTED, connect_info
+        result["steps"].append({"step": "connect_server", "ret_type": connect_info["type"], "clientid": clientid})
 
         # login with token, then rename, both as encrypted 0x8000 entity frames
         sauth = sauth_json_string(token, sdkuid)
@@ -843,18 +934,22 @@ def cmd_self_test() -> None:
     empty = native_frame(1)
     assert struct.unpack("<I", empty[:4])[0] == 2 and empty[4:6] == b"\x01\x00"
 
-    # KCP segment round trip
-    box: List[bytes] = []
-    a = MiniKCP(KCP_CONV, box.append)
-    b = MiniKCP(KCP_CONV, box.append)
+    # KCP segment round trip (PUSH -> ACK, fragmentation, in-order assembly)
+    wire: List[bytes] = []
+    acks: List[bytes] = []
+    a = MiniKCP(KCP_CONV, wire.append)
+    b = MiniKCP(KCP_CONV, acks.append)
     msg = b"x" * 2500
     a.send(msg)
     a.flush()
-    for seg in box:
+    assert all(seg[4] == IKCP_PUSH for seg in wire)
+    for seg in wire:
         b.input(seg)
-    b.ack_pending()
-    got = b.recv()
-    assert got == msg
+    assert b.recv() == msg
+    assert acks and all(seg[4] == IKCP_ACK for seg in acks)
+    for ack in acks:
+        a.input(ack)
+    assert not a.snd_buf
     print("self-test: OK")
 
 
@@ -879,10 +974,13 @@ def main() -> int:
     p.add_argument("--sdkuid", default="")
     p.add_argument("--crypto-mode", type=int, default=DEFAULT_CRYPTO_MODE)
     p.add_argument("--public-key-pem", default="")
+    p.add_argument("--frame-base", type=int, default=0,
+                   help="seed_request frame id; session_key/connect use base+1/base+2")
     p.add_argument("-v", "--verbose", action="store_true")
     p.set_defaults(func=lambda a: print(json.dumps(
         run_client(a.host, a.port, a.nickname, a.token, a.sdkuid, a.crypto_mode, a.verbose,
-                   open(a.public_key_pem, "rb").read() if a.public_key_pem else None),
+                   open(a.public_key_pem, "rb").read() if a.public_key_pem else None,
+                   a.frame_base),
         ensure_ascii=False, indent=2)))
 
     p = sub.add_parser("probe")
