@@ -75,7 +75,8 @@ def adrp_add_strings(insns):
         if i.mnemonic == "adrp":
             try:
                 reg, imm = m.split(", ")
-                pending[reg] = (i.address, int(imm, 0) if imm.startswith("0x") else int(imm))
+                imm = imm.lstrip("#")
+                pending[reg] = (i.address, int(imm, 0))
             except ValueError:
                 pass
         elif i.mnemonic in ("add", "ldr") and "x" in m:

@@ -26,11 +26,20 @@ see 游戏逆向研究总档案.txt sections 25/26/29/30):
     conv u32 | cmd u8 (81 push/82 ack/83 wask/84 wins) | frg u8 | wnd u16
     | ts u32 | sn u32 | una u32 | len u32   (24 bytes)
 
+Business frame layout (CONFIRMED from libclient.so static analysis):
+  generic frame sender 0x1ff39d8 (buffer, message, frame_id):
+    writes [u32 len][u16 frame_id] header then the serialized protobuf body;
+  entity frame builder 0x1fdc140 does the same with frame_id = 0x8000 and
+  len = total_size - 4 (the u32 counts every byte after itself, including
+  the 2 id bytes). Mobile handshake RPC frame ids (send_seed_request,
+  send_session_key, send_connect_server, ...) are runtime indices into the
+  message-type registry built from client_gate.proto (init @0x21a55fc,
+  48-byte entries, index = (descriptor - base)/48); the registration order
+  follows the proto file's message order. The defaults below assume that
+  order and stay overridable via --frame-base for live calibration.
+
 Business layer (confirmed inner framing from script analysis):
   uint32_le(len) + uint16_le(0x8000) + AreaMessage, one KCP message each.
-  The native RPC frames for seed/session_key/connect_server are NOT yet
-  recovered, so this module carries them as control frames (u16 tag) inside
-  the same KCP channel - clearly marked RESEARCH FRAMING below.
 
 Usage:
   python3 neox_real_transport.py self-test
@@ -111,7 +120,7 @@ IKCP_WND = 32
 
 
 def log(tag: str, msg: str) -> None:
-    print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}", flush=True)
+    print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}", file=sys.stderr, flush=True)
 
 
 def hexdump(data: bytes, limit: int = 64) -> str:
@@ -295,25 +304,36 @@ class MiniKCP:
 
 
 # ---------------------------------------------------------------------------
-# Business framing inside the KCP channel
+# Business framing inside the KCP channel (native layout from 0x1ff39d8):
+#   [u32 len-4][u16 frame_id][body]  - len counts bytes after the u32 itself.
 # ---------------------------------------------------------------------------
-CTRL_SEED_REQUEST = 0x0001
-CTRL_SEED_REPLY = 0x0002
-CTRL_SESSION_KEY = 0x0003
-CTRL_SESSION_KEY_OK = 0x0004
-CTRL_CONNECT_SERVER = 0x0005
-CTRL_CONNECT_REPLY = 0x0006
-CTRL_ENCRYPTED = 0x0007
-FRAME_ID_ENTITY_METHOD = 0x8000
+FRAME_ID_ENTITY_METHOD = 0x8000  # confirmed (entity builder 0x1fdc140)
 
-# RESEARCH FRAMING: native mobile-RPC frames (send_seed_request & friends)
-# are not yet recovered byte-exactly; they are carried as u16-tagged control
-# frames inside the same KCP channel. Business entity_method frames keep the
-# confirmed uint32_le(len)+uint16_le(0x8000)+AreaMessage layout.
+# Mobile handshake RPC frame ids: indices into the client_gate.proto message
+# registry (init @0x21a55fc). Sequential defaults assuming proto message
+# order EncryptString, SessionSeed, SessionKey, ...; calibrate against a live
+# gate with --frame-base / per-id overrides if needed.
+FRAME_ID_SEED_REQUEST = 1
+FRAME_ID_SEED_REPLY = 2
+FRAME_ID_SESSION_KEY = 3
+FRAME_ID_SESSION_KEY_OK = 4
+FRAME_ID_CONNECT_SERVER = 5
+FRAME_ID_CONNECT_REPLY = 6
 
 
-def ctrl_frame(tag: int, payload: bytes = b"") -> bytes:
-    return struct.pack("<H", tag) + payload
+def native_frame(frame_id: int, body: bytes = b"") -> bytes:
+    """Byte-exact layout of libclient.so's frame sender (0x1ff39d8)."""
+    return struct.pack("<I", 2 + len(body)) + struct.pack("<H", frame_id) + body
+
+
+def parse_native_frame(data: bytes) -> Tuple[int, bytes]:
+    """Inverse of native_frame; raises on short/length-mismatched input."""
+    if len(data) < 6:
+        raise ValueError("frame too short")
+    size = struct.unpack("<I", data[:4])[0]
+    if size != len(data) - 4:
+        raise ValueError(f"bad frame length: header={size}, actual={len(data) - 4}")
+    return struct.unpack("<H", data[4:6])[0], data[6:]
 
 
 class BusinessLayer:
@@ -327,14 +347,13 @@ class BusinessLayer:
         self.session_key: Optional[bytes] = None
         self.send_stream: Optional[CryptoStream] = None
         self.recv_stream: Optional[CryptoStream] = None
-        self.pending: Dict[int, bytes] = {}
         self.reply_queue: "queue.Queue[Tuple[int, bytes]]" = queue.Queue()
         self.index_to_name = {v: k for k, v in known_indices(salt).items()}
         self.index_to_name[rpc_index("loginWithAuthJson", salt)] = "loginWithAuthJson"
 
     # client side -------------------------------------------------------------
     def build_seed_request(self) -> bytes:
-        return ctrl_frame(CTRL_SEED_REQUEST)
+        return native_frame(FRAME_ID_SEED_REQUEST)
 
     def build_session_key(self, seed: int) -> Tuple[bytes, bytes]:
         material = make_random_session_material(
@@ -343,14 +362,14 @@ class BusinessLayer:
         )
         encrypted = rsa_oaep_encrypt(self.public_key_pem, material["session_key_message"])
         self.session_key = material["session_key"]
-        return ctrl_frame(CTRL_SESSION_KEY, parse_encrypt_string(make_encrypt_string_local(encrypted))), material["session_key"]
+        return native_frame(FRAME_ID_SESSION_KEY, encrypted), material["session_key"]
 
     def build_connect_server(self, clientid: str) -> bytes:
-        return ctrl_frame(CTRL_CONNECT_SERVER, uvar_field(1, 0) + bytes_field(2, clientid.encode()))
+        return native_frame(FRAME_ID_CONNECT_SERVER, uvar_field(1, 0) + bytes_field(2, clientid.encode()))
 
     def build_encrypted_rpc(self, frame: bytes) -> bytes:
         assert self.send_stream is not None
-        return ctrl_frame(CTRL_ENCRYPTED, self.send_stream.update(frame))
+        return native_frame(FRAME_ID_ENTITY_METHOD, self.send_stream.update(frame))
 
     # both sides ----------------------------------------------------------------
     def enable_crypto(self, session_key: bytes) -> None:
@@ -358,17 +377,15 @@ class BusinessLayer:
         self.send_stream = CryptoStream(self.crypto_mode, session_key, encrypt=True)
         self.recv_stream = CryptoStream(self.crypto_mode, session_key, encrypt=False)
 
-    def feed_ctrl(self, tag: int, payload: bytes) -> Optional[bytes]:
-        """Route a control frame; returns a business frame if tag==ENCRYPTED."""
-        if tag == CTRL_ENCRYPTED:
+    def feed_frame(self, data: bytes) -> Optional[bytes]:
+        """Route one native frame; returns a decrypted business frame for
+        encrypted entity frames, otherwise queues the control reply."""
+        frame_id, payload = parse_native_frame(data)
+        if frame_id == FRAME_ID_ENTITY_METHOD:
             assert self.recv_stream is not None
             return self.recv_stream.update(payload)
-        self.reply_queue.put((tag, payload))
+        self.reply_queue.put((frame_id, payload))
         return None
-
-
-def make_encrypt_string_local(ciphertext: bytes) -> bytes:
-    return bytes_field(1, ciphertext)
 
 
 # ---------------------------------------------------------------------------
@@ -492,25 +509,21 @@ class UdpTransport:
         return None
 
     def _on_kcp_message(self, msg: bytes) -> None:
-        if len(msg) < 2:
+        try:
+            frame = self.biz.feed_frame(msg)
+        except ValueError:
+            log("rpc<-", f"bad native frame: {hexdump(msg)}")
             return
-        tag = struct.unpack("<H", msg[:2])[0]
-        payload = msg[2:]
-        if tag == CTRL_ENCRYPTED:
-            frame = self.biz.feed_ctrl(tag, payload)
-            if frame is not None:
-                self.frames_in.put(frame)
-        else:
-            self.biz.feed_ctrl(tag, payload)
+        if frame is not None:
+            self.frames_in.put(frame)
 
     def send_frame(self, frame: bytes) -> None:
-        """Send one business frame (u32 len + 0x8000 + AreaMessage) as one KCP msg."""
+        """Send one pre-built native frame as one KCP message."""
         self.kcp.send(frame)
         self.kcp.flush()
 
-    def send_ctrl(self, tag: int, payload: bytes = b"") -> None:
-        self.kcp.send(ctrl_frame(tag, payload))
-        self.kcp.flush()
+    def send_ctrl(self, frame_id: int, payload: bytes = b"") -> None:
+        self.send_frame(native_frame(frame_id, payload))
 
     def start_io(self, feed_fn=None) -> None:
         """feed_fn(pkt) -> Optional[bytes]: pull inbound packets (None = poll)."""
@@ -547,29 +560,31 @@ class UdpTransport:
     # -- mock-gate business logic (server side) -----------------------------------
     def _server_pump(self) -> None:
         try:
-            tag, payload = self.biz.reply_queue.get_nowait()
+            frame_id, payload = self.biz.reply_queue.get_nowait()
         except queue.Empty:
             return
-        if tag == CTRL_SEED_REQUEST:
+        if frame_id == FRAME_ID_SEED_REQUEST:
             seed = secrets.randbits(63)
             self.server_state["seed"] = seed
-            self.send_ctrl(CTRL_SEED_REPLY, seed.to_bytes(8, "little"))
+            self.send_ctrl(FRAME_ID_SEED_REPLY, seed.to_bytes(8, "little"))
             log("rpc->", "seed_reply")
-        elif tag == CTRL_SESSION_KEY:
+        elif frame_id == FRAME_ID_SESSION_KEY:
             session_msg = rsa_oaep_decrypt(self.private_key_pem, payload)
             fields = parse_session_key_message(session_msg)
             session_key = bytes.fromhex(fields["field2_hex"])
             digest_ok = fields.get("field3") == digest64(
                 seed_session_digest(self.server_state["seed"], session_key, "seed-key"))
             self.server_state["digest_ok"] = digest_ok
+            # the client negotiates the stream cipher in SessionKey.field5
+            negotiated = int(fields.get("field5", 0))
+            self.biz.crypto_mode = negotiated
             self.biz.enable_crypto(session_key)
-            self.send_ctrl(CTRL_SESSION_KEY_OK)
-            log("rpc->", f"session_key_ok (digest {'ok' if digest_ok else 'BAD'})")
-        elif tag == CTRL_CONNECT_SERVER:
-            self.send_ctrl(CTRL_CONNECT_REPLY, bytes([1]))
+            self.send_ctrl(FRAME_ID_SESSION_KEY_OK)
+            log("rpc->", f"session_key_ok (digest {'ok' if digest_ok else 'BAD'}, "
+                         f"crypto mode {negotiated})")
+        elif frame_id == FRAME_ID_CONNECT_SERVER:
+            self.send_ctrl(FRAME_ID_CONNECT_REPLY, bytes([1]))
             log("rpc->", "connect_reply (connected)")
-        elif tag == CTRL_ENCRYPTED:
-            pass  # handled in _on_kcp_message via frames_in
 
     def server_handle_frames(self, on_frame) -> None:
         """Mock-gate main loop: decrypt frames, dispatch, reply encrypted."""
@@ -605,7 +620,7 @@ class UdpTransport:
                 reply_name, reply_args = "on_set_nickname", [False, f"unknown rpc {name}"]
             reply = inner_frame(callback_payload(reply_name, reply_args))
             assert self.biz.send_stream is not None
-            self.send_ctrl(CTRL_ENCRYPTED, self.biz.send_stream.update(reply))
+            self.send_ctrl(FRAME_ID_ENTITY_METHOD, self.biz.send_stream.update(reply))
             log("rpc->", f"{reply_name} {reply_args}")
 
 
@@ -661,31 +676,32 @@ def run_client(host: str, port: int, nickname: str, token: str, sdkuid: str,
         tp.start_io(recv_block)
 
         # business handshake: seed -> session key -> connect_server
-        tp.send_ctrl(CTRL_SEED_REQUEST)
-        tag, payload = ctrl_reply(tp, "seed_reply")
+        tp.send_ctrl(FRAME_ID_SEED_REQUEST)
+        frame_id, payload = ctrl_reply(tp, "seed_reply")
+        assert frame_id == FRAME_ID_SEED_REPLY, f"expected seed_reply id, got 0x{frame_id:04x}"
         seed = int.from_bytes(payload, "little")
         frame, session_key = tp.biz.build_session_key(seed)
-        tp.kcp.send(frame)
-        tp.kcp.flush()
-        tag, payload = ctrl_reply(tp, "session_key_ok")
+        tp.send_frame(frame)
+        frame_id, payload = ctrl_reply(tp, "session_key_ok")
+        assert frame_id == FRAME_ID_SESSION_KEY_OK, f"expected session_key_ok id, got 0x{frame_id:04x}"
         tp.biz.enable_crypto(session_key)
         result["steps"].append({"step": "session_key", "seed": seed, "status": "ok"})
 
         clientid = secrets.token_hex(8)
-        ctrl = tp.biz.build_connect_server(clientid)
-        tp.send_ctrl(struct.unpack("<H", ctrl[:2])[0], ctrl[2:])
-        tag, payload = ctrl_reply(tp, "connect_reply")
+        tp.send_frame(tp.biz.build_connect_server(clientid))
+        frame_id, payload = ctrl_reply(tp, "connect_reply")
+        assert frame_id == FRAME_ID_CONNECT_REPLY, f"expected connect_reply id, got 0x{frame_id:04x}"
         result["steps"].append({"step": "connect_server", "ret_type": payload[0], "clientid": clientid})
 
-        # login with token, then rename, both as encrypted 0x8000 frames
+        # login with token, then rename, both as encrypted 0x8000 entity frames
         sauth = sauth_json_string(token, sdkuid)
         login_frame = rpc_inner_frame("loginWithAuthJson", [sauth])
-        tp.send_ctrl(CTRL_ENCRYPTED, tp.biz.send_stream.update(login_frame))
+        tp.send_frame(tp.biz.build_encrypted_rpc(login_frame))
         reply = decode_inner_frame(wait_frame(tp))
         result["steps"].append({"step": "loginWithAuthJson", "reply": reply})
 
         rename_frame = rename_inner_frame(nickname)
-        tp.send_ctrl(CTRL_ENCRYPTED, tp.biz.send_stream.update(rename_frame))
+        tp.send_frame(tp.biz.build_encrypted_rpc(rename_frame))
         reply2 = decode_inner_frame(wait_frame(tp))
         result["steps"].append({"step": "set_nickname", "reply": reply2})
 
@@ -817,6 +833,15 @@ def cmd_self_test() -> None:
     assert (tok >> 32) == 0x11223344
     hb = hs.build_heartbeat(0)
     assert hb[5] == 0 and hb[6] == 0xFF and struct.unpack("<I", hb[7:11])[0] == HEARTBEAT_MARKER
+
+    # native business frame layout (0x1ff39d8): [u32 len][u16 id][body],
+    # u32 counts every byte after itself
+    f = native_frame(0x8000, b"\x01\x02\x03")
+    assert f == bytes.fromhex("050000000080010203"), f.hex()
+    fid, body = parse_native_frame(f)
+    assert fid == 0x8000 and body == b"\x01\x02\x03"
+    empty = native_frame(1)
+    assert struct.unpack("<I", empty[:4])[0] == 2 and empty[4:6] == b"\x01\x00"
 
     # KCP segment round trip
     box: List[bytes] = []
