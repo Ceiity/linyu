@@ -27,7 +27,10 @@ import hashlib
 import json
 import os
 import secrets
+import socket
+import socketserver
 import struct
+import threading
 import zlib
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -1165,6 +1168,367 @@ def cmd_mock_demo(args: argparse.Namespace) -> None:
     }))
 
 
+# ---------------------------------------------------------------------------
+# One-stop "input login token -> rename" pipeline against a mock/private gate.
+#
+# Recovered real-client flow (AsioGateClient.nxs + SocialHelper.nxs + Account.nxs):
+#   connect -> send_seed_request -> seed_reply(seed)
+#   -> send_session_key(RSA-OAEP EncryptString) -> session_key_ok
+#   -> send_connect_server(NEW_CONNECTION=0, clientid) -> connect_reply
+#   -> business RPC loginWithAuthJson(SAUTH_JSON, ...) with the login token
+#   -> on_become_player -> set_nickname(name) -> on_set_nickname(result, msg)
+#
+# The login token (SAUTH_JSON: sdkuid + accesstoken) is a business-layer RPC
+# payload, NOT part of the KCP/TCP handshake. The raw KCP outer header of the
+# production gate is still unrecovered, so the live transport here uses a
+# simple uint32_le length prefix; against your own gate this is the only
+# self-defined layer, everything inside matches the recovered protocol.
+# ---------------------------------------------------------------------------
+
+HANDSHAKE_SEED_REQUEST = 0x01
+HANDSHAKE_SEED_REPLY = 0x02
+HANDSHAKE_SESSION_KEY = 0x03
+HANDSHAKE_SESSION_KEY_OK = 0x04
+HANDSHAKE_CONNECT_SERVER = 0x05
+HANDSHAKE_CONNECT_REPLY = 0x06
+HANDSHAKE_ENCRYPTED = 0x07
+
+NEW_CONNECTION = 0
+RE_CONNECTION = 1
+REPLYTYPE_CONNECTED = 1
+
+
+def sauth_json_string(token: str, sdkuid: str) -> str:
+    """SAUTH_JSON as stored by UnisdkHelper and read by login_game_server."""
+    return json.dumps({"sdkuid": sdkuid, "accesstoken": token}, ensure_ascii=False)
+
+
+def login_inner_frame(sauth: str, *, salt: str = DEFAULT_SALT) -> bytes:
+    return rpc_inner_frame("loginWithAuthJson", [sauth], salt=salt)
+
+
+def outer_packet(tag: int, payload: bytes = b"") -> bytes:
+    body = bytes([tag]) + payload
+    return struct.pack("<I", len(body)) + body
+
+
+class _WirePeer:
+    """uint32_le length-prefixed packet channel shared by client and mock gate."""
+
+    def __init__(self, sock: socket.socket):
+        self.sock = sock
+        self.buf = b""
+
+    def send_packet(self, tag: int, payload: bytes = b"") -> None:
+        self.sock.sendall(outer_packet(tag, payload))
+
+    def recv_packet(self) -> Tuple[int, bytes]:
+        while len(self.buf) < 4:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise ConnectionError("connection closed")
+            self.buf += chunk
+        size = struct.unpack("<I", self.buf[:4])[0]
+        while len(self.buf) < 4 + size:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise ConnectionError("connection closed")
+            self.buf += chunk
+        body, self.buf = self.buf[4 : 4 + size], self.buf[4 + size :]
+        return body[0], body[1:]
+
+
+class MockGateServer(socketserver.ThreadingTCPServer):
+    """Minimal private gate: seed/session-key handshake + encrypted RPCs."""
+
+    allow_reuse_address = True
+
+    def __init__(self, server_address, private_key_pem: bytes, nickname_store: Dict[str, Any]):
+        self.private_key_pem = private_key_pem
+        self.nickname_store = nickname_store
+        super().__init__(server_address, _MockGateHandler)
+
+
+class _MockGateHandler(socketserver.BaseRequestHandler):
+    def handle(self) -> None:
+        wire = _WirePeer(self.request)
+        store = self.server.nickname_store  # type: ignore[attr-defined]
+
+        tag, _ = wire.recv_packet()
+        if tag != HANDSHAKE_SEED_REQUEST:
+            return
+        seed = secrets.randbits(63)
+        wire.send_packet(HANDSHAKE_SEED_REPLY, seed.to_bytes(8, "little"))
+
+        tag, payload = wire.recv_packet()
+        if tag != HANDSHAKE_SESSION_KEY:
+            return
+        session_msg = rsa_oaep_decrypt(self.server.private_key_pem, parse_encrypt_string(payload))  # type: ignore[attr-defined]
+        fields = parse_session_key_message(session_msg)
+        session_key = bytes.fromhex(fields["field2_hex"])
+        digest_ok = fields.get("field3") == digest64(
+            seed_session_digest(seed, session_key, "seed-key")
+        )
+        crypto_mode = int(fields.get("field5", 0))
+        wire.send_packet(HANDSHAKE_SESSION_KEY_OK)
+
+        # CFB keystream depends on ciphertext feedback, so the receiving
+        # direction must run the decryptor; RC4/OFB are plain XOR keystreams
+        # and work the same either way.
+        recv_stream = CryptoStream(crypto_mode, session_key, encrypt=False)
+        send_stream = CryptoStream(crypto_mode, session_key, encrypt=True)
+
+        tag, _ = wire.recv_packet()
+        if tag != HANDSHAKE_CONNECT_SERVER:
+            return
+        wire.send_packet(HANDSHAKE_CONNECT_REPLY, bytes([REPLYTYPE_CONNECTED]))
+
+        index_to_name = {v: k for k, v in known_indices(DEFAULT_SALT).items()}
+        index_to_name[rpc_index("loginWithAuthJson", DEFAULT_SALT)] = "loginWithAuthJson"
+        logged_in = False
+        store["digest_ok"] = digest_ok
+        store["seed"] = seed
+
+        while True:
+            try:
+                tag, payload = wire.recv_packet()
+            except (ConnectionError, OSError):
+                return
+            if tag != HANDSHAKE_ENCRYPTED:
+                return
+            try:
+                decoded = decode_inner_frame(recv_stream.update(payload))
+            except ValueError:
+                return
+            name = index_to_name.get(decoded["method_index"], "unknown")
+
+            if name == "loginWithAuthJson":
+                try:
+                    auth = json.loads(decoded["args"][0])
+                except (ValueError, IndexError):
+                    auth = {}
+                logged_in = bool(auth.get("accesstoken"))
+                store["sdkuid"] = auth.get("sdkuid", "")
+                reply_name, reply_args = "on_become_player", [logged_in, "login ok" if logged_in else "bad token"]
+            elif name == "set_nickname":
+                if not logged_in:
+                    reply_name, reply_args = "on_set_nickname", [False, "not logged in"]
+                else:
+                    store["nickname"] = decoded["args"][0]
+                    reply_name, reply_args = "on_set_nickname", [True, "OK"]
+            else:
+                reply_name, reply_args = "on_set_nickname", [False, f"unknown rpc {name}"]
+
+            reply = inner_frame(callback_payload(reply_name, reply_args))
+            wire.send_packet(HANDSHAKE_ENCRYPTED, send_stream.update(reply))
+
+
+class GateClientSession:
+    """Client side of the full login-token -> rename pipeline."""
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        public_key_pem: bytes,
+        *,
+        nickname: str,
+        sauth: str,
+        crypto_mode: int = DEFAULT_CRYPTO_MODE,
+        salt: str = DEFAULT_SALT,
+        clientid: str = "",
+    ):
+        self.host = host
+        self.port = port
+        self.public_key_pem = public_key_pem
+        self.nickname = nickname
+        self.sauth = sauth
+        self.crypto_mode = crypto_mode
+        self.salt = salt
+        self.clientid = clientid or secrets.token_hex(8)
+
+    def run(self) -> Dict[str, Any]:
+        steps: List[Dict[str, Any]] = []
+        sock = socket.create_connection((self.host, self.port), timeout=10)
+        wire = _WirePeer(sock)
+        try:
+            wire.send_packet(HANDSHAKE_SEED_REQUEST)
+            tag, payload = wire.recv_packet()
+            if tag != HANDSHAKE_SEED_REPLY:
+                raise ValueError(f"expected seed_reply, got tag 0x{tag:02x}")
+            seed = int.from_bytes(payload, "little")
+
+            material = make_random_session_material(
+                seed=seed,
+                session_key_hex="",
+                crypto_mode=self.crypto_mode,
+                digest_layout="seed-key",
+                session_layout="key-in-field2",
+            )
+            encrypted = rsa_oaep_encrypt(
+                self.public_key_pem, material["session_key_message"]
+            )
+            wire.send_packet(HANDSHAKE_SESSION_KEY, make_encrypt_string(encrypted))
+            tag, _ = wire.recv_packet()
+            if tag != HANDSHAKE_SESSION_KEY_OK:
+                raise ValueError(f"expected session_key_ok, got tag 0x{tag:02x}")
+            send_stream = CryptoStream(self.crypto_mode, material["session_key"], encrypt=True)
+            recv_stream = CryptoStream(self.crypto_mode, material["session_key"], encrypt=False)
+            steps.append({"step": "session_key", "seed": seed, "status": "ok"})
+
+            wire.send_packet(
+                HANDSHAKE_CONNECT_SERVER,
+                uvar_field(1, NEW_CONNECTION) + bytes_field(2, self.clientid.encode("utf-8")),
+            )
+            tag, payload = wire.recv_packet()
+            if tag != HANDSHAKE_CONNECT_REPLY:
+                raise ValueError(f"expected connect_reply, got tag 0x{tag:02x}")
+            steps.append({"step": "connect_server", "ret_type": payload[0], "clientid": self.clientid})
+
+            login_frame = login_inner_frame(self.sauth, salt=self.salt)
+            wire.send_packet(HANDSHAKE_ENCRYPTED, send_stream.update(login_frame))
+            tag, payload = wire.recv_packet()
+            if tag != HANDSHAKE_ENCRYPTED:
+                raise ValueError(f"expected encrypted reply, got tag 0x{tag:02x}")
+            login_reply = decode_inner_frame(recv_stream.update(payload))
+            steps.append({"step": "loginWithAuthJson", "reply": login_reply})
+
+            rename_frame = rename_inner_frame(self.nickname, salt=self.salt)
+            wire.send_packet(HANDSHAKE_ENCRYPTED, send_stream.update(rename_frame))
+            tag, payload = wire.recv_packet()
+            if tag != HANDSHAKE_ENCRYPTED:
+                raise ValueError(f"expected encrypted reply, got tag 0x{tag:02x}")
+            rename_reply = decode_inner_frame(recv_stream.update(payload))
+            steps.append({"step": "set_nickname", "reply": rename_reply})
+        finally:
+            sock.close()
+
+        login_ok = login_reply["args"][0] is True
+        rename_ok = rename_reply["args"][0] is True
+        return {
+            "login_ok": login_ok,
+            "rename_ok": rename_ok,
+            "nickname": self.nickname,
+            "steps": steps,
+        }
+
+
+def _start_mock_gate(private_key_pem: bytes, nickname_store: Dict[str, Any]) -> MockGateServer:
+    server = MockGateServer(("127.0.0.1", 0), private_key_pem, nickname_store)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
+def cmd_mock_gate(args: argparse.Namespace) -> None:
+    if args.private_key_pem:
+        private_key_pem = open(args.private_key_pem, "rb").read()
+    else:
+        private_key_pem = generate_demo_private_key()
+    public_key_pem = public_pem_from_private(private_key_pem)
+    store: Dict[str, Any] = {}
+    server = MockGateServer((args.bind, args.port), private_key_pem, store)
+    print(_json({
+        "mode": "mock gate",
+        "bind": args.bind,
+        "port": server.server_address[1],
+        "public_key_pem": public_key_pem.decode("ascii"),
+        "hint": (
+            "run: neox_rename_protocol_replay.py login-rename NICKNAME "
+            "--token YOUR_LOGIN_TOKEN --sdkuid YOUR_UID "
+            "--host HOST --port PORT --public-key-pem your_pub.pem"
+        ),
+    }))
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+def cmd_login_rename(args: argparse.Namespace) -> None:
+    if args.sauth_json:
+        sauth = args.sauth_json
+    elif args.token:
+        sauth = sauth_json_string(args.token, args.sdkuid)
+    else:
+        raise ValueError("provide --token (+--sdkuid) or --sauth-json")
+
+    output: Dict[str, Any] = {
+        "purpose": "login-token -> full handshake -> set_nickname pipeline",
+        "sauth_json": sauth,
+        "nickname": args.nickname,
+        "rpc_names": ["loginWithAuthJson", "set_nickname"],
+        "rpc_indexes": {
+            "loginWithAuthJson": rpc_index("loginWithAuthJson", args.salt),
+            "set_nickname": rpc_index("set_nickname", args.salt),
+        },
+    }
+
+    if args.demo or (args.host and args.port):
+        if args.demo:
+            private_key_pem = generate_demo_private_key()
+            public_key_pem = public_pem_from_private(private_key_pem)
+            store: Dict[str, Any] = {}
+            server = _start_mock_gate(private_key_pem, store)
+            host, port = server.server_address
+        else:
+            if not args.public_key_pem:
+                raise ValueError("--public-key-pem is required when connecting to an external gate")
+            public_key_pem = open(args.public_key_pem, "rb").read()
+            host, port, store, server = args.host, args.port, {}, None
+
+        session = GateClientSession(
+            host,
+            port,
+            public_key_pem,
+            nickname=args.nickname,
+            sauth=sauth,
+            crypto_mode=args.crypto_mode,
+            salt=args.salt,
+            clientid=args.clientid,
+        )
+        try:
+            result = session.run()
+        finally:
+            if server is not None:
+                server.shutdown()
+                server.server_close()
+        output.update(result)
+        output["mock_gate_state"] = {
+            k: store.get(k) for k in ("seed", "digest_ok", "sdkuid", "nickname")
+        }
+        output["server_applied_nickname"] = store.get("nickname")
+    else:
+        # Offline: dump every frame of the pipeline in send order.
+        material = make_random_session_material(
+            seed=args.seed,
+            session_key_hex="",
+            crypto_mode=args.crypto_mode,
+            digest_layout="seed-key",
+            session_layout="key-in-field2",
+        )
+        login_frame = login_inner_frame(sauth, salt=args.salt)
+        rename_frame = rename_inner_frame(args.nickname, salt=args.salt)
+        output["offline_frames"] = {
+            "note": "seed is random offline; frames after enable_encrypter are encrypted with a random session key",
+            "seed": material["seed"],
+            "session_key_hex": material["session_key"].hex(),
+            "send_session_key_encrypt_string_hex": make_encrypt_string(
+                rsa_oaep_encrypt(OLD_LOGIN_PUBLIC_KEY_PEM, material["session_key_message"])
+            ).hex(),
+            "connect_server_hex": (
+                uvar_field(1, NEW_CONNECTION) + bytes_field(2, b"clientid")
+            ).hex(),
+            "loginWithAuthJson_encrypted_hex": seal_payload(
+                login_frame, material["session_key"], args.crypto_mode
+            ).hex(),
+            "set_nickname_encrypted_hex": seal_payload(
+                rename_frame, material["session_key"], args.crypto_mode
+            ).hex(),
+        }
+    print(_json(output))
+
+
 def cmd_self_test(args: argparse.Namespace) -> None:
     assert rpc_index("set_nickname", "0") == 1648625260
     assert rpc_index("find_player_by_nid", "0") == 1288662083
@@ -1201,6 +1565,30 @@ def cmd_self_test(args: argparse.Namespace) -> None:
     )
     enc = rsa_oaep_encrypt(public_key, msg)
     assert rsa_oaep_decrypt(private_key, enc) == msg
+
+    # Full login-token -> rename pipeline against an in-process mock gate,
+    # for every crypto mode.
+    for mode_id in (0, 1, 2):
+        store: Dict[str, Any] = {}
+        gate = _start_mock_gate(private_key, store)
+        try:
+            session = GateClientSession(
+                "127.0.0.1",
+                gate.server_address[1],
+                public_pem_from_private(private_key),
+                nickname="selftest",
+                sauth=sauth_json_string("demo-token", "42"),
+                crypto_mode=mode_id,
+            )
+            result = session.run()
+        finally:
+            gate.shutdown()
+            gate.server_close()
+        assert result["login_ok"] is True
+        assert result["rename_ok"] is True
+        assert store["nickname"] == "selftest"
+        assert store["digest_ok"] is True
+        assert store["sdkuid"] == "42"
     print("self-test: OK")
 
 
@@ -1296,6 +1684,30 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--digest-layout", choices=("seed-key", "key-seed", "key-only"), default="seed-key")
     p.add_argument("--compress", action="store_true")
     p.set_defaults(func=cmd_mock_demo)
+
+    p = sub.add_parser(
+        "login-rename",
+        help="full pipeline: login token -> handshake -> loginWithAuthJson -> set_nickname",
+    )
+    p.add_argument("nickname")
+    p.add_argument("--token", default="", help="login token (accesstoken)")
+    p.add_argument("--sdkuid", default="", help="sdk uid paired with the token")
+    p.add_argument("--sauth-json", default="", help="raw SAUTH_JSON string; overrides --token/--sdkuid")
+    p.add_argument("--salt", default=DEFAULT_SALT)
+    p.add_argument("--seed", type=int)
+    p.add_argument("--crypto-mode", type=int, choices=sorted(CRYPTO_MODES), default=DEFAULT_CRYPTO_MODE)
+    p.add_argument("--clientid", default="")
+    p.add_argument("--demo", action="store_true", help="spin up an in-process mock gate and run end-to-end")
+    p.add_argument("--host", default="", help="gate host for live mode")
+    p.add_argument("--port", type=int, help="gate port for live mode")
+    p.add_argument("--public-key-pem", default="", help="gate RSA public key PEM for live mode")
+    p.set_defaults(func=cmd_login_rename)
+
+    p = sub.add_parser("mock-gate", help="run a standalone mock gate server")
+    p.add_argument("--bind", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=0)
+    p.add_argument("--private-key-pem", default="", help="RSA private key PEM; a demo key is generated when omitted")
+    p.set_defaults(func=cmd_mock_gate)
 
     sub.add_parser("self-test", help="run local checks").set_defaults(func=cmd_self_test)
     return parser
