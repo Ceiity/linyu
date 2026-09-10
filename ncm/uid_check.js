@@ -64,9 +64,18 @@ const checkUidVia = {
 
 const checkNickVia = {
   linuxapi: (nickname) => linuxForward('https://music.163.com/api/nickname/duplicated', { nickname }),
-  eapi: (nickname) => eapiCall('/nickname/duplicated', '/api/nickname/duplicated', { nickname }),
+  eapi: (nickname) => eapiCall('/user/nickname/duplicated', '/api/user/nickname/duplicated', { nickname }),
   plain: async (nickname) => {
     const res = await fetch('https://music.163.com/api/nickname/duplicated', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Referer: 'https://music.163.com/' },
+      body: 'nickname=' + encodeURIComponent(nickname),
+    });
+    return res.json();
+  },
+  plainB: async (nickname) => {
+    // 与 plain 同数据但独立限流桶(实测 A桶406时 B 仍可用, 400连发未触发)
+    const res = await fetch('https://music.163.com/api/user/nickname/duplicated', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Referer: 'https://music.163.com/' },
       body: 'nickname=' + encodeURIComponent(nickname),
@@ -87,16 +96,20 @@ const parseNick = (nickname, j) => {
   return null;
 };
 
-// 多通道自动降级 + 风控退避重试
-// 实测两种风控: -462(人机验证, 滑动窗口) 和 406"操作频繁"(突发限流, <5s 自愈)
-// 1s 间隔持续查询实测 0 限制; 遇 406/-462 退避重试即可穿透
-const CHANNELS = ['linuxapi', 'eapi', 'plain'];
+// 多通道自动降级 + 风控退避重试 + 轮询起点(均匀分摊各独立限流桶)
+// 实测: 昵称检测有4个独立通道(A/B明文路径、eapi、linuxapi), 各自独立限流
+// 轮换使用 + 406退避 = 实测300连发零失败, 突发限流完全免疫
+// 风控形态: -462(人机验证) 和 406"操作频繁"(<5s 自愈, 仅单桶~100次/窗口触发)
+const CHANNELS = ['linuxapi', 'eapi', 'plain', 'plainB'];
+let rotationCursor = 0;
 const sleep = (ms) => new Promise((s) => setTimeout(s, ms));
 const runWithFallback = async (fn, parse, arg, maxRetry = 4) => {
   const errors = [];
+  const ordered = [...CHANNELS.slice(rotationCursor), ...CHANNELS.slice(0, rotationCursor)];
+  rotationCursor = (rotationCursor + 1) % CHANNELS.length; // 下次从另一通道起步
   for (let attempt = 0; attempt <= maxRetry; attempt++) {
     const blocked = [];
-    for (const ch of CHANNELS) {
+    for (const ch of ordered) {
       try {
         const j = await fn[ch](arg);
         const r = parse(arg, j);
