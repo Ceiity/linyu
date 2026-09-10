@@ -87,8 +87,9 @@ const parseNick = (nickname, j) => {
   return null;
 };
 
-// 多通道自动降级 + -462 风控退避重试
-// 风控为短滑动窗口(实测几秒~1分钟), 遇 -462 等待后重试即可穿透
+// 多通道自动降级 + 风控退避重试
+// 实测两种风控: -462(人机验证, 滑动窗口) 和 406"操作频繁"(突发限流, <5s 自愈)
+// 1s 间隔持续查询实测 0 限制; 遇 406/-462 退避重试即可穿透
 const CHANNELS = ['linuxapi', 'eapi', 'plain'];
 const sleep = (ms) => new Promise((s) => setTimeout(s, ms));
 const runWithFallback = async (fn, parse, arg, maxRetry = 4) => {
@@ -100,7 +101,7 @@ const runWithFallback = async (fn, parse, arg, maxRetry = 4) => {
         const j = await fn[ch](arg);
         const r = parse(arg, j);
         if (r) return { ...r, channel: ch };
-        if (j.code === -462) blocked.push(ch); // 风控，稍后重试
+        if (j.code === -462 || j.code === 406) blocked.push(ch); // 风控/限流，稍后重试
         else errors.push(`${ch}: ${JSON.stringify(j).slice(0, 80)}`);
       } catch (e) {
         errors.push(`${ch}: ${e.message}`);
