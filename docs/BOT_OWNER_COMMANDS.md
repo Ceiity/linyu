@@ -4,8 +4,8 @@
 
 源码位置：
 
-- 插件入口：`plugins/astrbot_plugin_linyu_remote_admin/main.py`
-- 插件说明：`plugins/astrbot_plugin_linyu_remote_admin/README.md`
+- 插件入口：`plugins/astrbot_plugin_nailong_remote_admin/main.py`
+- 插件说明：`plugins/astrbot_plugin_nailong_remote_admin/README.md`
 
 ## 当前数量
 

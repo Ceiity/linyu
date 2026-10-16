@@ -29,10 +29,10 @@ CMD_NO_PREFIX_ALIASES = {
 
 
 @register(
-    "astrbot_plugin_linyu_remote_admin",
-    "linyu",
+    "astrbot_plugin_nailong_remote_admin",
+    "nailong",
     "\u53d1\u9001\u7533\u8bf7\u767b\u5f55\uff0c\u81ea\u52a8\u7533\u8bf7\u4e00\u4e2a NapCat \u626b\u7801\u673a\u5668\u4eba\u3002",
-    "1.1.0",
+    "1.2.0",
     "https://github.com/Ceiity/linyu",
 )
 class Main(Star):
@@ -51,11 +51,11 @@ class Main(Star):
         candidates = []
         # Runtime install: /opt/astrbot/data/plugins/<plugin>/main.py -> /opt/astrbot/data/config/...
         try:
-            candidates.append(here.parents[2] / "config" / "astrbot_plugin_linyu_remote_admin_config.json")
+            candidates.append(here.parents[2] / "config" / "astrbot_plugin_nailong_remote_admin_config.json")
         except Exception:
             pass
         # Development/project fallback: <repo>/plugins/<plugin>/main.py -> /opt/astrbot/data/config/...
-        candidates.append(Path("/opt/astrbot/data/config/astrbot_plugin_linyu_remote_admin_config.json"))
+        candidates.append(Path("/opt/astrbot/data/config/astrbot_plugin_nailong_remote_admin_config.json"))
         for path in candidates:
             if path.exists():
                 return path
@@ -142,7 +142,7 @@ class Main(Star):
         return ""
 
     def _state_path(self) -> Path:
-        return Path(__file__).resolve().parent / "linyu_remote_admin_state.json"
+        return Path(__file__).resolve().parent / "nailong_remote_admin_state.json"
 
     def _public_login_enabled(self) -> bool:
         try:
@@ -231,7 +231,7 @@ class Main(Star):
             "requester": self._sender_id(event),
             "group_id": self._group_id(event),
             "bot_self_id": self._self_id(event),
-            "source": "astrbot_plugin_linyu_remote_admin",
+            "source": "astrbot_plugin_nailong_remote_admin",
             "allow_create": self._is_owner(event),
             "public_login_enabled": self._public_login_enabled(),
         }
@@ -252,7 +252,7 @@ class Main(Star):
             "requester": self._sender_id(event),
             "group_id": self._group_id(event),
             "bot_self_id": self._self_id(event),
-            "source": "astrbot_plugin_linyu_remote_admin",
+            "source": "astrbot_plugin_nailong_remote_admin",
             "count": count,
         }
         return await asyncio.to_thread(self._post_json_sync, "/api/remote/napcat/create", payload)
@@ -262,7 +262,7 @@ class Main(Star):
             "requester": self._sender_id(event),
             "group_id": self._group_id(event),
             "bot_self_id": self._self_id(event),
-            "source": "astrbot_plugin_linyu_remote_admin",
+            "source": "astrbot_plugin_nailong_remote_admin",
             "name": name,
             "keep_data": True,
         }
@@ -273,7 +273,7 @@ class Main(Star):
             "requester": self._sender_id(event),
             "group_id": self._group_id(event),
             "bot_self_id": self._self_id(event),
-            "source": "astrbot_plugin_linyu_remote_admin",
+            "source": "astrbot_plugin_nailong_remote_admin",
         }
         return await asyncio.to_thread(self._post_json_sync, "/api/remote/astrbot/no-prefix", payload)
 
@@ -282,7 +282,7 @@ class Main(Star):
             "requester": self._sender_id(event),
             "group_id": self._group_id(event),
             "bot_self_id": self._self_id(event),
-            "source": "astrbot_plugin_linyu_remote_admin",
+            "source": "astrbot_plugin_nailong_remote_admin",
             "enabled": bool(enabled),
         }
         return await asyncio.to_thread(self._post_json_sync, "/api/remote/login/public-access", payload)
@@ -304,12 +304,26 @@ class Main(Star):
         return f"http://q.qlogo.cn/headimg_dl?dst_uin={qq}&spec=640&img_type=jpg"
 
     @staticmethod
+    def _temp_image_path(stem: str, suffix: str) -> Path:
+        """Temp file for an outgoing image; sweeps our files older than an hour."""
+        tmp_dir = Path(tempfile.gettempdir())
+        cutoff = time.time() - 3600
+        for pattern in ("nailong-*", "linyu-*"):
+            for old in tmp_dir.glob(pattern):
+                try:
+                    if old.is_file() and old.stat().st_mtime < cutoff:
+                        old.unlink()
+                except OSError:
+                    pass
+        return tmp_dir / f"nailong-{stem}-{int(time.time() * 1000)}{suffix}"
+
+    @staticmethod
     def _download_avatar_sync(qq: str) -> str:
         url = Main._avatar_url(qq)
         req = urlrequest.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urlrequest.urlopen(req, timeout=12) as resp:
             data = resp.read()
-        path = Path(tempfile.gettempdir()) / f"linyu-qq-avatar-{qq}-{int(time.time())}.jpg"
+        path = Main._temp_image_path("qq-avatar-" + "".join(c for c in str(qq) if c.isdigit()), ".jpg")
         path.write_bytes(data)
         return str(path)
 
@@ -450,7 +464,7 @@ class Main(Star):
             yield event.plain_result("\u4e8c\u7ef4\u7801\u6682\u65f6\u6ca1\u6709\u751f\u6210\uff0c\u8bf7\u7a0d\u540e\u518d\u7533\u8bf7\u3002")
             return
         try:
-            path = Path(tempfile.gettempdir()) / f"linyu-napcat-login-{int(time.time())}.png"
+            path = self._temp_image_path("napcat-login", ".png")
             path.write_bytes(base64.b64decode(png))
             yield event.image_result(str(path))
             if data.get("recovered"):

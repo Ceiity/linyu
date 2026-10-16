@@ -73,7 +73,7 @@
 
 ## 5. QQ 远程管理插件接口
 
-这些接口主要由 `plugins/astrbot_plugin_linyu_remote_admin` 调用。
+这些接口主要由 `plugins/astrbot_plugin_nailong_remote_admin` 调用。
 
 | 方法 | 路径 | 鉴权 | 用途 |
 |---|---|---|---|
@@ -83,7 +83,7 @@
 | POST | `/api/remote/napcat/login-status` | Remote Token | 远程查询扫码登录/实例分配状态。 |
 | POST | `/api/remote/astrbot/no-prefix` | Remote Token | 远程触发 AstrBot 免 @ / 免前缀配置。 |
 | POST | `/api/remote/login/public-access` | Remote Token | 远程开关公开登录入口能力。 |
-| POST | `/api/linyu-remote/sync` | 登录 | 从面板同步 QQ 远程登录插件配置。 |
+| POST | `/api/nailong-remote/sync` | 登录 | 从面板同步 QQ 远程登录插件配置。 |
 
 ---
 

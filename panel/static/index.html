@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>淋雨控制台</title>
-  <link rel="icon" href="/assets/linyu-robot.svg" type="image/svg+xml">
+  <title>奶龙控制台</title>
+  <link rel="icon" href="/assets/nailong-robot.svg" type="image/svg+xml">
   <meta name="theme-color" content="#111111">
-  <link rel="stylesheet" href="/assets/style.css?v=20260805-phone-icon2">
+  <link rel="stylesheet" href="/assets/style.css?v=20261016-nailong">
 </head>
 <body>
   <div id="login" class="login-screen">
     <div class="login-card">
-      <div class="brand-mark logo-mark"><img src="/assets/linyu-robot.svg" alt="淋雨机器人商标"></div>
-      <h1>淋雨控制台</h1>
+      <div class="brand-mark logo-mark"><img src="/assets/nailong-robot.svg" alt="奶龙商标"></div>
+      <h1>奶龙控制台</h1>
       <p>管理 AstrBot 与 NapCat 机器人，从这里开始。</p>
       <label>账号<input id="loginUser" autocomplete="off" spellcheck="false" placeholder="请输入面板账号"></label>
       <label>密码<input id="loginPass" type="password" autocomplete="off" placeholder="请输入面板密码"></label>
@@ -23,12 +23,12 @@
 
   <div id="app" class="app hidden">
     <aside class="sidebar">
-      <div class="side-brand" onclick="go('dashboard')"><div class="brand-mark small logo-mark"><img src="/assets/linyu-robot.svg" alt="淋雨"></div><div><b>淋雨</b><span>AstrBot Panel</span></div></div>
+      <div class="side-brand" onclick="go('dashboard')"><div class="brand-mark small logo-mark"><img src="/assets/nailong-robot.svg" alt="奶龙"></div><div><b>奶龙</b><span>AstrBot Panel</span></div></div>
       <nav id="nav"></nav>
     </aside>
     <header class="topbar">
       <button class="icon-btn mobile-only" onclick="toggleDrawer()" aria-label="打开菜单">☰</button>
-      <div><h2 id="pageTitle">淋雨-仪表盘</h2><span id="pageSub">系统总览</span></div>
+      <div><h2 id="pageTitle">奶龙-仪表盘</h2><span id="pageSub">系统总览</span></div>
       <div class="top-actions">
         <span id="globalStatus" class="status-pill grey">检测中</span>
         <button class="ghost" onclick="refresh(true,true)">刷新</button>
@@ -42,6 +42,6 @@
   <div id="themeMenu" class="theme-menu hidden" role="menu"></div>
   <div id="modal" class="modal hidden"><div class="modal-card"><div id="modalBody"></div><div class="modal-actions"><button onclick="closeModal()">&#x53d6;&#x6d88;</button><button id="modalOk" class="danger">&#x786e;&#x8ba4;</button></div></div></div>
   <div id="toast" class="toast"></div>
-  <script src="/assets/app.js?v=20260805-phone-icon2"></script>
+  <script src="/assets/app.js?v=20261016-nailong"></script>
 </body>
 </html>

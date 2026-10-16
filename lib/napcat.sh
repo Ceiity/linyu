@@ -78,7 +78,7 @@ build_reserved_ports(){
     reserved+=" $(awk -F'\t' 'NF>=4{printf " %s %s %s",$2,$3,$4}' "$NAPCAT_INDEX_FILE")"
   fi
   reserved+=" $(port_state_values | tr '\n' ' ')"
-  reserved+=" $(docker ps --format '{{.Ports}}' 2>/dev/null | grep -Eo '0\.0\.0\.0:[0-9]+|:::[0-9]+' | grep -Eo '[0-9]+$' | tr '\n' ' ' || true)"
+  reserved+=" $(docker ps --format '{{.Ports}}' 2>/dev/null | grep -Eo '(0\.0\.0\.0|127\.0\.0\.1):[0-9]+|:::[0-9]+' | grep -Eo '[0-9]+$' | tr '\n' ' ' || true)"
   printf '%s\n' "$reserved"
 }
 generate_napcat_config(){
@@ -108,8 +108,8 @@ services:
       - TZ=${DEFAULT_TIMEZONE}
     ports:
       - "${webui_port}:6099"
-      - "${ws_port}:3001"
-      - "${http_port}:3000"
+      - "127.0.0.1:${ws_port}:3001"
+      - "127.0.0.1:${http_port}:3000"
     volumes:
       - ${DATA_DIR}:/AstrBot/data
       - ${dir}/config:/app/napcat/config

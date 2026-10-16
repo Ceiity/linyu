@@ -1,4 +1,4 @@
-# astrbot_plugin_linyu_remote_admin
+# astrbot_plugin_nailong_remote_admin
 
 Trigger command: `\u7533\u8bf7\u767b\u5f55`.
 

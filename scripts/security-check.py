@@ -47,9 +47,9 @@ def main() -> None:
         cfg = app.default_config()
         cfg.update({
             "remote_api_token": "remote-secret",
-            "linyu_remote_owner_ids": "10001",
-            "linyu_remote_bot_self_ids": "20002",
-            "linyu_remote_public_login_enabled": False,
+            "nailong_remote_owner_ids": "10001",
+            "nailong_remote_bot_self_ids": "20002",
+            "nailong_remote_public_login_enabled": False,
         })
         app.write_json(app.PANEL_CONFIG, cfg)
 
@@ -111,7 +111,7 @@ def main() -> None:
         principal = Dummy()
         claimed_public = {"requester": "other", "bot_self_id": "20002", "public_login_enabled": True}
         assert not app.Handler.remote_principal_ok(principal, claimed_public, allow_public_login=True)
-        cfg["linyu_remote_public_login_enabled"] = True
+        cfg["nailong_remote_public_login_enabled"] = True
         app.write_json(app.PANEL_CONFIG, cfg)
         assert app.Handler.remote_principal_ok(principal, claimed_public, allow_public_login=True)
 

@@ -222,15 +222,19 @@ apply_astrbot_default_config(){
   success "AstrBot default config applied: $dst"
 }
 
-install_linyu_remote_plugin(){
-  local src="$PROJECT_DIR/plugins/astrbot_plugin_linyu_remote_admin"
-  local dst="$DATA_DIR/plugins/astrbot_plugin_linyu_remote_admin"
+install_nailong_remote_plugin(){
+  local src="$PROJECT_DIR/plugins/astrbot_plugin_nailong_remote_admin"
+  local dst="$DATA_DIR/plugins/astrbot_plugin_nailong_remote_admin"
   local cfg_dir="$DATA_DIR/config"
   local panel_cfg="$INSTALL_PREFIX/panel_config.json"
+  local legacy="astrbot_plugin_linyu_remote_admin"
   local remote_token server_url plugin_cfg
-  [[ -d "$src" ]] || { warn "Linyu remote plugin source not found: $src"; return 0; }
+  [[ -d "$src" ]] || { warn "Nailong remote plugin source not found: $src"; return 0; }
+  # Pre-rename plugin would answer the same QQ commands twice; remove it.
+  rm -rf -- "${DATA_DIR:?}/plugins/$legacy" "$cfg_dir/${legacy}_config.json"
   mkdir -p "$dst" "$cfg_dir"
   cp -a "$src/." "$dst/"
+  rm -rf -- "$dst/__pycache__"
   remote_token="$(
     PANEL_CONFIG_PATH="$panel_cfg" python3 - <<'PY'
 import json, os, secrets
@@ -260,15 +264,15 @@ print(token)
 PY
   )"
   server_url="http://$(public_ip):${WEB_ADMIN_PORT:-7070}"
-  plugin_cfg="$cfg_dir/astrbot_plugin_linyu_remote_admin_config.json"
+  plugin_cfg="$cfg_dir/astrbot_plugin_nailong_remote_admin_config.json"
   cat > "$plugin_cfg" <<JSON
 {
   "enabled": true,
   "public_login_enabled": false,
   "server_url": "$server_url",
   "remote_token": "$remote_token",
-  "owner_ids": ["${LINYU_REMOTE_OWNER_ID:-3179806299}"],
-  "bot_self_ids": ["${LINYU_REMOTE_BOT_SELF_ID:-2141945863}"],
+  "owner_ids": ["${NAILONG_REMOTE_OWNER_ID:-${LINYU_REMOTE_OWNER_ID:-3179806299}}"],
+  "bot_self_ids": ["${NAILONG_REMOTE_BOT_SELF_ID:-${LINYU_REMOTE_BOT_SELF_ID:-2141945863}}"],
   "allowed_groups": [],
   "triggers": ["申请登录"],
   "cooldown_seconds": 300,
@@ -280,5 +284,5 @@ JSON
     docker restart "$ASTRBOT_CONTAINER" >/dev/null || true
     wait_container "$ASTRBOT_CONTAINER" 180 || warn "AstrBot did not restart cleanly after plugin install."
   fi
-  success "Linyu QQ remote plugin installed: $dst"
+  success "Nailong QQ remote plugin installed: $dst"
 }
