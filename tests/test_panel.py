@@ -143,6 +143,24 @@ class ConfigTest(unittest.TestCase):
         self.assertNotIn("initial_password", app.load_config())
 
 
+class DefaultsTest(unittest.TestCase):
+    def test_no_shared_secrets_or_owner(self):
+        a, b = app.default_config(), app.default_config()
+        self.assertNotEqual(a["default_reverse_ws_token"], "yuyu521521")
+        self.assertNotEqual(a["default_reverse_ws_token"], b["default_reverse_ws_token"])
+        self.assertGreaterEqual(len(a["default_reverse_ws_token"]), 16)
+        self.assertEqual(a["nailong_remote_owner_ids"], "")
+        self.assertEqual(a["nailong_remote_bot_self_ids"], "")
+
+    def test_empty_principals_denied(self):
+        cfg = app.load_config()
+        cfg.update({"nailong_remote_owner_ids": "", "nailong_remote_bot_self_ids": "", "nailong_remote_public_login_enabled": True})
+        app.save_config(cfg)
+        dummy = type("D", (), {})()
+        data = {"requester": "", "bot_self_id": ""}
+        self.assertFalse(app.Handler.remote_principal_ok(dummy, data, allow_public_login=True))
+
+
 class PluginMigrationTest(unittest.TestCase):
     def test_legacy_plugin_replaced(self):
         root = Path(app.load_config()["astrbot_plugin_dir"])

@@ -265,14 +265,18 @@ PY
   )"
   server_url="http://$(public_ip):${WEB_ADMIN_PORT:-7070}"
   plugin_cfg="$cfg_dir/astrbot_plugin_nailong_remote_admin_config.json"
+  # No built-in owner: unset means nobody may run owner commands until configured.
+  local owner_ids_json bot_ids_json
+  owner_ids_json="$(jq -nc --arg v "${NAILONG_REMOTE_OWNER_ID:-${LINYU_REMOTE_OWNER_ID:-}}" '$v | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')"
+  bot_ids_json="$(jq -nc --arg v "${NAILONG_REMOTE_BOT_SELF_ID:-${LINYU_REMOTE_BOT_SELF_ID:-}}" '$v | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')"
   cat > "$plugin_cfg" <<JSON
 {
   "enabled": true,
   "public_login_enabled": false,
   "server_url": "$server_url",
   "remote_token": "$remote_token",
-  "owner_ids": ["${NAILONG_REMOTE_OWNER_ID:-${LINYU_REMOTE_OWNER_ID:-3179806299}}"],
-  "bot_self_ids": ["${NAILONG_REMOTE_BOT_SELF_ID:-${LINYU_REMOTE_BOT_SELF_ID:-2141945863}}"],
+  "owner_ids": ${owner_ids_json},
+  "bot_self_ids": ${bot_ids_json},
   "allowed_groups": [],
   "triggers": ["申请登录"],
   "cooldown_seconds": 300,

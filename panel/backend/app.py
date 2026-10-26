@@ -215,15 +215,15 @@ def default_config() -> dict:
         "napcat_recovery_wait": 25,
         "max_upload_mb": 256,
         "network_name": "astrbot_network",
-        "default_reverse_ws_token": "yuyu521521",
+        "default_reverse_ws_token": secrets.token_hex(12),
         "remote_api_enabled": True,
         "remote_api_token": os.environ.get("PANEL_REMOTE_TOKEN") or secrets.token_urlsafe(24),
         "file_api_tokens": [],
         "nailong_remote_login_enabled": True,
         "nailong_remote_public_login_enabled": False,
         "nailong_remote_server_url": "",
-        "nailong_remote_owner_ids": os.environ.get("NAILONG_REMOTE_OWNER_IDS") or os.environ.get("LINYU_REMOTE_OWNER_IDS") or "3179806299",
-        "nailong_remote_bot_self_ids": os.environ.get("NAILONG_REMOTE_BOT_SELF_IDS") or os.environ.get("LINYU_REMOTE_BOT_SELF_IDS") or "2141945863",
+        "nailong_remote_owner_ids": os.environ.get("NAILONG_REMOTE_OWNER_IDS") or os.environ.get("LINYU_REMOTE_OWNER_IDS") or "",
+        "nailong_remote_bot_self_ids": os.environ.get("NAILONG_REMOTE_BOT_SELF_IDS") or os.environ.get("LINYU_REMOTE_BOT_SELF_IDS") or "",
         "nailong_remote_allowed_groups": "",
         "nailong_remote_triggers": "申请登录",
         "nailong_remote_qr_retry_seconds": 60,
@@ -612,7 +612,7 @@ def shell_state() -> dict[str, str]:
     data.setdefault("INSTALL_PREFIX", cfg.get("install_prefix", str(INSTALL_PREFIX)))
     data.setdefault("PROJECT_DIR", cfg.get("project_dir", str(PROJECT_DIR)))
     data.setdefault("NETWORK_NAME", cfg.get("network_name", "astrbot_network"))
-    data.setdefault("ASTRBOT_REVERSE_WS_TOKEN", cfg.get("default_reverse_ws_token", "yuyu521521"))
+    data.setdefault("ASTRBOT_REVERSE_WS_TOKEN", cfg.get("default_reverse_ws_token", ""))
     return data
 
 
@@ -1740,7 +1740,7 @@ def astrbot_data(origin: str | None = None) -> dict:
     st = shell_state()
     origin = origin or public_origin()
     deploy = Path(st.get("DEPLOY_INFO_FILE", str(INSTALL_PREFIX / "deploy_info.txt")))
-    return {"status": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "url": url_for_port(origin, st.get("ASTRBOT_WEB_PORT", "6185")), "username": st.get("ASTRBOT_USERNAME", "astrbot"), "password": current_astrbot_password(), "token": st.get("ASTRBOT_REVERSE_WS_TOKEN", "yuyu521521"), "config_path": str(INSTALL_PREFIX / "data" / "cmd_config.json"), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署"}
+    return {"status": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "url": url_for_port(origin, st.get("ASTRBOT_WEB_PORT", "6185")), "username": st.get("ASTRBOT_USERNAME", "astrbot"), "password": current_astrbot_password(), "token": st.get("ASTRBOT_REVERSE_WS_TOKEN", ""), "config_path": str(INSTALL_PREFIX / "data" / "cmd_config.json"), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署"}
 
 
 def get_logs(target: str, lines: int) -> str:
@@ -3269,7 +3269,7 @@ class Handler(BaseHTTPRequestHandler):
         count = int(data.get("napcat_count", 1))
         if count < 0 or count > 999:
             raise ValueError("NapCat 数量必须是 0-999")
-        token = str(data.get("reverse_token", "")).strip() or "yuyu521521"
+        token = str(data.get("reverse_token", "")).strip() or str(load_config().get("default_reverse_ws_token") or secrets.token_hex(12))
         if not all(c.isalnum() or c in "._-+=" for c in token) or len(token) < 4:
             raise ValueError("连接 Token 格式不合法")
         with CONFIG_LOCK:

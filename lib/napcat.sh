@@ -156,7 +156,7 @@ sync_napcat_reverse_configs(){
     id="${name#napcat}"; id="$((10#$id))"
     astrbot_ws_port="$((ASTRBOT_INTERNAL_WS_PORT + id - 1))"
     dir="$NAPCAT_BASE_DIR/$name"
-    token_to_use="${ASTRBOT_REVERSE_WS_TOKEN:-yuyu521521}"
+    token_to_use="$ASTRBOT_REVERSE_WS_TOKEN"
     shopt -s nullglob
     for cfg in "$dir"/config/onebot11*.json; do
       [[ -f "$cfg" ]] || continue
@@ -200,7 +200,7 @@ PY
     done
     shopt -u nullglob
   done < "$NAPCAT_INDEX_FILE"
-  success "NapCat reverse WebSocket configs synced; token=${ASTRBOT_REVERSE_WS_TOKEN:-yuyu521521}"
+  success "NapCat reverse WebSocket configs synced; token=${ASTRBOT_REVERSE_WS_TOKEN}"
 }
 add_napcat_instances(){
   local count="$1" width i id name token webui ws http file total astrbot_ws_port reserved_ports="" ids=()

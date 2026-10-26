@@ -13,8 +13,6 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
 TRIGGER_APPLY_LOGIN = "\u7533\u8bf7\u767b\u5f55"
-DEFAULT_BOT_SELF_ID = "2141945863"
-DEFAULT_OWNER_ID = "3179806299"
 CMD_LOGIN_OPEN = "\u767b\u5f55\u5f00\u542f"
 CMD_LOGIN_CLOSE = "\u767b\u5f55\u5173\u95ed"
 CMD_CREATE_BOT = "\u521b\u5efa\u673a\u5668\u4eba"
@@ -158,12 +156,12 @@ class Main(Star):
 
     def _is_owner(self, event: AstrMessageEvent) -> bool:
         sender = self._sender_id(event)
-        owners = self._as_str_set(self._cfg("owner_ids", [DEFAULT_OWNER_ID]))
+        owners = self._as_str_set(self._cfg("owner_ids", []))
         return bool(owners) and sender in owners
 
     def _is_managed_bot(self, event: AstrMessageEvent) -> bool:
         self_id = self._self_id(event)
-        allowed_bots = self._as_str_set(self._cfg("bot_self_ids", [DEFAULT_BOT_SELF_ID]))
+        allowed_bots = self._as_str_set(self._cfg("bot_self_ids", []))
         return bool(allowed_bots) and self_id in allowed_bots
 
     def _target_allowed(self, event: AstrMessageEvent) -> bool:
@@ -186,7 +184,7 @@ class Main(Star):
             return False, "\u8fdc\u7a0b\u7533\u8bf7\u767b\u5f55\u5df2\u5173\u95ed\u3002"
         if not self._target_allowed(event):
             return False, ""
-        owners = self._as_str_set(self._cfg("owner_ids", [DEFAULT_OWNER_ID]))
+        owners = self._as_str_set(self._cfg("owner_ids", []))
         if not owners:
             return False, "\u8fd8\u6ca1\u6709\u914d\u7f6e\u4e3b\u4eba QQ\u3002\u8bf7\u5148\u5728\u63d2\u4ef6\u914d\u7f6e\u91cc\u586b\u5199 owner_ids\u3002"
         if self._is_owner(event):
