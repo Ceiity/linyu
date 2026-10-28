@@ -1,0 +1,306 @@
+{
+ "installer_version": "1.0.0",
+ "time": 1793172357,
+ "hostname": "nailong-demo",
+ "is_root": true,
+ "os": {
+  "id": "ubuntu",
+  "version": "24.04",
+  "codename": "noble",
+  "pretty": "Ubuntu 24.04.5 LTS",
+  "machine": "x86_64",
+  "arch": "amd64",
+  "kernel": "6.18.44-fc-v180",
+  "supported": true,
+  "reason": "",
+  "systemd": true
+ },
+ "resources": {
+  "cpu_cores": 4,
+  "mem_total": 16872808448,
+  "mem_available": 9900797952,
+  "swap_total": 0,
+  "disk_total": 270553174016,
+  "disk_free": 14632079360,
+  "disk_path": "/opt/nailong"
+ },
+ "tools": {
+  "docker": "Docker version 29.9.2, build a82e528",
+  "compose": "5.6.1",
+  "python3": "Python 3.12.3",
+  "git": null,
+  "curl": "curl 8.5.0 (x86_64-pc-linux-gnu) libcurl/8.5.0 OpenSSL/3.0.13 zlib/1.3 brotli/1.",
+  "wget": null,
+  "tar": "tar (GNU tar) 1.35",
+  "unzip": null,
+  "apt": "apt 2.8.3 (amd64)",
+  "gpg": "gpg (GnuPG) 2.4.4"
+ },
+ "firewall": {
+  "ufw": null,
+  "firewalld": null
+ },
+ "network": {
+  "download.docker.com": {
+   "dns": true,
+   "https": true,
+   "latency_ms": 48
+  },
+  "registry-1.docker.io": {
+   "dns": true,
+   "https": true,
+   "latency_ms": 86
+  },
+  "github.com": {
+   "dns": true,
+   "https": true,
+   "latency_ms": 55
+  },
+  "pypi.org": {
+   "dns": true,
+   "https": true,
+   "latency_ms": 29
+  }
+ },
+ "sshd": {
+  "known": true,
+  "allow_tcp_forwarding": "yes",
+  "ok": true
+ },
+ "docker": {
+  "installed": true,
+  "running": true,
+  "compose": true,
+  "version": "29.9.2",
+  "running_containers": 3,
+  "registry_mirrors": []
+ },
+ "containers": [
+  {
+   "id": "d096772b2222",
+   "name": "nailong-agent",
+   "image": "python:3.12-slim-bookworm",
+   "state": "running",
+   "status": "Up 44 seconds",
+   "labels": {
+    "com.nailong.managed": "true",
+    "com.nailong.role": "agent"
+   },
+   "ports": [],
+   "networks": [
+    "host"
+   ],
+   "mounts": [
+    {
+     "source": "/opt/nailong/agent/app",
+     "destination": "/app",
+     "type": "bind"
+    },
+    {
+     "source": "/opt/nailong/backups",
+     "destination": "/backups",
+     "type": "bind"
+    },
+    {
+     "source": "/opt/nailong/agent/data",
+     "destination": "/data",
+     "type": "bind"
+    },
+    {
+     "source": "/opt/nailong/agent/deps",
+     "destination": "/deps",
+     "type": "bind"
+    },
+    {
+     "source": "/srv/bot/data",
+     "destination": "/mnt/astrbot",
+     "type": "bind"
+    },
+    {
+     "source": "/srv/napcat01/config",
+     "destination": "/mnt/napcat/0",
+     "type": "bind"
+    },
+    {
+     "source": "/var/run/docker.sock",
+     "destination": "/var/run/docker.sock",
+     "type": "bind"
+    },
+    {
+     "source": "/etc/ssl/certs/ca-certificates.crt",
+     "destination": "/etc/ssl/certs/ca-certificates.crt",
+     "type": "bind"
+    }
+   ]
+  },
+  {
+   "id": "dd9614e448ba",
+   "name": "napcat01",
+   "image": "mlikiowa/napcat-docker:v4.18.41",
+   "state": "running",
+   "status": "Up About a minute",
+   "labels": {
+    "org.opencontainers.image.created": "2024-11-05T14:52:45.380Z",
+    "org.opencontainers.image.description": "NapCat-Docker",
+    "org.opencontainers.image.licenses": "",
+    "org.opencontainers.image.ref.name": "ubuntu",
+    "org.opencontainers.image.revision": "60dc2d72126890a0ae88a36f64000c08b7b8bf7a",
+    "org.opencontainers.image.source": "https://github.com/NapNeko/NapCat-Docker",
+    "org.opencontainers.image.title": "NapCat-Docker",
+    "org.opencontainers.image.url": "https://github.com/NapNeko/NapCat-Docker",
+    "org.opencontainers.image.version": "base"
+   },
+   "ports": [
+    {
+     "private": 6099,
+     "public": 6099,
+     "ip": "0.0.0.0",
+     "type": "tcp"
+    }
+   ],
+   "networks": [
+    "astrbot_network"
+   ],
+   "mounts": [
+    {
+     "source": "/srv/napcat01/qq",
+     "destination": "/app/.config/QQ",
+     "type": "bind"
+    },
+    {
+     "source": "/srv/napcat01/config",
+     "destination": "/app/napcat/config",
+     "type": "bind"
+    }
+   ]
+  },
+  {
+   "id": "12db78631d7f",
+   "name": "astrbot",
+   "image": "soulter/astrbot:v4.29.3",
+   "state": "running",
+   "status": "Up About a minute",
+   "labels": {},
+   "ports": [
+    {
+     "private": 6185,
+     "public": 6185,
+     "ip": "0.0.0.0",
+     "type": "tcp"
+    }
+   ],
+   "networks": [
+    "astrbot_network"
+   ],
+   "mounts": [
+    {
+     "source": "/srv/bot/data",
+     "destination": "/AstrBot/data",
+     "type": "bind"
+    }
+   ]
+  }
+ ],
+ "networks": [
+  "none",
+  "host",
+  "bridge",
+  "astrbot_network"
+ ],
+ "volumes": [],
+ "existing": {
+  "astrbot": [
+   "astrbot"
+  ],
+  "napcat": [
+   "napcat01"
+  ],
+  "agent": [
+   "nailong-agent"
+  ]
+ },
+ "listening_ports": [
+  22,
+  6099,
+  6185,
+  18180
+ ],
+ "state": {
+  "astrbot": {
+   "container": "astrbot",
+   "managed": false,
+   "data_dir": "/srv/bot/data",
+   "port": 6185,
+   "network": "astrbot_network"
+  },
+  "version": "1.0.0",
+  "updated_at": 1793172316,
+  "napcat": [
+   {
+    "container": "napcat01",
+    "managed": false,
+    "config_dir": "/srv/napcat01/config",
+    "webui_port": 6099,
+    "webui_container_port": 6099
+   }
+  ],
+  "onebot": {
+   "astrbot_platform_id": "my_qq",
+   "port": 6199
+  },
+  "agent": {
+   "port": 18180,
+   "container": "nailong-agent",
+   "version": "1.0.0"
+  }
+ },
+ "plan": {
+  "mode": "takeover",
+  "steps": [
+   {
+    "id": "deps",
+    "title": "安装基础依赖",
+    "action": "skip",
+    "detail": "依赖已齐全"
+   },
+   {
+    "id": "docker",
+    "title": "Docker",
+    "action": "skip",
+    "detail": "已安装 Docker version 29.9.2, build a82e528，跳过安装"
+   },
+   {
+    "id": "astrbot",
+    "title": "AstrBot",
+    "action": "keep",
+    "detail": "检测到已有 AstrBot（astrbot），保留原有配置和数据"
+   },
+   {
+    "id": "napcat",
+    "title": "NapCat",
+    "action": "keep",
+    "detail": "检测到已有 NapCat（napcat01），保留原有配置"
+   },
+   {
+    "id": "onebot",
+    "title": "OneBot v11 连接",
+    "action": "keep",
+    "detail": "复用现有连接配置，不重置 Token"
+   },
+   {
+    "id": "agent",
+    "title": "部署奶龙管理 Agent",
+    "action": "upgrade",
+    "detail": "仅监听 127.0.0.1，通过 SSH 隧道访问"
+   },
+   {
+    "id": "verify",
+    "title": "验证服务",
+    "action": "install",
+    "detail": "检查容器、端口与连接"
+   }
+  ],
+  "blockers": [],
+  "warnings": []
+ }
+}

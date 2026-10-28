@@ -1,0 +1,167 @@
+{
+ "installer_version": "1.0.0",
+ "time": 1793172357,
+ "hostname": "nailong-demo",
+ "is_root": true,
+ "os": {
+  "id": "ubuntu",
+  "version": "24.04",
+  "codename": "noble",
+  "pretty": "Ubuntu 24.04.5 LTS",
+  "machine": "x86_64",
+  "arch": "amd64",
+  "kernel": "6.8.0-45-generic",
+  "supported": true,
+  "reason": "",
+  "systemd": true
+ },
+ "resources": {
+  "cpu_cores": 4,
+  "mem_total": 16872808448,
+  "mem_available": 9900797952,
+  "swap_total": 0,
+  "disk_total": 53687091200,
+  "disk_free": 40802189312,
+  "disk_path": "/opt/nailong"
+ },
+ "tools": {
+  "docker": null,
+  "compose": null,
+  "python3": "Python 3.12.3",
+  "git": null,
+  "curl": null,
+  "wget": null,
+  "tar": "tar (GNU tar) 1.35",
+  "unzip": null,
+  "apt": "apt 2.8.3 (amd64)",
+  "gpg": null
+ },
+ "firewall": {
+  "ufw": null,
+  "firewalld": null
+ },
+ "network": {
+  "download.docker.com": {
+   "dns": true,
+   "https": true,
+   "latency_ms": 48
+  },
+  "registry-1.docker.io": {
+   "dns": true,
+   "https": true,
+   "latency_ms": 86
+  },
+  "github.com": {
+   "dns": true,
+   "https": true,
+   "latency_ms": 55
+  },
+  "pypi.org": {
+   "dns": true,
+   "https": true,
+   "latency_ms": 29
+  }
+ },
+ "sshd": {
+  "known": true,
+  "allow_tcp_forwarding": "yes",
+  "ok": true
+ },
+ "docker": {
+  "installed": false,
+  "running": false,
+  "compose": false
+ },
+ "containers": [],
+ "networks": [],
+ "volumes": [],
+ "existing": {
+  "astrbot": [],
+  "napcat": [],
+  "agent": []
+ },
+ "listening_ports": [
+  22,
+  6099,
+  6185,
+  18180
+ ],
+ "state": {
+  "astrbot": {
+   "container": "astrbot",
+   "managed": false,
+   "data_dir": "/srv/bot/data",
+   "port": 6185,
+   "network": "astrbot_network"
+  },
+  "version": "1.0.0",
+  "updated_at": 1793172316,
+  "napcat": [
+   {
+    "container": "napcat01",
+    "managed": false,
+    "config_dir": "/srv/napcat01/config",
+    "webui_port": 6099,
+    "webui_container_port": 6099
+   }
+  ],
+  "onebot": {
+   "astrbot_platform_id": "my_qq",
+   "port": 6199
+  },
+  "agent": {
+   "port": 18180,
+   "container": "nailong-agent",
+   "version": "1.0.0"
+  }
+ },
+ "plan": {
+  "mode": "fresh",
+  "steps": [
+   {
+    "id": "deps",
+    "title": "安装基础依赖",
+    "action": "install",
+    "detail": "将安装：curl、gnupg"
+   },
+   {
+    "id": "docker",
+    "title": "安装 Docker Engine 与 Compose 插件",
+    "action": "install",
+    "detail": "使用 Docker 官方 APT 软件源（GPG 指纹校验）"
+   },
+   {
+    "id": "astrbot",
+    "title": "部署 AstrBot",
+    "action": "install",
+    "detail": "soulter/astrbot:v4.29.3"
+   },
+   {
+    "id": "napcat",
+    "title": "部署 NapCat",
+    "action": "install",
+    "detail": "mlikiowa/napcat-docker:v4.18.41"
+   },
+   {
+    "id": "onebot",
+    "title": "配置 OneBot v11 连接",
+    "action": "install",
+    "detail": "自动生成随机 Token 并建立反向 WebSocket"
+   },
+   {
+    "id": "agent",
+    "title": "部署奶龙管理 Agent",
+    "action": "install",
+    "detail": "仅监听 127.0.0.1，通过 SSH 隧道访问"
+   },
+   {
+    "id": "verify",
+    "title": "验证服务",
+    "action": "install",
+    "detail": "检查容器、端口与连接"
+   }
+  ],
+  "blockers": [],
+  "warnings": []
+ }
+}

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="body" cx="42%" cy="34%" r="70%">
+      <stop offset="0" stop-color="#FFE27A"/>
+      <stop offset="0.55" stop-color="#FFCB3D"/>
+      <stop offset="1" stop-color="#F5A623"/>
+    </radialGradient>
+    <radialGradient id="belly" cx="50%" cy="40%" r="60%">
+      <stop offset="0" stop-color="#FFF7D6"/>
+      <stop offset="1" stop-color="#FFE6A0"/>
+    </radialGradient>
+    <linearGradient id="horn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF1C2"/>
+      <stop offset="1" stop-color="#FFC54D"/>
+    </linearGradient>
+  </defs>
+  <!-- 背鳍 -->
+  <path d="M206 126 q12 -52 44 -22 q20 -50 48 -4 q26 -30 36 30 z" fill="#FF9F2E"/>
+  <!-- 角 -->
+  <path d="M150 150 q-26 -64 18 -82 q20 34 30 66 z" fill="url(#horn)" stroke="#E9A23B" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M362 150 q26 -64 -18 -82 q-20 34 -30 66 z" fill="url(#horn)" stroke="#E9A23B" stroke-width="6" stroke-linejoin="round"/>
+  <!-- 小翅膀 -->
+  <path d="M78 300 q-40 -40 -22 -96 q36 18 62 64 z" fill="#FFB12E"/>
+  <path d="M434 300 q40 -40 22 -96 q-36 18 -62 64 z" fill="#FFB12E"/>
+  <!-- 身体（圆滚滚的头身） -->
+  <ellipse cx="256" cy="282" rx="190" ry="176" fill="url(#body)"/>
+  <!-- 肚皮/口鼻区 -->
+  <ellipse cx="256" cy="340" rx="122" ry="98" fill="url(#belly)"/>
+  <!-- 眼睛 -->
+  <ellipse cx="186" cy="250" rx="30" ry="36" fill="#2B1D0E"/>
+  <ellipse cx="326" cy="250" rx="30" ry="36" fill="#2B1D0E"/>
+  <circle cx="176" cy="236" r="11" fill="#FFFFFF"/>
+  <circle cx="316" cy="236" r="11" fill="#FFFFFF"/>
+  <circle cx="194" cy="266" r="5" fill="#FFFFFF" opacity=".8"/>
+  <circle cx="334" cy="266" r="5" fill="#FFFFFF" opacity=".8"/>
+  <!-- 腮红 -->
+  <ellipse cx="146" cy="306" rx="26" ry="16" fill="#FF8FA3" opacity=".55"/>
+  <ellipse cx="366" cy="306" rx="26" ry="16" fill="#FF8FA3" opacity=".55"/>
+  <!-- 鼻孔 -->
+  <ellipse cx="240" cy="304" rx="5" ry="4" fill="#C7861B"/>
+  <ellipse cx="272" cy="304" rx="5" ry="4" fill="#C7861B"/>
+  <!-- 嘴巴 -->
+  <path d="M222 330 q34 38 68 0 q-34 14 -68 0 z" fill="#B5432E"/>
+  <path d="M238 343 q18 12 36 0 q-18 4 -36 0 z" fill="#FF8FA3"/>
+  <!-- 小爪子 -->
+  <ellipse cx="170" cy="414" rx="34" ry="22" fill="#FFC23A"/>
+  <ellipse cx="342" cy="414" rx="34" ry="22" fill="#FFC23A"/>
+</svg>
