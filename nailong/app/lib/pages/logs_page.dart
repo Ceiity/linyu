@@ -274,7 +274,7 @@ class _LogsPageState extends State<LogsPage> {
           if (paused && buffered.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
-              child: Text('已暂停 · ${buffered.length} 条新日志待显示', style: TextStyle(color: cs.primary, fontSize: 12)),
+              child: Text('已暂停 · ${buffered.length} 条新日志待显示', style: TextStyle(color: cs.accentText, fontSize: 12)),
             ),
           Expanded(
             child: Container(
@@ -367,7 +367,7 @@ class _LogLine extends StatelessWidget {
                 if (hint.isNotEmpty)
                   Text(
                     hint,
-                    style: TextStyle(fontWeight: FontWeight.w700, color: cs.primary, fontSize: 12.5),
+                    style: TextStyle(fontWeight: FontWeight.w700, color: cs.accentText, fontSize: 12.5),
                   ),
                 SelectableText(
                   line['text'].toString(),

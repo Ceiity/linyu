@@ -65,6 +65,11 @@ ThemeData buildTheme(ColorScheme scheme, {bool pureBlack = false}) {
 }
 
 extension StatusColors on ColorScheme {
+  /// 强调色文字：亮黄等浅主题色在白底上看不清，浅色模式下用加深的同色系。
+  Color get accentText => brightness == Brightness.light && primary.computeLuminance() > 0.45
+      ? Color.lerp(primary, Colors.black, 0.45)!
+      : primary;
+
   Color get success => brightness == Brightness.dark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A);
   Color get warning => brightness == Brightness.dark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
 }

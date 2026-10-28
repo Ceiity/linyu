@@ -208,7 +208,7 @@ void main() {
 
   testWidgets('06 首页', (t) => shot(t, '06_dashboard', DashboardPage(active: true, onOpenLogs: (_) {}, onGo: (_) {})), skip: skip != null);
 
-  testWidgets('07 首页深色', (t) => shot(t, '07_dashboard_dark', DashboardPage(active: true, onOpenLogs: (_) {}, onGo: (_) {}), dark: true), skip: skip != null);
+  testWidgets('07 首页深色', (t) => shot(t, '07_dashboard_dark', DashboardPage(active: true, onOpenLogs: (_) {}, onGo: (_) {}), ), skip: skip != null);
 
   testWidgets('08 QQ 登录', (t) => shot(t, '08_qq', const QqPage(active: true)), skip: skip != null);
 
@@ -216,5 +216,5 @@ void main() {
 
   testWidgets('10 日志', (t) => shot(t, '10_logs', LogsPage(active: true, target: ValueNotifier(null))), skip: skip != null);
 
-  testWidgets('11 更多', (t) => shot(t, '11_more', const MorePage(), dark: true), skip: skip != null);
+  testWidgets('11 更多', (t) => shot(t, '11_more', const MorePage(), ), skip: skip != null);
 }

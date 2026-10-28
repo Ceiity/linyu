@@ -370,7 +370,7 @@ class _DeployPageState extends State<DeployPage> {
                   'upgrade' => Icons.upgrade,
                   'keep' => Icons.shield_outlined,
                   _ => Icons.check_circle_outline,
-                }, color: s['action'] == 'keep' ? cs.success : (s['action'] == 'skip' ? cs.outline : cs.primary)),
+                }, color: s['action'] == 'keep' ? cs.success : (s['action'] == 'skip' ? cs.outline : cs.accentText)),
                 title: Text(s['title'].toString(), style: const TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: Text(s['detail'].toString()),
                 trailing: StatusChip(
@@ -603,7 +603,7 @@ class _StepTile extends StatelessWidget {
                       ),
                     ),
                     if (step.speed != null)
-                      Text(fmtSpeed(step.speed), style: TextStyle(fontSize: 12, color: cs.primary)),
+                      Text(fmtSpeed(step.speed), style: TextStyle(fontSize: 12, color: cs.accentText)),
                   ],
                 ),
                 if (step.message.isNotEmpty)

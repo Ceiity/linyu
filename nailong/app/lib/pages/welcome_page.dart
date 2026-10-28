@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../core/ssh.dart';
 import '../core/store.dart';
+import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'deploy_page.dart';
 
@@ -256,7 +257,7 @@ class _WelcomePageState extends State<WelcomePage> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.verified_user_outlined, size: 16, color: cs.primary),
+                      Icon(Icons.verified_user_outlined, size: 16, color: cs.accentText),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(

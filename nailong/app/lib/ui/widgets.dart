@@ -95,7 +95,7 @@ class SectionTitle extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(color: cs.primary, fontWeight: FontWeight.w700),
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(color: cs.accentText, fontWeight: FontWeight.w700),
             ),
           ),
           ?trailing,
@@ -141,7 +141,7 @@ Color toneColor(ColorScheme cs, Tone t) => switch (t) {
   Tone.ok => cs.success,
   Tone.warn => cs.warning,
   Tone.bad => cs.error,
-  Tone.info => cs.primary,
+  Tone.info => cs.accentText,
   Tone.idle => cs.outline,
 };
 
