@@ -362,3 +362,7 @@ Web 控制台不会写死 IP、域名或 localhost。后端会根据当前请求
 ```text
 http://服务器内网IP:7070
 ```
+
+## 手机 App
+
+`mobile/` 目录是面板的 Flutter 手机客户端：打开后输入服务器 IP，自动寻找 7070 端口并加密登录，可查看仪表盘、管理机器人、扫码登录 QQ、看日志、备份更新。详见 [mobile/README.md](mobile/README.md)。
