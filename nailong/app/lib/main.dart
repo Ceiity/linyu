@@ -23,13 +23,7 @@ class NailongApp extends StatelessWidget {
     final s = StoreScope.of(context);
     return DynamicColorBuilder(
       builder: (lightDynamic, darkDynamic) {
-        final seed = Color(s.seedColor);
-        var light = ColorScheme.fromSeed(seedColor: seed, dynamicSchemeVariant: DynamicSchemeVariant.fidelity);
-        var dark = ColorScheme.fromSeed(
-          seedColor: seed,
-          brightness: Brightness.dark,
-          dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
-        );
+        var (light, dark) = appSchemes(s.seedColor);
         if (s.dynamicColor && lightDynamic != null && darkDynamic != null) {
           light = lightDynamic.harmonized();
           dark = darkDynamic.harmonized();

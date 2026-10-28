@@ -68,3 +68,60 @@ extension StatusColors on ColorScheme {
   Color get success => brightness == Brightness.dark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A);
   Color get warning => brightness == Brightness.dark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
 }
+
+const brandYellow = 0xFFFFC83D;
+
+/// 浅色中性背景（白 / 浅灰卡片），主题色只用于按钮、开关等强调元素。
+(ColorScheme, ColorScheme) appSchemes(int seedColor) {
+  final seed = Color(seedColor);
+  var light = ColorScheme.fromSeed(seedColor: seed, dynamicSchemeVariant: DynamicSchemeVariant.tonalSpot);
+  var dark = ColorScheme.fromSeed(
+    seedColor: seed,
+    brightness: Brightness.dark,
+    dynamicSchemeVariant: DynamicSchemeVariant.tonalSpot,
+  );
+  light = light.copyWith(
+    surface: const Color(0xFFF6F7F9),
+    onSurface: const Color(0xFF1C1E21),
+    onSurfaceVariant: const Color(0xFF5F6368),
+    surfaceContainerLowest: const Color(0xFFFFFFFF),
+    surfaceContainerLow: const Color(0xFFFAFBFC),
+    surfaceContainer: const Color(0xFFFFFFFF),
+    surfaceContainerHigh: const Color(0xFFF0F1F4),
+    surfaceContainerHighest: const Color(0xFFE8EAED),
+    secondaryContainer: const Color(0xFFEDEFF2),
+    onSecondaryContainer: const Color(0xFF1C1E21),
+    outline: const Color(0xFF9AA0A6),
+    outlineVariant: const Color(0xFFDADCE0),
+  );
+  dark = dark.copyWith(
+    surface: const Color(0xFF121315),
+    onSurface: const Color(0xFFE8EAED),
+    onSurfaceVariant: const Color(0xFFA8ADB4),
+    surfaceContainerLowest: const Color(0xFF0D0E10),
+    surfaceContainerLow: const Color(0xFF17181B),
+    surfaceContainer: const Color(0xFF1C1E21),
+    surfaceContainerHigh: const Color(0xFF25272B),
+    surfaceContainerHighest: const Color(0xFF2E3135),
+    secondaryContainer: const Color(0xFF2E3135),
+    onSecondaryContainer: const Color(0xFFE8EAED),
+    outline: const Color(0xFF7C8187),
+    outlineVariant: const Color(0xFF3A3D42),
+  );
+  if (seedColor == brandYellow) {
+    // 奶龙黄：亮黄色按钮 + 深色文字，浅色容器
+    light = light.copyWith(
+      primary: const Color(0xFFFFC83D),
+      onPrimary: const Color(0xFF2B2100),
+      primaryContainer: const Color(0xFFFFF4D6),
+      onPrimaryContainer: const Color(0xFF3A2E00),
+    );
+    dark = dark.copyWith(
+      primary: const Color(0xFFFFC83D),
+      onPrimary: const Color(0xFF2B2100),
+      primaryContainer: const Color(0xFF4A3B00),
+      onPrimaryContainer: const Color(0xFFFFE08A),
+    );
+  }
+  return (light, dark);
+}

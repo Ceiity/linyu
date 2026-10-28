@@ -102,7 +102,7 @@ class AppStore extends ChangeNotifier {
   List<ServerProfile> servers = [];
   String? currentId;
   ThemeMode themeMode = ThemeMode.system;
-  bool dynamicColor = true;
+  bool dynamicColor = false;
   int seedColor = 0xFFFFC83D;
   SourceSettings sources = SourceSettings();
   bool onboarded = false;
@@ -112,7 +112,7 @@ class AppStore extends ChangeNotifier {
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
     themeMode = ThemeMode.values[(_prefs.getInt('themeMode') ?? 0).clamp(0, 2)];
-    dynamicColor = _prefs.getBool('dynamicColor') ?? true;
+    dynamicColor = _prefs.getBool('dynamicColor') ?? false;
     seedColor = _prefs.getInt('seedColor') ?? 0xFFFFC83D;
     onboarded = _prefs.getBool('onboarded') ?? false;
     try {

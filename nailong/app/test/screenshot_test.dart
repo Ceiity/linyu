@@ -123,9 +123,7 @@ void main() {
   });
 
   Widget app(Widget child, {bool dark = false}) {
-    final seed = const Color(0xFFFFC83D);
-    final light = ColorScheme.fromSeed(seedColor: seed, dynamicSchemeVariant: DynamicSchemeVariant.fidelity);
-    final darkCs = ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark, dynamicSchemeVariant: DynamicSchemeVariant.fidelity);
+    final (light, darkCs) = appSchemes(brandYellow);
     ThemeData t(ColorScheme cs) {
       final base = buildTheme(cs);
       return base.copyWith(textTheme: base.textTheme.apply(fontFamily: 'WQY'), primaryTextTheme: base.primaryTextTheme.apply(fontFamily: 'WQY'));
