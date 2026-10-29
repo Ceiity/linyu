@@ -5,6 +5,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../ui/theme.dart';
+
 /// 服务器档案（不含任何密钥，存 SharedPreferences）。
 class ServerProfile {
   final String id;
@@ -103,7 +105,8 @@ class AppStore extends ChangeNotifier {
   String? currentId;
   ThemeMode themeMode = ThemeMode.light;
   bool dynamicColor = false;
-  int seedColor = 0xFFFFC83D;
+  int seedColor = brandGraphite;
+  ButtonLook buttonLook = ButtonLook.light;
   SourceSettings sources = SourceSettings();
   bool onboarded = false;
 
@@ -113,7 +116,9 @@ class AppStore extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
     themeMode = ThemeMode.values[(_prefs.getInt('themeMode') ?? ThemeMode.light.index).clamp(0, 2)];
     dynamicColor = _prefs.getBool('dynamicColor') ?? false;
-    seedColor = _prefs.getInt('seedColor') ?? 0xFFFFC83D;
+    seedColor = _prefs.getInt('seedColor') ?? brandGraphite;
+    if (seedColor == 0xFFFFC83D) seedColor = brandGraphite; // 旧版默认的黄色，迁移到石墨灰
+    buttonLook = ButtonLook.values[(_prefs.getInt('buttonLook') ?? 0).clamp(0, 1)];
     onboarded = _prefs.getBool('onboarded') ?? false;
     try {
       servers = ((jsonDecode(_prefs.getString('servers') ?? '[]')) as List)
@@ -201,6 +206,12 @@ class AppStore extends ChangeNotifier {
   void setDynamicColor(bool v) {
     dynamicColor = v;
     _prefs.setBool('dynamicColor', v);
+    notifyListeners();
+  }
+
+  void setButtonLook(ButtonLook v) {
+    buttonLook = v;
+    _prefs.setInt('buttonLook', v.index);
     notifyListeners();
   }
 

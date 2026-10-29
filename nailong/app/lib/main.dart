@@ -32,8 +32,8 @@ class NailongApp extends StatelessWidget {
           title: '奶龙',
           debugShowCheckedModeBanner: false,
           themeMode: s.themeMode,
-          theme: buildTheme(light),
-          darkTheme: buildTheme(dark),
+          theme: buildTheme(light, look: s.buttonLook),
+          darkTheme: buildTheme(dark, look: s.buttonLook),
           home: s.current == null ? const WelcomePage() : HomeShell(key: ValueKey(s.currentId)),
         );
       },

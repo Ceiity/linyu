@@ -479,7 +479,7 @@ class _DevicesPageState extends State<DevicesPage> {
 
 // ---------------------------------------------------------------- 主题
 
-const _colors = [0xFFFFC83D, 0xFFFF8D28, 0xFFFF2D55, 0xFFCB30E0, 0xFF5856D6, 0xFF007AFF, 0xFF34C759, 0xFF8E8E93];
+const _colors = [brandGraphite, 0xFFFF8D28, 0xFFFF2D55, 0xFFCB30E0, 0xFF5856D6, 0xFF007AFF, 0xFF34C759, 0xFF8E8E93];
 
 class ThemePage extends StatelessWidget {
   const ThemePage({super.key});
@@ -507,7 +507,19 @@ class ThemePage extends StatelessWidget {
                   onSelectionChanged: (v) => s.setThemeMode(v.first),
                 ),
               ),
-              const SectionTitle('主题色'),
+              const SectionTitle('按钮风格'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SegmentedButton<ButtonLook>(
+              segments: const [
+                ButtonSegment(value: ButtonLook.light, icon: Icon(Icons.light_mode_outlined), label: Text('浅色渐变')),
+                ButtonSegment(value: ButtonLook.dark, icon: Icon(Icons.dark_mode_outlined), label: Text('黑色渐变')),
+              ],
+              selected: {s.buttonLook},
+              onSelectionChanged: (v) => s.setButtonLook(v.first),
+            ),
+          ),
+          const SectionTitle('主题色'),
               GroupCard(
                 children: [
                   SwitchListTile(
@@ -552,7 +564,7 @@ class ThemePage extends StatelessWidget {
               const SizedBox(height: 8),
               Padding(
                 padding: const EdgeInsets.all(16),
-                child: Text('第一个是奶龙黄。', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12.5)),
+                child: Text('第一个是默认的石墨灰。', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12.5)),
               ),
             ],
           ),

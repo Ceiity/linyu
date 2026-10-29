@@ -1,6 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 
-ThemeData buildTheme(ColorScheme scheme, {bool pureBlack = false}) {
+/// 主按钮风格：浅色渐变（白→浅灰，深色文字）或黑色渐变（石墨→黑，白色文字）。
+enum ButtonLook { light, dark }
+
+ThemeData buildTheme(ColorScheme scheme, {bool pureBlack = false, ButtonLook look = ButtonLook.light}) {
   var cs = scheme;
   if (pureBlack && cs.brightness == Brightness.dark) {
     cs = cs.copyWith(
@@ -13,7 +16,52 @@ ThemeData buildTheme(ColorScheme scheme, {bool pureBlack = false}) {
     );
   }
   final base = ThemeData(colorScheme: cs, useMaterial3: true);
+  final dark = cs.brightness == Brightness.dark;
+  // 深色模式下“浅色渐变”按钮用浅灰渐变，“黑色渐变”用更亮一点的石墨，保证可见
+  final useDarkLook = look == ButtonLook.dark;
+  final grad = useDarkLook
+      ? (dark ? const [Color(0xFF5A5E66), Color(0xFF34373D)] : const [Color(0xFF45484F), Color(0xFF17181B)])
+      : (dark ? const [Color(0xFFF2F3F5), Color(0xFFC9CCD2)] : const [Color(0xFFFFFFFF), Color(0xFFDDE0E5)]);
+  final fg = useDarkLook ? Colors.white : const Color(0xFF1C1E21);
+  final edge = useDarkLook ? Colors.transparent : (dark ? const Color(0x00000000) : const Color(0xFFCDD1D7));
+  final gradientButton = ButtonStyle(
+    backgroundColor: const WidgetStatePropertyAll(Colors.transparent),
+    shadowColor: const WidgetStatePropertyAll(Colors.transparent),
+    surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+    elevation: const WidgetStatePropertyAll(0),
+    foregroundColor: WidgetStateProperty.resolveWith(
+      (s) => s.contains(WidgetState.disabled) ? cs.onSurface.withValues(alpha: 0.38) : fg,
+    ),
+    overlayColor: WidgetStatePropertyAll(fg.withValues(alpha: 0.08)),
+    padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 22, vertical: 14)),
+    shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+    backgroundBuilder: (context, states, child) {
+      final off = states.contains(WidgetState.disabled);
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: off ? [cs.onSurface.withValues(alpha: 0.10), cs.onSurface.withValues(alpha: 0.10)] : grad,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: off ? Colors.transparent : edge),
+          boxShadow: off || dark
+              ? null
+              : [BoxShadow(color: Colors.black.withValues(alpha: useDarkLook ? 0.22 : 0.08), blurRadius: 10, offset: const Offset(0, 3))],
+        ),
+        child: child,
+      );
+    },
+  );
   return base.copyWith(
+    filledButtonTheme: FilledButtonThemeData(style: gradientButton),
+    floatingActionButtonTheme: FloatingActionButtonThemeData(
+      backgroundColor: useDarkLook ? const Color(0xFF2A2C31) : (dark ? const Color(0xFFE8EAED) : Colors.white),
+      foregroundColor: useDarkLook ? Colors.white : const Color(0xFF1C1E21),
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: BorderSide(color: useDarkLook ? Colors.transparent : const Color(0xFFCDD1D7))),
+    ),
     scaffoldBackgroundColor: cs.surface,
     appBarTheme: AppBarTheme(
       backgroundColor: cs.surface,
@@ -74,7 +122,7 @@ extension StatusColors on ColorScheme {
   Color get warning => brightness == Brightness.dark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
 }
 
-const brandYellow = 0xFFFFC83D;
+const brandGraphite = 0xFF2F3237;
 
 /// 浅色中性背景（白 / 浅灰卡片），主题色只用于按钮、开关等强调元素。
 (ColorScheme, ColorScheme) appSchemes(int seedColor) {
@@ -113,19 +161,21 @@ const brandYellow = 0xFFFFC83D;
     outline: const Color(0xFF7C8187),
     outlineVariant: const Color(0xFF3A3D42),
   );
-  if (seedColor == brandYellow) {
-    // 奶龙黄：亮黄色按钮 + 深色文字，浅色容器
+  if (seedColor == brandGraphite) {
+    // 默认主题：石墨灰作为强调色（开关、进度、选中态），不带任何黄色
     light = light.copyWith(
-      primary: const Color(0xFFFFC83D),
-      onPrimary: const Color(0xFF2B2100),
-      primaryContainer: const Color(0xFFFFF4D6),
-      onPrimaryContainer: const Color(0xFF3A2E00),
+      primary: const Color(0xFF2F3237),
+      onPrimary: Colors.white,
+      primaryContainer: const Color(0xFFE9EBEF),
+      onPrimaryContainer: const Color(0xFF1C1E21),
+      tertiary: const Color(0xFF8A9099),
     );
     dark = dark.copyWith(
-      primary: const Color(0xFFFFC83D),
-      onPrimary: const Color(0xFF2B2100),
-      primaryContainer: const Color(0xFF4A3B00),
-      onPrimaryContainer: const Color(0xFFFFE08A),
+      primary: const Color(0xFFE3E5E9),
+      onPrimary: const Color(0xFF17181B),
+      primaryContainer: const Color(0xFF34373D),
+      onPrimaryContainer: const Color(0xFFE8EAED),
+      tertiary: const Color(0xFF8A9099),
     );
   }
   return (light, dark);

@@ -122,10 +122,10 @@ void main() {
       ..state = ConnState.online;
   });
 
-  Widget app(Widget child, {bool dark = false}) {
-    final (light, darkCs) = appSchemes(brandYellow);
+  Widget app(Widget child, {bool dark = false, ButtonLook look = ButtonLook.light}) {
+    final (light, darkCs) = appSchemes(brandGraphite);
     ThemeData t(ColorScheme cs) {
-      final base = buildTheme(cs);
+      final base = buildTheme(cs, look: look);
       return base.copyWith(textTheme: base.textTheme.apply(fontFamily: 'WQY'), primaryTextTheme: base.primaryTextTheme.apply(fontFamily: 'WQY'));
     }
 
@@ -144,11 +144,12 @@ void main() {
     );
   }
 
-  Future<void> shot(WidgetTester tester, String name, Widget page, {bool dark = false, Future<void> Function()? after}) async {
+  Future<void> shot(WidgetTester tester, String name, Widget page,
+      {bool dark = false, ButtonLook look = ButtonLook.light, Future<void> Function()? after}) async {
     tester.view.physicalSize = const Size(1170, 2532);
     tester.view.devicePixelRatio = 3;
     await tester.runAsync(() async {
-      await tester.pumpWidget(app(page, dark: dark));
+      await tester.pumpWidget(app(page, dark: dark, look: look));
       for (var i = 0; i < 6; i++) {
         await Future.delayed(const Duration(milliseconds: 200));
         await tester.pump(const Duration(milliseconds: 200));
@@ -217,4 +218,10 @@ void main() {
   testWidgets('10 日志', (t) => shot(t, '10_logs', LogsPage(active: true, target: ValueNotifier(null))), skip: skip != null);
 
   testWidgets('11 更多', (t) => shot(t, '11_more', const MorePage(), ), skip: skip != null);
+
+  testWidgets('12 欢迎页（黑色渐变按钮）', (t) => shot(t, '12_welcome_darkbtn', const WelcomePage(), look: ButtonLook.dark), skip: skip != null);
+
+  testWidgets('13 主题设置', (t) => shot(t, '13_theme', const ThemePage()), skip: skip != null);
+
+  testWidgets('14 报告（黑色渐变按钮）', (t) => shot(t, '14_report_darkbtn', DeployPage(target: const SshTarget(host: '123.123.123.123'), debugFlow: flowWith('report_fresh.json', FlowPhase.report)), look: ButtonLook.dark), skip: skip != null);
 }
