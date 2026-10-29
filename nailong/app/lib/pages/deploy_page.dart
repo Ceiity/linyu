@@ -57,9 +57,8 @@ class _DeployPageState extends State<DeployPage> {
     final leave = await confirmDialog(
       context,
       title: '部署进行中',
-      message: '离开会中断与服务器的连接。服务器上已完成的步骤会保留，之后可以继续部署。确定离开吗？',
+      message: '部署会继续在服务器上运行，不会因为离开而中断。之后重新连接这台服务器，会自动接上进度并完成配对。确定离开吗？',
       confirmText: '离开',
-      destructive: true,
     );
     return leave;
   }

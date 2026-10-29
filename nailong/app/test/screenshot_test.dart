@@ -42,9 +42,18 @@ class FakeAgent extends AgentApi {
           {'container': 'napcat', 'state': 'running', 'running': true},
         ],
         'metrics': {
-          'cpu_percent': 23.4, 'cpu_cores': 2, 'load': [0.42, 0.38, 0.31], 'mem_total': 4 * 1073741824,
-          'mem_used': 2.3 * 1073741824, 'mem_percent': 57.5, 'disk_total': 60 * 1073741824, 'disk_used': 17.2 * 1073741824,
-          'disk_percent': 28.7, 'net_rx_bps': 186000 + tick * 9000, 'net_tx_bps': 42000 + tick * 3000, 'uptime': 3 * 86400 + 5 * 3600,
+          'cpu_percent': 23.4,
+          'cpu_cores': 2,
+          'load': [0.42, 0.38, 0.31],
+          'mem_total': 4 * 1073741824,
+          'mem_used': 2.3 * 1073741824,
+          'mem_percent': 57.5,
+          'disk_total': 60 * 1073741824,
+          'disk_used': 17.2 * 1073741824,
+          'disk_percent': 28.7,
+          'net_rx_bps': 186000 + tick * 9000,
+          'net_tx_bps': 42000 + tick * 3000,
+          'uptime': 3 * 86400 + 5 * 3600,
         },
       };
     }
@@ -55,16 +64,64 @@ class FakeAgent extends AgentApi {
     }
     if (path.endsWith('/login')) {
       return {
-        'name': 'napcat', 'is_login': false, 'is_offline': false, 'error': '', 'phase': 'qrcode',
+        'name': 'napcat',
+        'is_login': false,
+        'is_offline': false,
+        'error': '',
+        'phase': 'qrcode',
         'qrcode': 'https://txz.qq.com/p?k=nailong-demo-qrcode&f=1600001604',
       };
     }
     if (path == '/api/plugins') {
       return [
-        {'name': 'astrbot_plugin_weather', 'display_name': '天气查询', 'desc': '查询城市实时天气与未来三天预报', 'author': 'demo', 'version': '1.2.0', 'repo': 'https://github.com/demo/astrbot_plugin_weather', 'activated': true, 'reserved': false, 'has_update': true, 'online_version': '1.3.0'},
-        {'name': 'astrbot_plugin_daily_news', 'display_name': '每日新闻', 'desc': '每天早上推送 60 秒读懂世界', 'author': 'demo', 'version': '0.4.1', 'repo': '', 'activated': true, 'reserved': false, 'has_update': false, 'online_version': ''},
-        {'name': 'astrbot_plugin_sign', 'display_name': '群签到', 'desc': '群内签到、积分与排行榜', 'author': 'demo', 'version': '2.0.0', 'repo': '', 'activated': false, 'reserved': false, 'has_update': false, 'online_version': ''},
-        {'name': 'builtin_commands', 'display_name': 'builtin_commands', 'desc': "AstrBot's internal plugin, providing all built-in commands such as /reset.", 'author': 'Soulter', 'version': '0.0.1', 'repo': '', 'activated': true, 'reserved': true, 'has_update': false, 'online_version': ''},
+        {
+          'name': 'astrbot_plugin_weather',
+          'display_name': '天气查询',
+          'desc': '查询城市实时天气与未来三天预报',
+          'author': 'demo',
+          'version': '1.2.0',
+          'repo': 'https://github.com/demo/astrbot_plugin_weather',
+          'activated': true,
+          'reserved': false,
+          'has_update': true,
+          'online_version': '1.3.0',
+        },
+        {
+          'name': 'astrbot_plugin_daily_news',
+          'display_name': '每日新闻',
+          'desc': '每天早上推送 60 秒读懂世界',
+          'author': 'demo',
+          'version': '0.4.1',
+          'repo': '',
+          'activated': true,
+          'reserved': false,
+          'has_update': false,
+          'online_version': '',
+        },
+        {
+          'name': 'astrbot_plugin_sign',
+          'display_name': '群签到',
+          'desc': '群内签到、积分与排行榜',
+          'author': 'demo',
+          'version': '2.0.0',
+          'repo': '',
+          'activated': false,
+          'reserved': false,
+          'has_update': false,
+          'online_version': '',
+        },
+        {
+          'name': 'builtin_commands',
+          'display_name': 'builtin_commands',
+          'desc': "AstrBot's internal plugin, providing all built-in commands such as /reset.",
+          'author': 'Soulter',
+          'version': '0.0.1',
+          'repo': '',
+          'activated': true,
+          'reserved': true,
+          'has_update': false,
+          'online_version': '',
+        },
       ];
     }
     return {};
@@ -75,9 +132,19 @@ class FakeAgent extends AgentApi {
     final lines = <Map<String, dynamic>>[
       {'time': '2026-10-28 07:31:02', 'level': 'INFO', 'text': '[Core] [INFO] AstrBot v4.29.3 启动完成', 'hint': ''},
       {'time': '2026-10-28 07:31:03', 'level': 'INFO', 'text': '[Core] [INFO] 插件 天气查询 载入成功', 'hint': '插件已加载'},
-      {'time': '2026-10-28 07:31:05', 'level': 'INFO', 'text': '[Platform] [INFO] aiocqhttp(OneBot v11) 适配器已连接 napcat', 'hint': 'NapCat 已连接到 AstrBot'},
+      {
+        'time': '2026-10-28 07:31:05',
+        'level': 'INFO',
+        'text': '[Platform] [INFO] aiocqhttp(OneBot v11) 适配器已连接 napcat',
+        'hint': 'NapCat 已连接到 AstrBot',
+      },
       {'time': '2026-10-28 07:32:11', 'level': 'WARNING', 'text': '[Core] [WARN] 会话 123456 触发速率限制，已排队', 'hint': ''},
-      {'time': '2026-10-28 07:33:40', 'level': 'ERROR', 'text': '[Provider] [ERRO] 调用模型失败：Authorization: Bearer ****** 返回 429', 'hint': ''},
+      {
+        'time': '2026-10-28 07:33:40',
+        'level': 'ERROR',
+        'text': '[Provider] [ERRO] 调用模型失败：Authorization: Bearer ****** 返回 429',
+        'hint': '',
+      },
       {'time': '2026-10-28 07:33:41', 'level': 'INFO', 'text': '[Provider] [INFO] 已自动切换到备用模型', 'hint': ''},
       {'time': '2026-10-28 07:34:02', 'level': 'DEBUG', 'text': '[Core] [DEBG] 消息处理耗时 182ms', 'hint': ''},
     ];
@@ -112,8 +179,15 @@ void main() {
     store = AppStore();
     await store.load();
     final p = ServerProfile(
-      id: 'demo', name: '我的服务器', host: '123.123.123.123', port: 22, user: 'root',
-      hostKey: 'SHA256:x', agentPort: 18180, deviceId: 'nl-demo00001', lastOnline: DateTime.now().millisecondsSinceEpoch,
+      id: 'demo',
+      name: '我的服务器',
+      host: '123.123.123.123',
+      port: 22,
+      user: 'root',
+      hostKey: 'SHA256:x',
+      agentPort: 18180,
+      deviceId: 'nl-demo00001',
+      lastOnline: DateTime.now().millisecondsSinceEpoch,
     );
     store.servers = [p];
     store.currentId = 'demo';
@@ -126,7 +200,10 @@ void main() {
     final (light, darkCs) = appSchemes(brandGraphite);
     ThemeData t(ColorScheme cs) {
       final base = buildTheme(cs, look: look);
-      return base.copyWith(textTheme: base.textTheme.apply(fontFamily: 'WQY'), primaryTextTheme: base.primaryTextTheme.apply(fontFamily: 'WQY'));
+      return base.copyWith(
+        textTheme: base.textTheme.apply(fontFamily: 'WQY'),
+        primaryTextTheme: base.primaryTextTheme.apply(fontFamily: 'WQY'),
+      );
     }
 
     return StoreScope(
@@ -138,14 +215,23 @@ void main() {
           theme: t(light),
           darkTheme: t(darkCs),
           themeMode: dark ? ThemeMode.dark : ThemeMode.light,
-          home: DefaultTextStyle.merge(style: const TextStyle(fontFamily: 'WQY'), child: child),
+          home: DefaultTextStyle.merge(
+            style: const TextStyle(fontFamily: 'WQY'),
+            child: child,
+          ),
         ),
       ),
     );
   }
 
-  Future<void> shot(WidgetTester tester, String name, Widget page,
-      {bool dark = false, ButtonLook look = ButtonLook.light, Future<void> Function()? after}) async {
+  Future<void> shot(
+    WidgetTester tester,
+    String name,
+    Widget page, {
+    bool dark = false,
+    ButtonLook look = ButtonLook.light,
+    Future<void> Function()? after,
+  }) async {
     tester.view.physicalSize = const Size(1170, 2532);
     tester.view.devicePixelRatio = 3;
     await tester.runAsync(() async {
@@ -161,7 +247,9 @@ void main() {
       }
       await tester.pump(const Duration(milliseconds: 300));
     });
-    await tester.pumpAndSettle(const Duration(milliseconds: 100), EnginePhase.sendSemanticsUpdate, const Duration(seconds: 3)).catchError((_) => 0);
+    await tester
+        .pumpAndSettle(const Duration(milliseconds: 100), EnginePhase.sendSemanticsUpdate, const Duration(seconds: 3))
+        .catchError((_) => 0);
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/$name.png'));
   }
 
@@ -174,9 +262,31 @@ void main() {
 
   testWidgets('01 欢迎页', (t) => shot(t, '01_welcome', const WelcomePage()), skip: skip != null);
 
-  testWidgets('02 环境报告（全新服务器）', (t) => shot(t, '02_report_fresh', DeployPage(target: const SshTarget(host: '123.123.123.123'), debugFlow: flowWith('report_fresh.json', FlowPhase.report))), skip: skip != null);
+  testWidgets(
+    '02 环境报告（全新服务器）',
+    (t) => shot(
+      t,
+      '02_report_fresh',
+      DeployPage(
+        target: const SshTarget(host: '123.123.123.123'),
+        debugFlow: flowWith('report_fresh.json', FlowPhase.report),
+      ),
+    ),
+    skip: skip != null,
+  );
 
-  testWidgets('03 环境报告（接管已有）', (t) => shot(t, '03_report_takeover', DeployPage(target: const SshTarget(host: '123.123.123.123'), debugFlow: flowWith('report_takeover.json', FlowPhase.report))), skip: skip != null);
+  testWidgets(
+    '03 环境报告（接管已有）',
+    (t) => shot(
+      t,
+      '03_report_takeover',
+      DeployPage(
+        target: const SshTarget(host: '123.123.123.123'),
+        debugFlow: flowWith('report_takeover.json', FlowPhase.report),
+      ),
+    ),
+    skip: skip != null,
+  );
 
   testWidgets('04 部署中', (t) {
     final f = flowWith('report_fresh.json', FlowPhase.deploying);
@@ -193,7 +303,14 @@ void main() {
       ..speed = 11800000
       ..message = '正在从 Docker Hub 拉取 soulter/astrbot:v4.29.3  412.6 MB / 896.3 MB';
     f.status = '正在从 Docker Hub 拉取 soulter/astrbot:v4.29.3';
-    return shot(t, '04_deploying', DeployPage(target: const SshTarget(host: '123.123.123.123'), debugFlow: f));
+    return shot(
+      t,
+      '04_deploying',
+      DeployPage(
+        target: const SshTarget(host: '123.123.123.123'),
+        debugFlow: f,
+      ),
+    );
   }, skip: skip != null);
 
   testWidgets('05 部署成功', (t) {
@@ -204,24 +321,59 @@ void main() {
     f.step('pair').message = '设备已授权';
     f.step('tunnel').message = '安全通道正常';
     f.result = store.servers.first;
-    return shot(t, '05_success', DeployPage(target: const SshTarget(host: '123.123.123.123'), debugFlow: f));
+    return shot(
+      t,
+      '05_success',
+      DeployPage(
+        target: const SshTarget(host: '123.123.123.123'),
+        debugFlow: f,
+      ),
+    );
   }, skip: skip != null);
 
-  testWidgets('06 首页', (t) => shot(t, '06_dashboard', DashboardPage(active: true, onOpenLogs: (_) {}, onGo: (_) {})), skip: skip != null);
+  testWidgets(
+    '06 首页',
+    (t) => shot(t, '06_dashboard', DashboardPage(active: true, onOpenLogs: (_) {}, onGo: (_) {})),
+    skip: skip != null,
+  );
 
-  testWidgets('07 首页深色', (t) => shot(t, '07_dashboard_dark', DashboardPage(active: true, onOpenLogs: (_) {}, onGo: (_) {}), ), skip: skip != null);
+  testWidgets(
+    '07 首页深色',
+    (t) => shot(t, '07_dashboard_dark', DashboardPage(active: true, onOpenLogs: (_) {}, onGo: (_) {})),
+    skip: skip != null,
+  );
 
   testWidgets('08 QQ 登录', (t) => shot(t, '08_qq', const QqPage(active: true)), skip: skip != null);
 
   testWidgets('09 插件', (t) => shot(t, '09_plugins', PluginsPage(active: true, onOpenLogs: (_) {})), skip: skip != null);
 
-  testWidgets('10 日志', (t) => shot(t, '10_logs', LogsPage(active: true, target: ValueNotifier(null))), skip: skip != null);
+  testWidgets(
+    '10 日志',
+    (t) => shot(t, '10_logs', LogsPage(active: true, target: ValueNotifier(null))),
+    skip: skip != null,
+  );
 
-  testWidgets('11 更多', (t) => shot(t, '11_more', const MorePage(), ), skip: skip != null);
+  testWidgets('11 更多', (t) => shot(t, '11_more', const MorePage()), skip: skip != null);
 
-  testWidgets('12 欢迎页（黑色渐变按钮）', (t) => shot(t, '12_welcome_darkbtn', const WelcomePage(), look: ButtonLook.dark), skip: skip != null);
+  testWidgets(
+    '12 欢迎页（黑色渐变按钮）',
+    (t) => shot(t, '12_welcome_darkbtn', const WelcomePage(), look: ButtonLook.dark),
+    skip: skip != null,
+  );
 
   testWidgets('13 主题设置', (t) => shot(t, '13_theme', const ThemePage()), skip: skip != null);
 
-  testWidgets('14 报告（黑色渐变按钮）', (t) => shot(t, '14_report_darkbtn', DeployPage(target: const SshTarget(host: '123.123.123.123'), debugFlow: flowWith('report_fresh.json', FlowPhase.report)), look: ButtonLook.dark), skip: skip != null);
+  testWidgets(
+    '14 报告（黑色渐变按钮）',
+    (t) => shot(
+      t,
+      '14_report_darkbtn',
+      DeployPage(
+        target: const SshTarget(host: '123.123.123.123'),
+        debugFlow: flowWith('report_fresh.json', FlowPhase.report),
+      ),
+      look: ButtonLook.dark,
+    ),
+    skip: skip != null,
+  );
 }

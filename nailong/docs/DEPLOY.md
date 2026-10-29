@@ -18,6 +18,9 @@ App 通过 SSH 执行 `installer/nailong_installer.py`（以 root/sudo 运行，
 | agent | 复制源码，临时容器内 `pip install --require-hashes`，Agent 以 host 网络只监听 `127.0.0.1:<自动端口>`，只读根文件系统、no-new-privileges |
 | verify | 容器运行、Agent 健康检查、确认奶龙管理的容器没有公网端口 |
 
+部署以独立后台任务运行（有 systemd 时用 `systemd-run --unit nailong-deploy`，否则 `setsid`），日志写入 `/opt/nailong/run/deploy.log`；
+App 用 `deploy-poll --offset N` 增量读取，SSH 断线后重连并从上次位置继续。安装器忽略 SIGHUP，只有明确“取消”（`cancel` → SIGTERM）才会停止。
+
 所有步骤幂等：重复执行会跳过已完成的部分，因此“继续部署”是安全的。状态保存在 `/opt/nailong/state.json`（0600）。
 
 目录：

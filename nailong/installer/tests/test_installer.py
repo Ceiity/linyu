@@ -159,3 +159,30 @@ def test_plan_fail2ban():
     # 旧报告没有该字段也不报错
     p = ni.make_plan(_report())
     assert any(s["id"] == "fail2ban" for s in p["steps"])
+
+
+def test_read_log_chunk(tmp_path):
+    f = tmp_path / "deploy.log"
+    assert ni.read_log_chunk(f, 0) == ("", 0)
+    f.write_bytes("第一行\n第二行\n半行".encode())
+    text, off = ni.read_log_chunk(f, 0)
+    assert text == "第一行\n第二行\n" and off == len("第一行\n第二行\n".encode())
+    # 半行不返回，写完整后下次取到
+    assert ni.read_log_chunk(f, off) == ("", off)
+    with open(f, "ab") as fh:
+        fh.write("完成\n".encode())
+    text2, off2 = ni.read_log_chunk(f, off)
+    assert text2 == "半行完成\n" and off2 == f.stat().st_size
+    # 日志被新一轮部署覆盖后从头读
+    f.write_bytes(b"new\n")
+    assert ni.read_log_chunk(f, 9999) == ("new\n", 4)
+    # 超长时分块，且每块都在行边界
+    f.write_bytes(b"x" * 10 + b"\n" + b"y" * 10 + b"\n")
+    t, o = ni.read_log_chunk(f, 0, max_bytes=15)
+    assert t == "x" * 10 + "\n"
+
+
+def test_sighup_is_ignored_not_cancel():
+    src = Path(ni.__file__).read_text()
+    assert "signal.signal(signal.SIGHUP, signal.SIG_IGN)" in src
+    assert "signal.SIGHUP, _on_term" not in src

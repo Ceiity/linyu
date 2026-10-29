@@ -67,7 +67,25 @@ class DeployFlow extends ChangeNotifier {
     if (logs.length > 3000) logs.removeRange(0, 500);
   }
 
-  void _update() => notifyListeners();
+  bool _disposed = false;
+  bool reconnecting = false;
+
+  void _update() {
+    if (!_disposed) notifyListeners();
+  }
+
+  /// 部署在服务器上独立运行；手机切后台/断网后 SSH 会断，这里用已核对过的指纹静默重连。
+  Future<SshSession> _reconnectSsh() async {
+    final t = target!;
+    final s = await SshSession.connect(
+      t,
+      knownFingerprint: ssh?.hostKeyFingerprint ?? store.knownHost(t.hostKeyId),
+      decide: (a, b, c) => false,
+      retries: 0,
+    );
+    ssh = s;
+    return s;
+  }
 
   void _fail(Object e, [String? stepId]) {
     error = e is NailongError ? e : NailongError('ERROR', e.toString());
@@ -116,7 +134,7 @@ class DeployFlow extends ChangeNotifier {
       step('detect').status = StepStatus.running;
       status = '正在检测服务器环境';
       _update();
-      installer = ServerInstaller(ssh!);
+      installer = ServerInstaller(ssh!, reconnect: _reconnectSsh);
       preflight = await installer!.preflight();
       if (!preflight!.hasPython) {
         if (!preflight!.hasApt) {
@@ -141,6 +159,11 @@ class DeployFlow extends ChangeNotifier {
       _applyPlan(Map<String, dynamic>.from(report!['plan'] as Map));
       phase = FlowPhase.report;
       _update();
+      if (report!['deploy']?['running'] == true) {
+        // 上次的部署还在服务器上运行（比如 App 被切走/回收了）：直接接上进度，不重新开始
+        status = '服务器上有一个正在进行的部署，正在接上进度…';
+        await deploy(attach: true);
+      }
     } catch (e) {
       _fail(e, step('connect').status == StepStatus.done ? 'detect' : 'connect');
     }
@@ -162,7 +185,7 @@ class DeployFlow extends ChangeNotifier {
   List<String> get blockers => ((plan['blockers'] ?? []) as List).map((e) => e.toString()).toList();
 
   /// 第 2 步：用户确认后执行部署（也用于“继续部署”）。
-  Future<void> deploy() async {
+  Future<void> deploy({bool attach = false}) async {
     if (installer == null || target == null) return;
     error = null;
     cancelRequested = false;
@@ -174,13 +197,17 @@ class DeployFlow extends ChangeNotifier {
     _update();
     Map<String, dynamic>? res;
     try {
-      await for (final ev in installer!.deploy({
+      await for (final ev in installer!.deploy(attach: attach, {
         'ssh_user': target!.user,
         'sources': store.sources.forInstaller(),
         'timezone': 'Asia/Shanghai',
         'fail2ban': installFail2ban,
       })) {
+        if (ev.type != 'reconnecting') reconnecting = false;
         switch (ev.type) {
+          case 'reconnecting':
+            reconnecting = true;
+            status = ev.data['message']?.toString() ?? '正在重连…';
           case 'step_start':
             step(ev.id)
               ..status = StepStatus.running
@@ -334,6 +361,8 @@ class DeployFlow extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    installer?.stopWatching();
     ssh?.close();
     super.dispose();
   }

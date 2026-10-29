@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
-import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import 'errors.dart';
@@ -37,10 +36,14 @@ String _rand() => List.generate(10, (_) => Random.secure().nextInt(36).toRadixSt
 /// 服务器端安装器的 App 侧封装。所有命令参数都由 App 生成并做格式校验，
 /// 不拼接任何用户输入到 shell 中（用户名、公钥另做白名单校验）。
 class ServerInstaller {
-  final SshSession ssh;
-  SSHSession? _running;
+  SshSession ssh;
 
-  ServerInstaller(this.ssh);
+  /// SSH 断开后（手机切后台、断网）用它重建连接。
+  final Future<SshSession> Function()? reconnect;
+
+  ServerInstaller(this.ssh, {this.reconnect});
+
+  bool _watching = false;
 
   Future<Preflight> preflight() async {
     final r = await ssh.run(
@@ -116,54 +119,134 @@ class ServerInstaller {
     return Map<String, dynamic>.from(_result(r.stdout)['report'] as Map);
   }
 
-  /// 执行部署，事件流逐条返回；最后一个事件 type=result。
-  Stream<InstallerEvent> deploy(Map<String, dynamic> config) {
-    final ctrl = StreamController<InstallerEvent>();
-    () async {
-      try {
-        final cfgPath = '/tmp/nailong-deploy-${_rand()}.json';
-        await ssh.upload(cfgPath, utf8.encode(jsonEncode(config)));
-        final code = await ssh.stream(
-          '$_installer deploy --config $cfgPath; R=\$?; rm -f $cfgPath; exit \$R',
-          onStart: (s) => _running = s,
-          onLine: (line) {
-            if (line.startsWith('@@EVENT ')) {
-              try {
-                final m = Map<String, dynamic>.from(jsonDecode(line.substring(8)) as Map);
-                ctrl.add(InstallerEvent(m['type']?.toString() ?? 'log', m));
-              } catch (_) {}
-            } else if (line.startsWith('@@RESULT ')) {
-              ctrl.add(InstallerEvent('result', Map<String, dynamic>.from(jsonDecode(line.substring(9)) as Map)));
-            } else if (line.trim().isNotEmpty) {
-              ctrl.add(InstallerEvent('log', {'line': line}));
-            }
-          },
-        );
-        if (code == -1 && !ctrl.isClosed) {
-          ctrl.add(
-            InstallerEvent('result', {
-              'ok': false,
-              'code': 'DISCONNECTED',
-              'message': '与服务器的连接中断，部署在服务器上可能仍在进行，可稍后继续部署',
-            }),
-          );
-        }
-      } catch (e) {
-        ctrl.add(InstallerEvent('result', {'ok': false, 'code': 'SSH_ERROR', 'message': e.toString()}));
-      } finally {
-        _running = null;
-        await ctrl.close();
+  InstallerEvent? _parseLine(String line) {
+    try {
+      if (line.startsWith('@@EVENT ')) {
+        final m = Map<String, dynamic>.from(jsonDecode(line.substring(8)) as Map);
+        return InstallerEvent(m['type']?.toString() ?? 'log', m);
       }
-    }();
-    return ctrl.stream;
+      if (line.startsWith('@@RESULT ')) {
+        return InstallerEvent('result', Map<String, dynamic>.from(jsonDecode(line.substring(9)) as Map));
+      }
+    } catch (_) {}
+    return null;
   }
 
-  /// 安全取消：通知安装器在当前原子步骤结束后停止。
+  /// 确保 SSH 可用；断开则按退避重连，最多约 15 分钟。
+  Future<bool> _ensureConnected({required void Function(int attempt) onAttempt}) async {
+    if (!ssh.isClosed) return true;
+    if (reconnect == null) return false;
+    for (var i = 0; i < 40; i++) {
+      onAttempt(i + 1);
+      try {
+        ssh = await reconnect!();
+        return true;
+      } on NailongError catch (e) {
+        if (e.code == 'AUTH_FAILED' || e.code.startsWith('HOSTKEY')) return false;
+      } catch (_) {}
+      await Future.delayed(Duration(seconds: [2, 3, 5, 8, 12, 20, 30][i < 7 ? i : 6]));
+    }
+    return false;
+  }
+
+  /// 在服务器上启动独立的后台部署，并持续读取进度。
+  /// 部署进程与 SSH 连接无关：手机切后台、断网、甚至 App 被回收，部署都会继续；
+  /// 重新连接后从上次位置接着读（attach=true 则从头回放日志，用于重新打开 App 后接上）。
+  /// 最后一个事件 type=result。
+  Stream<InstallerEvent> deploy(Map<String, dynamic> config, {bool attach = false}) async* {
+    _watching = true;
+    var offset = 0;
+    try {
+      if (!attach) {
+        final cfgPath = '/tmp/nailong-deploy-${_rand()}.json';
+        await ssh.upload(cfgPath, utf8.encode(jsonEncode(config)));
+        final r = await ssh.run('$_installer deploy-start --config $cfgPath; R=\$?; rm -f $cfgPath; exit \$R');
+        _result(r.stdout);
+      }
+      var failures = 0;
+      var emptyAfterStop = 0;
+      while (_watching) {
+        try {
+          if (ssh.isClosed) {
+            // 连接断了（切后台、断网）：部署还在服务器上跑，先告诉界面，再尝试重连
+            if (reconnect == null) throw NailongError('DISCONNECTED', '与服务器的连接已断开');
+            yield InstallerEvent('reconnecting', {'message': '与服务器的连接中断，部署仍在服务器上继续，正在自动重连…', 'failures': failures});
+            ssh = await reconnect!();
+          }
+          final r = await ssh.run('$_installer deploy-poll --offset $offset', timeout: const Duration(seconds: 25));
+          failures = 0;
+          bool running = true;
+          for (final line in r.stdout.split('\n')) {
+            if (line.startsWith('@@POLL ')) {
+              final m = Map<String, dynamic>.from(jsonDecode(line.substring(7)) as Map);
+              offset = (m['offset'] as num).toInt();
+              running = m['running'] == true;
+              continue;
+            }
+            final ev = _parseLine(line);
+            if (ev != null) {
+              yield ev;
+              if (ev.type == 'result') return;
+            } else if (line.trim().isNotEmpty) {
+              yield InstallerEvent('log', {'line': line});
+            }
+          }
+          if (!running) {
+            // 进程已结束但没读到结果：再读一轮排空日志，仍没有就判定异常退出
+            if (++emptyAfterStop >= 2) {
+              yield InstallerEvent('result', {
+                'ok': false,
+                'code': 'PROCESS_EXITED',
+                'message': '服务器上的部署进程意外退出，已完成的步骤会保留，可以继续部署',
+              });
+              return;
+            }
+          } else {
+            emptyAfterStop = 0;
+          }
+        } on NailongError catch (e) {
+          if (e.code == 'AUTH_FAILED' || e.code.startsWith('HOSTKEY')) {
+            yield InstallerEvent('result', {'ok': false, 'code': e.code, 'message': e.message, 'detail': e.detail});
+            return;
+          }
+          failures++;
+          try {
+            ssh.close();
+          } catch (_) {}
+        } catch (_) {
+          failures++;
+          try {
+            ssh.close();
+          } catch (_) {}
+        }
+        if (failures > 60) {
+          yield InstallerEvent('result', {
+            'ok': false,
+            'code': 'DISCONNECTED',
+            'message': '长时间连不上服务器。部署仍可能在服务器上继续，网络恢复后重新连接即可接上进度',
+          });
+          return;
+        }
+        await Future.delayed(
+          failures == 0 ? const Duration(milliseconds: 1200) : Duration(seconds: failures < 4 ? 2 : 5),
+        );
+      }
+    } on NailongError catch (e) {
+      yield InstallerEvent('result', {'ok': false, 'code': e.code, 'message': e.message, 'detail': e.detail});
+    } finally {
+      _watching = false;
+    }
+  }
+
+  void stopWatching() => _watching = false;
+
+  /// 安全取消：通知服务器上的部署在当前原子步骤结束后停止。
   Future<void> cancel() async {
+    await _ensureConnected(onAttempt: (_) {});
     await ssh.run('$_installer cancel', timeout: const Duration(seconds: 30));
   }
 
-  bool get running => _running != null;
+  bool get running => _watching;
 
   static final _userRe = RegExp(r'^[a-z_][a-z0-9_\-.]{0,31}$');
   static final _pubRe = RegExp(r'^ssh-ed25519 [A-Za-z0-9+/]{68}={0,2}$');

@@ -47,6 +47,10 @@ VERSION = "1.0.0"
 BASE = Path(os.environ.get("NAILONG_BASE", "/opt/nailong"))
 STATE_FILE = BASE / "state.json"
 PID_FILE = BASE / "run" / "installer.pid"
+RUN_DIR = BASE / "run"
+DEPLOY_LOG = RUN_DIR / "deploy.log"
+DEPLOY_CFG = RUN_DIR / "deploy-config.json"
+POLL_MAX_BYTES = 256 * 1024
 CACHE_DIR = BASE / "cache"
 DOCKER_SOCK = os.environ.get("NAILONG_DOCKER_SOCK", "/var/run/docker.sock")
 BUNDLE_DIR = Path(__file__).resolve().parent
@@ -788,6 +792,70 @@ def fail2ban_state() -> dict:
     return st
 
 
+def deploy_running() -> bool:
+    """部署进程是否还活着（部署在服务器上独立运行，与手机的 SSH 连接无关）。"""
+    try:
+        pid = int(PID_FILE.read_text().strip())
+        os.kill(pid, 0)
+        return True
+    except (FileNotFoundError, ValueError, ProcessLookupError):
+        return False
+    except PermissionError:
+        return True
+
+
+def read_log_chunk(path: Path, offset: int, max_bytes: int = POLL_MAX_BYTES) -> tuple[str, int]:
+    """从字节偏移读取新增日志，只返回完整的行；返回 (文本, 新偏移)。"""
+    try:
+        size = path.stat().st_size
+    except FileNotFoundError:
+        return "", 0
+    if offset > size:  # 日志被新一轮部署覆盖
+        offset = 0
+    with open(path, "rb") as f:
+        f.seek(offset)
+        data = f.read(max_bytes)
+    cut = data.rfind(b"\n")
+    if cut < 0:
+        return "", offset
+    data = data[:cut + 1]
+    return data.decode("utf-8", errors="replace"), offset + len(data)
+
+
+def start_deploy_detached(cfg_path: Path) -> dict:
+    """在服务器上以独立后台任务启动部署：手机切后台、断网、被系统回收都不会中断它。"""
+    if deploy_running():
+        return {"ok": True, "started": False, "running": True, "message": "部署已在服务器上运行，已接上进度"}
+    cfg = read_json(cfg_path, None)
+    if not isinstance(cfg, dict):
+        raise InstallError("BAD_INPUT", "部署配置无效")
+    RUN_DIR.mkdir(parents=True, exist_ok=True)
+    write_json(DEPLOY_CFG, cfg, 0o600)
+    if DEPLOY_LOG.exists():
+        os.replace(DEPLOY_LOG, DEPLOY_LOG.with_suffix(".log.1"))
+    DEPLOY_LOG.touch(mode=0o600)
+    script = str(Path(__file__).resolve())
+    cmd = [sys.executable, script, "deploy-run", "--config", str(DEPLOY_CFG)]
+    mode = "process"
+    if os_info()["systemd"] and which("systemd-run"):
+        unit = "nailong-deploy"
+        run(["systemctl", "reset-failed", unit], timeout=15, check=False)
+        code, out = run(["systemd-run", "--unit", unit, "--collect", "--quiet",
+                         "--property=StandardOutput=append:%s" % DEPLOY_LOG,
+                         "--property=StandardError=append:%s" % DEPLOY_LOG] + cmd, timeout=30, check=False)
+        if code == 0:
+            mode = "systemd"
+    if mode == "process":
+        log_f = open(DEPLOY_LOG, "ab")
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log_f, stderr=log_f, start_new_session=True,
+                         close_fds=True)
+    for _ in range(40):  # 等部署进程写好 pid
+        if deploy_running():
+            break
+        time.sleep(0.25)
+    return {"ok": True, "started": True, "running": deploy_running(), "mode": mode}
+
+
 def container_logs_fail2ban() -> str:
     _, out = run(["journalctl", "-u", "fail2ban", "-n", "30", "--no-pager"], timeout=15, check=False)
     return out
@@ -838,6 +906,7 @@ def detect() -> dict:
     report["network"] = network_status()
     report["sshd"] = sshd_forwarding()
     report["fail2ban"] = fail2ban_state()
+    report["deploy"] = {"running": deploy_running()}
     report["docker"] = {"installed": bool(report["tools"].get("docker")), "running": docker_available(),
                         "compose": bool(report["tools"].get("compose"))}
     report["containers"] = []
@@ -1783,6 +1852,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("detect")
     d = sub.add_parser("deploy")
     d.add_argument("--config", required=True)
+    ds = sub.add_parser("deploy-start")
+    ds.add_argument("--config", required=True)
+    dr = sub.add_parser("deploy-run")
+    dr.add_argument("--config", required=True)
+    dp = sub.add_parser("deploy-poll")
+    dp.add_argument("--offset", type=int, default=0)
     sub.add_parser("pair-code")
     a = sub.add_parser("authorize-key")
     a.add_argument("--user", required=True)
@@ -1828,7 +1903,15 @@ def main(argv: list[str] | None = None) -> int:
                 regs.append(OFFICIAL_REGISTRY)
             arch = SUPPORTED_ARCH.get(platform.machine(), "amd64")
             return result({"ok": True, "registries": rank_registries(regs, "astrbot", arch, not args.fresh)})
-        if args.cmd == "deploy":
+        if args.cmd == "deploy-start":
+            return result(start_deploy_detached(Path(args.config)))
+        if args.cmd == "deploy-poll":
+            text, offset = read_log_chunk(DEPLOY_LOG, max(0, args.offset))
+            sys.stdout.write(text)
+            sys.stdout.write("@@POLL " + json.dumps({"offset": offset, "running": deploy_running()}) + "\n")
+            sys.stdout.flush()
+            return 0
+        if args.cmd in ("deploy", "deploy-run"):
             cfg = read_json(Path(args.config), None)
             if not isinstance(cfg, dict):
                 raise InstallError("BAD_INPUT", "部署配置无效")
@@ -1842,7 +1925,8 @@ def main(argv: list[str] | None = None) -> int:
                     pass
             PID_FILE.write_text(str(os.getpid()))
             signal.signal(signal.SIGTERM, _on_term)
-            signal.signal(signal.SIGHUP, _on_term)
+            # SSH 断开（手机切后台、断网）会发 SIGHUP：必须忽略，部署要继续跑；只有明确“取消”才停止
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
             try:
                 return result(Deployer(cfg).run())
             finally:
