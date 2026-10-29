@@ -101,11 +101,18 @@ ThemeData buildTheme(ColorScheme scheme, {bool pureBlack = false, ButtonLook loo
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
+    // 填充式输入框：标签浮在框内（不要用 OutlineInputBorder，否则浮动标签会卡在上边缘被底色切掉）
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.6),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      border: _fieldBorder(BorderSide.none),
+      enabledBorder: _fieldBorder(BorderSide.none),
+      disabledBorder: _fieldBorder(BorderSide.none),
+      focusedBorder: _fieldBorder(BorderSide(color: cs.primary, width: 1.6)),
+      errorBorder: _fieldBorder(BorderSide(color: cs.error, width: 1.2)),
+      focusedErrorBorder: _fieldBorder(BorderSide(color: cs.error, width: 1.6)),
+      floatingLabelBehavior: FloatingLabelBehavior.auto,
+      contentPadding: const EdgeInsets.fromLTRB(16, 18, 16, 12),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
@@ -189,3 +196,6 @@ const brandGraphite = 0xFF2F3237;
   }
   return (light, dark);
 }
+
+InputBorder _fieldBorder(BorderSide side) =>
+    UnderlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: side);
