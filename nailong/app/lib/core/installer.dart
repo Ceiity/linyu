@@ -174,6 +174,10 @@ class ServerInstaller {
             ssh = await reconnect!();
           }
           final r = await ssh.run('$_installer deploy-poll --offset $offset', timeout: const Duration(seconds: 25));
+          if (!r.stdout.contains('@@POLL ')) {
+            // 命令中途被断开或异常退出，没有拿到进度：算一次失败，关掉连接让下一轮重连
+            throw NailongError('DISCONNECTED', '读取进度失败（退出码 ${r.exitCode}）', r.stderr);
+          }
           failures = 0;
           bool running = true;
           for (final line in r.stdout.split('\n')) {

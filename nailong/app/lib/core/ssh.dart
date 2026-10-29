@@ -181,11 +181,22 @@ class SshSession {
     }
   }
 
+  /// 给可能卡死的操作加超时。切后台后连接常变成“半死”（对端已不在、本地还以为连着），
+  /// 没有超时就会永远等下去。超时后关闭连接，让上层走重连。
+  Future<T> _guard<T>(Future<T> f, Duration t) async {
+    try {
+      return await f.timeout(t);
+    } on TimeoutException {
+      client.close();
+      throw NailongError('TIMEOUT', '与服务器的连接已失去响应');
+    }
+  }
+
   Future<CommandResult> run(String cmd, {bool sudo = true, Duration timeout = const Duration(minutes: 2)}) async {
     if (sudo && !canElevate) {
       throw NailongError('NO_ROOT', '需要 root 权限：请使用 root 登录，或使用有 sudo 权限的用户并填写密码');
     }
-    final session = await client.execute(_wrap(cmd, sudo));
+    final session = await _guard(client.execute(_wrap(cmd, sudo)), const Duration(seconds: 20));
     _feedSudo(session, sudo);
     final out = BytesBuilder();
     final err = BytesBuilder();
@@ -211,7 +222,7 @@ class SshSession {
     bool sudo = true,
     void Function(SSHSession session)? onStart,
   }) async {
-    final session = await client.execute(_wrap(cmd, sudo));
+    final session = await _guard(client.execute(_wrap(cmd, sudo)), const Duration(seconds: 20));
     onStart?.call(session);
     _feedSudo(session, sudo);
     final lines = session.stdout.cast<List<int>>().transform(utf8.decoder).transform(const LineSplitter());
@@ -223,14 +234,16 @@ class SshSession {
   }
 
   Future<void> upload(String remotePath, Uint8List data) async {
-    final sftp = await client.sftp();
+    final sftp = await _guard(client.sftp(), const Duration(seconds: 20));
     try {
-      final f = await sftp.open(
-        remotePath,
-        mode: SftpFileOpenMode.create | SftpFileOpenMode.truncate | SftpFileOpenMode.write,
-      );
-      await f.writeBytes(data);
-      await f.close();
+      await _guard(() async {
+        final f = await sftp.open(
+          remotePath,
+          mode: SftpFileOpenMode.create | SftpFileOpenMode.truncate | SftpFileOpenMode.write,
+        );
+        await f.writeBytes(data);
+        await f.close();
+      }(), const Duration(seconds: 90));
     } finally {
       sftp.close();
     }

@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'agent_api.dart';
 import 'errors.dart';
 import 'installer.dart';
+import 'keepalive.dart';
 import 'keys.dart';
 import 'ssh.dart';
 import 'store.dart';
@@ -187,6 +188,9 @@ class DeployFlow extends ChangeNotifier {
   /// 第 2 步：用户确认后执行部署（也用于“继续部署”）。
   Future<void> deploy({bool attach = false}) async {
     if (installer == null || target == null) return;
+    // 记下连接信息（加密暂存）并启动前台服务：App 被系统回收后能自动接上进度
+    await store.setPending(target!, savePassword: savePassword);
+    await DeployKeepAlive.start('部署在服务器上运行，可放心切到后台');
     error = null;
     cancelRequested = false;
     phase = FlowPhase.deploying;
@@ -208,6 +212,8 @@ class DeployFlow extends ChangeNotifier {
           case 'reconnecting':
             reconnecting = true;
             status = ev.data['message']?.toString() ?? '正在重连…';
+            _log('[${DateTime.now().toString().substring(11, 19)}] ${ev.data['message']}');
+            DeployKeepAlive.update('连接中断，正在自动重连…');
           case 'step_start':
             step(ev.id)
               ..status = StepStatus.running
@@ -250,10 +256,31 @@ class DeployFlow extends ChangeNotifier {
         );
       }
       await pairAndSave(agentPort: (res['agent_port'] as num).toInt());
+      await store.finishPending();
+      await DeployKeepAlive.stop();
     } catch (e) {
+      await DeployKeepAlive.stop();
       final running = steps.where((s) => s.status == StepStatus.running).firstOrNull;
       _fail(e, running?.id);
     }
+  }
+
+  /// 一键复制的诊断信息：错误码、各步骤状态、最近日志，方便定位“莫名其妙中断”。
+  String diagnostics() {
+    final b = StringBuffer()
+      ..writeln('奶龙诊断信息  ${DateTime.now()}')
+      ..writeln('阶段：$phase  重连中：$reconnecting')
+      ..writeln('目标：${target?.user}@${target?.host}:${target?.port}')
+      ..writeln('错误：${error?.code} ${error?.message}')
+      ..writeln('详情：${error?.detail}')
+      ..writeln('--- 步骤');
+    for (final s in steps) {
+      b.writeln('${s.id}: ${s.status.name} ${s.message}');
+    }
+    b.writeln('--- 最近日志');
+    final tail = logs.length > 150 ? logs.sublist(logs.length - 150) : logs;
+    b.writeAll(tail, '\n');
+    return b.toString();
   }
 
   Future<void> cancel() async {
@@ -362,6 +389,7 @@ class DeployFlow extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    DeployKeepAlive.stop();
     installer?.stopWatching();
     ssh?.close();
     super.dispose();

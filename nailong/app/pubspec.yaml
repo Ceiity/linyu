@@ -44,6 +44,7 @@ dependencies:
   file_picker: ^13.3.0
   crypto: ^3.0.8
   pinenacl: ^0.6.0
+  flutter_foreground_task: ^11.0.3
 
 dev_dependencies:
   flutter_test:

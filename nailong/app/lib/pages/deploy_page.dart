@@ -17,15 +17,25 @@ class DeployPage extends StatefulWidget {
   /// 仅用于截图/测试：注入已有流程状态，不发起连接。
   final DeployFlow? debugFlow;
 
-  const DeployPage({super.key, required this.target, this.savePassword = false, this.repairFor, this.debugFlow});
+  /// App 被系统回收后重新打开：作为首页自动接上服务器上正在进行的部署。
+  final bool resume;
+
+  const DeployPage({
+    super.key,
+    required this.target,
+    this.savePassword = false,
+    this.repairFor,
+    this.debugFlow,
+    this.resume = false,
+  });
 
   @override
   State<DeployPage> createState() => _DeployPageState();
 }
 
 class _DeployPageState extends State<DeployPage> {
-  late final DeployFlow flow =
-      widget.debugFlow ?? (DeployFlow(StoreScope.read(context))..savePassword = widget.savePassword);
+  late final DeployFlow flow = widget.debugFlow ?? (DeployFlow(store)..savePassword = widget.savePassword);
+  late final AppStore store = StoreScope.read(context);
   bool showLogs = false;
 
   @override
@@ -48,8 +58,23 @@ class _DeployPageState extends State<DeployPage> {
 
   @override
   void dispose() {
+    // 不在部署/配对中就把暂存的连接信息删掉；部署中离开则保留，下次打开 App 自动接上
+    final p = flow.phase;
+    if (p != FlowPhase.deploying && p != FlowPhase.pairing) store.finishPending();
     flow.dispose();
     super.dispose();
+  }
+
+  /// 结束本页：清掉暂存信息；恢复模式下本页是根页面，清除后由入口切到首页/欢迎页。
+  Future<void> _leave({bool goHome = false}) async {
+    final nav = Navigator.of(context);
+    await store.clearPending();
+    if (!mounted) return;
+    if (goHome) {
+      nav.popUntil((r) => r.isFirst);
+    } else if (nav.canPop()) {
+      nav.pop();
+    }
   }
 
   Future<bool> _confirmLeave() async {
@@ -70,7 +95,7 @@ class _DeployPageState extends State<DeployPage> {
       canPop: phase != FlowPhase.deploying && phase != FlowPhase.pairing,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        if (await _confirmLeave() && context.mounted) Navigator.of(context).pop();
+        if (await _confirmLeave() && context.mounted) _leave();
       },
       child: Scaffold(
         body: CustomScrollView(
@@ -142,7 +167,7 @@ class _DeployPageState extends State<DeployPage> {
           Expanded(
             child: OutlinedButton(
               style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: _leave,
               child: const Text('返回'),
             ),
           ),
@@ -161,7 +186,7 @@ class _DeployPageState extends State<DeployPage> {
           Expanded(
             child: FilledButton.icon(
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-              onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+              onPressed: () => _leave(goHome: true),
               icon: const Icon(Icons.dashboard_outlined),
               label: const Text('进入奶龙管理首页'),
             ),
@@ -252,6 +277,18 @@ class _DeployPageState extends State<DeployPage> {
                     ),
                   ),
                 ],
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: cs.onErrorContainer,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  onPressed: () => copyText(context, flow.diagnostics(), label: '诊断信息'),
+                  icon: const Icon(Icons.copy_all_outlined, size: 18),
+                  label: const Text('复制诊断信息'),
+                ),
               ),
               if (installerHints[e.code] != null && installerHints[e.code] != e.message) ...[
                 const SizedBox(height: 8),
@@ -358,6 +395,14 @@ class _DeployPageState extends State<DeployPage> {
       for (final b in flow.blockers) _note(Icons.block, b, cs.error),
       for (final w in (plan['warnings'] as List? ?? [])) _note(Icons.warning_amber, w.toString(), cs.warning),
       const SectionTitle('部署计划'),
+      Padding(
+        padding: const EdgeInsets.only(left: 4, right: 4, bottom: 10),
+        child: Text(
+          '部署在服务器上独立运行，切到后台也不会中断。开始后连接信息会用 Android Keystore 加密暂存，'
+          '用于 App 被系统回收后自动接上进度，部署结束立即删除。',
+          style: TextStyle(fontSize: 12.5, height: 1.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
+      ),
       Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: InfoCard(

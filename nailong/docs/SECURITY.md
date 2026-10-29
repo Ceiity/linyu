@@ -4,6 +4,7 @@
 | --- | --- |
 | SSH 主机身份验证 | 首次连接显示 SHA256 指纹由用户确认；之后严格比对，不一致直接拒绝并提示中间人风险。没有“跳过校验”选项 |
 | 凭据 | SSH 密码只在内存中用于部署，经 stdin 传给 sudo，不出现在命令行和日志；用户勾选后才用 Android Keystore 保存 |
+| 部署期间的暂存 | 为了 App 被系统回收后能自动接上进度，部署开始时把连接信息（含 SSH 密码/私钥）用 Android Keystore 加密暂存；部署结束（成功、失败、放弃）立即删除，超过 12 小时自动作废；SharedPreferences 里不含任何密码 |
 | 长期访问 | 每台设备独立 Ed25519 密钥，服务器 authorized_keys 为 `restrict,port-forwarding,permitopen="127.0.0.1:<Agent端口>",command="echo nailong-tunnel-only"`：不能执行命令、不能开 PTY、只能转发到 Agent |
 | 传输加密 | App ↔ 服务器全部走 SSH（隧道内 HTTP / WebSocket）。Android 仅允许对 `127.0.0.1`（本地隧道入口）使用明文 |
 | 防暴力破解 / 撞库 | 部署时默认安装 Fail2Ban 保护 SSH：10 分钟内失败 5 次封禁该 IP 1 小时；可在部署前关闭；已有的 Fail2Ban 配置不会被改动；撤销：删除 `/etc/fail2ban/jail.d/nailong-sshd.local` 后 `fail2ban-client reload` |

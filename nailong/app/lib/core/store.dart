@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ui/theme.dart';
+import 'ssh.dart';
 
 /// 服务器档案（不含任何密钥，存 SharedPreferences）。
 class ServerProfile {
@@ -95,6 +96,16 @@ String newId([int n = 16]) {
   return List.generate(n, (_) => chars[r.nextInt(chars.length)]).join();
 }
 
+/// 进行中的部署：用于 App 被系统回收后重新打开时自动接上进度。
+/// 连接信息（含 SSH 密码/私钥）只在部署期间用 Android Keystore 加密暂存，部署结束立即删除，超过 12 小时自动作废。
+class PendingDeploy {
+  final SshTarget target;
+  final bool savePassword;
+  final int startedAt;
+
+  PendingDeploy(this.target, this.savePassword, this.startedAt);
+}
+
 /// 全局状态：服务器列表、当前服务器、主题、下载源。
 /// 私钥、访问令牌、（经用户同意保存的）SSH 密码只存 Android Keystore 保护的安全存储。
 class AppStore extends ChangeNotifier {
@@ -109,6 +120,7 @@ class AppStore extends ChangeNotifier {
   ButtonLook buttonLook = ButtonLook.light;
   SourceSettings sources = SourceSettings();
   bool onboarded = false;
+  PendingDeploy? pending;
 
   ServerProfile? get current => servers.where((s) => s.id == currentId).firstOrNull;
 
@@ -132,8 +144,68 @@ class AppStore extends ChangeNotifier {
         Map<String, dynamic>.from(jsonDecode(_prefs.getString('sources') ?? '{}') as Map),
       );
     } catch (_) {}
+    await _loadPending();
     currentId = _prefs.getString('currentServer');
     if (current == null && servers.isNotEmpty) currentId = servers.first.id;
+  }
+
+  static const _pendingTtl = Duration(hours: 12);
+
+  Future<void> _loadPending() async {
+    try {
+      final raw = _prefs.getString('pendingDeploy');
+      if (raw == null) return;
+      final j = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final at = j['at'] as int;
+      if (DateTime.now().millisecondsSinceEpoch - at > _pendingTtl.inMilliseconds) {
+        await finishPending();
+        return;
+      }
+      pending = PendingDeploy(
+        SshTarget(
+          host: j['host'] as String,
+          port: j['port'] as int,
+          user: j['user'] as String,
+          password: await secure.read(key: 'pend:pw'),
+          privateKeyPem: await secure.read(key: 'pend:key'),
+          passphrase: await secure.read(key: 'pend:pass'),
+        ),
+        j['savePassword'] == true,
+        at,
+      );
+    } catch (_) {
+      pending = null;
+    }
+  }
+
+  /// 部署开始时调用（静默写入，不触发界面重建）。
+  Future<void> setPending(SshTarget t, {required bool savePassword}) async {
+    final at = DateTime.now().millisecondsSinceEpoch;
+    await _prefs.setString(
+      'pendingDeploy',
+      jsonEncode({'host': t.host, 'port': t.port, 'user': t.user, 'savePassword': savePassword, 'at': at}),
+    );
+    await secure.write(key: 'pend:pw', value: t.password ?? '');
+    await secure.write(key: 'pend:key', value: t.privateKeyPem ?? '');
+    await secure.write(key: 'pend:pass', value: t.passphrase ?? '');
+    pending = PendingDeploy(t, savePassword, at);
+  }
+
+  /// 删除落盘的连接信息（部署结束/放弃时调用）；内存里的 [pending] 保持不变，避免界面突然切换。
+  Future<void> finishPending() async {
+    await _prefs.remove('pendingDeploy');
+    for (final k in ['pend:pw', 'pend:key', 'pend:pass']) {
+      await secure.delete(key: k);
+    }
+  }
+
+  /// 彻底清除并刷新界面（用户离开部署页 / 点了“进入首页”）。
+  Future<void> clearPending() async {
+    await finishPending();
+    if (pending != null) {
+      pending = null;
+      notifyListeners();
+    }
   }
 
   Future<void> _saveServers() async {
