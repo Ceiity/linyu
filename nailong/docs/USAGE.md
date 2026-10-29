@@ -60,4 +60,5 @@
 | 需要 root 权限 | 用 root 登录，或用 sudo 用户并填写密码 |
 | Docker 镜像下载失败，正在尝试备用下载源 | 在「下载加速」添加可信镜像加速器后点“继续部署” |
 | SSH 服务禁止了端口转发 | 在 `/etc/ssh/sshd_config` 设置 `AllowTcpForwarding yes`（或 `local`）后重启 sshd |
+| 连不上服务器（刚输错过几次密码） | 被 Fail2Ban 临时封禁了 IP（1 小时自动解封）。在服务器控制台执行 `fail2ban-client status sshd` 查看，`fail2ban-client unban <你的IP>` 立即解封 |
 | 授权已失效，请重新配对 | 令牌被撤销或密钥被移除，点“重新配对”输入 SSH 密码 |

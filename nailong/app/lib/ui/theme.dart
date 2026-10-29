@@ -48,7 +48,13 @@ ThemeData buildTheme(ColorScheme scheme, {bool pureBlack = false, ButtonLook loo
           border: Border.all(color: off ? Colors.transparent : edge),
           boxShadow: off || dark
               ? null
-              : [BoxShadow(color: Colors.black.withValues(alpha: useDarkLook ? 0.22 : 0.08), blurRadius: 10, offset: const Offset(0, 3))],
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: useDarkLook ? 0.22 : 0.08),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
         ),
         child: child,
       );
@@ -60,7 +66,10 @@ ThemeData buildTheme(ColorScheme scheme, {bool pureBlack = false, ButtonLook loo
       backgroundColor: useDarkLook ? const Color(0xFF2A2C31) : (dark ? const Color(0xFFE8EAED) : Colors.white),
       foregroundColor: useDarkLook ? Colors.white : const Color(0xFF1C1E21),
       elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: BorderSide(color: useDarkLook ? Colors.transparent : const Color(0xFFCDD1D7))),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: useDarkLook ? Colors.transparent : const Color(0xFFCDD1D7)),
+      ),
     ),
     scaffoldBackgroundColor: cs.surface,
     appBarTheme: AppBarTheme(

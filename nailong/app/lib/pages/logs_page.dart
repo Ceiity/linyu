@@ -114,10 +114,10 @@ class _LogsPageState extends State<LogsPage> {
           onDone: () {
             sub = null;
             if (mounted && widget.active) {
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted) _sync();
-          });
-        }
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) _sync();
+              });
+            }
           },
         );
     setState(() {});
@@ -349,8 +349,8 @@ class _LogLine extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-          width: 46,
-          alignment: Alignment.center,
+            width: 46,
+            alignment: Alignment.center,
             margin: const EdgeInsets.only(top: 2),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
             decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),

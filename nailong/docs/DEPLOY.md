@@ -9,6 +9,7 @@ App 通过 SSH 执行 `installer/nailong_installer.py`（以 root/sudo 运行，
 | 上传 | 安装包 `bundle.tar.gz` 经 SFTP 上传到 `/tmp`，`sha256sum -c` 校验与 App 内记录一致后解压到 `/opt/nailong/installer` |
 | detect | 系统/版本/架构、root、systemd；Docker、Compose、Python、Git、curl、wget、tar、unzip、apt；CPU/内存/磁盘；DNS 与 HTTPS 可达性；UFW/firewalld；sshd 是否允许转发；容器、网络、数据卷、监听端口；已有 AstrBot / NapCat / Agent |
 | deps | 只安装缺失的 curl、tar、gnupg、ca-certificates |
+| fail2ban | 防 SSH 暴力破解：从系统官方源安装 `fail2ban`，写入 `/etc/fail2ban/jail.d/nailong-sshd.local`（实际 SSH 端口、10 分钟内失败 5 次封禁 1 小时、systemd 日志后端）。**已有 Fail2Ban 且已保护 SSH 时只保留不改**；用户在报告页关闭开关则跳过；失败只给警告，不中断部署 |
 | docker | 删除冲突的发行版旧包 → 下载 Docker 官方 GPG 密钥并**校验指纹 `9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`** → 配置 APT 源 → 安装 docker-ce、containerd.io、buildx、compose 插件 → `systemctl enable --now docker` |
 | images | 对每个加速器与官方源测速（DNS、TLS、清单摘要、架构），按 `仓库@sha256:摘要` 拉取，失败退避重试并切换来源，最后打成固定标签 |
 | astrbot | `/opt/nailong/astrbot/data` 持久化，WebUI 只绑定 `127.0.0.1:<自动端口>`，网络 `nailong_net` |

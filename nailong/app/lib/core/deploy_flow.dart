@@ -9,7 +9,7 @@ import 'keys.dart';
 import 'ssh.dart';
 import 'store.dart';
 
-enum StepStatus { pending, running, done, skipped, kept, failed }
+enum StepStatus { pending, running, done, skipped, kept, warning, failed }
 
 class DeployStep {
   final String id;
@@ -40,6 +40,7 @@ class DeployFlow extends ChangeNotifier {
   Map<String, dynamic>? report;
   ServerProfile? result;
   bool savePassword = false;
+  bool installFail2ban = true;
   bool cancelRequested = false;
   final logs = <String>[];
 
@@ -47,6 +48,7 @@ class DeployFlow extends ChangeNotifier {
     DeployStep('connect', '连接服务器'),
     DeployStep('detect', '环境检测'),
     DeployStep('deps', '安装基础依赖'),
+    DeployStep('fail2ban', '配置 Fail2Ban 防暴力破解'),
     DeployStep('docker', '安装 Docker'),
     DeployStep('images', '下载 AstrBot / NapCat 镜像'),
     DeployStep('astrbot', '部署 AstrBot'),
@@ -176,6 +178,7 @@ class DeployFlow extends ChangeNotifier {
         'ssh_user': target!.user,
         'sources': store.sources.forInstaller(),
         'timezone': 'Asia/Shanghai',
+        'fail2ban': installFail2ban,
       })) {
         switch (ev.type) {
           case 'step_start':
@@ -195,6 +198,7 @@ class DeployFlow extends ChangeNotifier {
             s.status = switch (ev.data['status']) {
               'skipped' => StepStatus.skipped,
               'kept' => StepStatus.kept,
+              'warning' => StepStatus.warning,
               _ => StepStatus.done,
             };
             s.message = ev.data['message']?.toString() ?? '';

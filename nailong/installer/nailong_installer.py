@@ -737,6 +737,62 @@ def network_status() -> dict:
     return checks
 
 
+F2B_JAIL = Path("/etc/fail2ban/jail.d/nailong-sshd.local")
+F2B_MAXRETRY = 5
+F2B_FINDTIME = "10m"
+F2B_BANTIME = "1h"
+
+
+def sshd_ports() -> list[int]:
+    """sshd 实际监听的端口（可能不是 22）。"""
+    path = which("sshd") or "/usr/sbin/sshd"
+    code, out = run([path, "-T"], timeout=10, check=False)
+    ports = set()
+    if code == 0:
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[0].lower() == "port" and parts[1].isdigit():
+                ports.add(int(parts[1]))
+    return sorted(ports) or [22]
+
+
+def fail2ban_jail_text(ports: list[int], systemd: bool) -> str:
+    """奶龙的 sshd jail 覆盖文件。删除该文件即可恢复 Fail2Ban 默认行为。"""
+    lines = [
+        "# 由奶龙生成：SSH 暴力破解防护。删除本文件后执行 fail2ban-client reload 即可撤销。",
+        "[sshd]",
+        "enabled = true",
+        "port = %s" % ",".join(str(p) for p in ports),
+        "maxretry = %d" % F2B_MAXRETRY,
+        "findtime = %s" % F2B_FINDTIME,
+        "bantime = %s" % F2B_BANTIME,
+    ]
+    if systemd:
+        # Ubuntu 的服务名是 ssh.service，新版 OpenSSH 的认证进程叫 sshd-session，所以按进程名匹配
+        lines += ["backend = systemd", "journalmatch = _COMM=sshd + _COMM=sshd-session"]
+    return "\n".join(lines) + "\n"
+
+
+def fail2ban_state() -> dict:
+    st = {"installed": bool(which("fail2ban-client")), "active": False, "sshd_jail": False,
+          "managed": F2B_JAIL.exists(), "banned": 0}
+    if not st["installed"]:
+        return st
+    code, _ = run(["fail2ban-client", "ping"], timeout=10, check=False)
+    st["active"] = code == 0
+    if st["active"]:
+        code, out = run(["fail2ban-client", "status", "sshd"], timeout=10, check=False)
+        st["sshd_jail"] = code == 0
+        m = re.search(r"Currently banned:\s*(\d+)", out)
+        st["banned"] = int(m.group(1)) if m else 0
+    return st
+
+
+def container_logs_fail2ban() -> str:
+    _, out = run(["journalctl", "-u", "fail2ban", "-n", "30", "--no-pager"], timeout=15, check=False)
+    return out
+
+
 def sshd_forwarding() -> dict:
     """App 后续通过 SSH 隧道访问 Agent，需要 sshd 允许本地转发。"""
     if not which("sshd"):
@@ -781,6 +837,7 @@ def detect() -> dict:
     report["firewall"] = firewall_status()
     report["network"] = network_status()
     report["sshd"] = sshd_forwarding()
+    report["fail2ban"] = fail2ban_state()
     report["docker"] = {"installed": bool(report["tools"].get("docker")), "running": docker_available(),
                         "compose": bool(report["tools"].get("compose"))}
     report["containers"] = []
@@ -836,6 +893,13 @@ def make_plan(report: dict) -> dict:
         missing_tools.append("gnupg")
     step("deps", "安装基础依赖", "install" if missing_tools else "skip",
          ("将安装：" + "、".join(missing_tools)) if missing_tools else "依赖已齐全")
+    f2b = report.get("fail2ban") or {}
+    if f2b.get("active") and f2b.get("sshd_jail") and not f2b.get("managed"):
+        step("fail2ban", "Fail2Ban（SSH 防暴力破解）", "keep", "检测到 Fail2Ban 已保护 SSH，保留原有配置")
+    elif f2b.get("installed"):
+        step("fail2ban", "Fail2Ban（SSH 防暴力破解）", "install", "已安装，补充 SSH 防护规则（连续失败 %d 次封禁 %s）" % (F2B_MAXRETRY, "1 小时"))
+    else:
+        step("fail2ban", "安装 Fail2Ban（SSH 防暴力破解）", "install", "连续输错 %d 次密码封禁该 IP %s，使用系统官方软件源" % (F2B_MAXRETRY, "1 小时"))
     if report["docker"]["installed"]:
         step("docker", "Docker", "skip", "已安装 %s，跳过安装" % (report["tools"].get("docker") or ""))
         if not report["docker"]["running"]:
@@ -915,6 +979,10 @@ class Deployer:
         emit("plan", plan=plan)
         actions = {s["id"]: s["action"] for s in plan["steps"]}
         self.step("deps", "安装基础依赖", self.install_deps)
+        if self.cfg.get("fail2ban", True):
+            self.step("fail2ban", "配置 Fail2Ban", self.setup_fail2ban)
+        else:
+            emit("step_done", id="fail2ban", status="skipped", message="已按你的选择跳过")
         if actions.get("docker") == "install":
             self.step("docker", "安装 Docker", self.install_docker)
         elif not docker_available():
@@ -944,6 +1012,56 @@ class Deployer:
                 continue
             raise InstallError("APT_FAILED", "软件包安装失败，请检查服务器网络或软件源", out[-1500:])
         raise InstallError("APT_FAILED", "软件包管理器繁忙或网络异常，请稍后重试")
+
+    def setup_fail2ban(self) -> dict:
+        """Fail2Ban 是附加的安全加固：失败只给出警告，不中断整个部署。"""
+        try:
+            return self._fail2ban()
+        except InstallError as e:
+            log("Fail2Ban 配置失败：%s %s" % (e.message, e.detail[-600:]))
+            return {"status": "warning", "message": "Fail2Ban 没有配置成功（%s），不影响其它部署，可稍后手动安装" % e.message}
+
+    def _fail2ban(self) -> dict:
+        st = fail2ban_state()
+        if st["active"] and st["sshd_jail"] and not st["managed"]:
+            self.state["fail2ban"] = {"managed": False}
+            save_state(self.state)
+            return {"status": "kept", "message": "检测到 Fail2Ban 已保护 SSH，保留原有配置"}
+        systemd = bool(os_info()["systemd"] and which("systemctl"))
+        if not st["installed"]:
+            self.progress("fail2ban", 20, "安装 Fail2Ban")
+            self.apt(["update"])
+            self.apt(["install", "fail2ban", "iptables"] + (["python3-systemd"] if systemd else []))
+        ports = sshd_ports()
+        text = fail2ban_jail_text(ports, systemd)
+        changed = not F2B_JAIL.exists() or F2B_JAIL.read_text() != text
+        if changed:
+            backup_file(F2B_JAIL)
+            F2B_JAIL.parent.mkdir(parents=True, exist_ok=True)
+            F2B_JAIL.write_text(text)
+            os.chmod(F2B_JAIL, 0o644)
+        code, out = run(["fail2ban-client", "-t"], timeout=60, check=False)
+        if code != 0:
+            if changed:
+                F2B_JAIL.unlink()
+            raise InstallError("FAIL2BAN_CONFIG", "Fail2Ban 配置测试未通过，已撤销奶龙的规则", out[-1500:])
+        if systemd:
+            run(["systemctl", "enable", "fail2ban"], timeout=60, check=False)
+            if st["active"] and changed:
+                run(["fail2ban-client", "reload"], timeout=60, check=False)
+            else:
+                run(["systemctl", "restart", "fail2ban"], timeout=90, check=False)
+        else:
+            run(["service", "fail2ban", "restart"], timeout=90, check=False)
+        for _ in range(20):
+            check_cancel()
+            if fail2ban_state()["sshd_jail"]:
+                self.state["fail2ban"] = {"managed": True, "ports": ports}
+                save_state(self.state)
+                return {"message": "Fail2Ban 已启用：保护 SSH 端口 %s，连续失败 %d 次封禁 %s" % (
+                    ",".join(map(str, ports)), F2B_MAXRETRY, "1 小时")}
+            time.sleep(2)
+        raise InstallError("FAIL2BAN_START", "Fail2Ban 启动后没有加载 SSH 防护", container_logs_fail2ban())
 
     def install_deps(self) -> dict:
         need = []

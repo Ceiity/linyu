@@ -6,6 +6,7 @@
 | 凭据 | SSH 密码只在内存中用于部署，经 stdin 传给 sudo，不出现在命令行和日志；用户勾选后才用 Android Keystore 保存 |
 | 长期访问 | 每台设备独立 Ed25519 密钥，服务器 authorized_keys 为 `restrict,port-forwarding,permitopen="127.0.0.1:<Agent端口>",command="echo nailong-tunnel-only"`：不能执行命令、不能开 PTY、只能转发到 Agent |
 | 传输加密 | App ↔ 服务器全部走 SSH（隧道内 HTTP / WebSocket）。Android 仅允许对 `127.0.0.1`（本地隧道入口）使用明文 |
+| 防暴力破解 / 撞库 | 部署时默认安装 Fail2Ban 保护 SSH：10 分钟内失败 5 次封禁该 IP 1 小时；可在部署前关闭；已有的 Fail2Ban 配置不会被改动；撤销：删除 `/etc/fail2ban/jail.d/nailong-sshd.local` 后 `fail2ban-client reload` |
 | 不开放公网端口 | Agent、AstrBot WebUI、NapCat WebUI 都只绑定 127.0.0.1；验证步骤会检查奶龙管理的容器没有公网端口 |
 | Agent 认证 | 一次性配对码（10 分钟，仅存哈希，失败 5 次锁定 10 分钟）→ 设备令牌（32 字节随机，仅存哈希，30 天过期，自动/手动轮换，可撤销） |
 | 最小权限 | Agent 无任意命令接口；Docker 操作仅限 AstrBot / NapCat 的启动、停止、重启；只读根文件系统、no-new-privileges |

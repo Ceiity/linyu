@@ -125,6 +125,12 @@
     "detail": "将安装：curl、gnupg"
    },
    {
+    "id": "fail2ban",
+    "title": "安装 Fail2Ban（SSH 防暴力破解）",
+    "action": "install",
+    "detail": "连续输错 5 次密码封禁该 IP 1 小时，使用系统官方软件源"
+   },
+   {
     "id": "docker",
     "title": "安装 Docker Engine 与 Compose 插件",
     "action": "install",
@@ -163,5 +169,12 @@
   ],
   "blockers": [],
   "warnings": []
+ },
+ "fail2ban": {
+  "installed": false,
+  "active": false,
+  "sshd_jail": false,
+  "managed": false,
+  "banned": 0
  }
 }

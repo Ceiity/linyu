@@ -24,7 +24,8 @@ class DeployPage extends StatefulWidget {
 }
 
 class _DeployPageState extends State<DeployPage> {
-  late final DeployFlow flow = widget.debugFlow ?? (DeployFlow(StoreScope.read(context))..savePassword = widget.savePassword);
+  late final DeployFlow flow =
+      widget.debugFlow ?? (DeployFlow(StoreScope.read(context))..savePassword = widget.savePassword);
   bool showLogs = false;
 
   @override
@@ -358,11 +359,29 @@ class _DeployPageState extends State<DeployPage> {
       for (final b in flow.blockers) _note(Icons.block, b, cs.error),
       for (final w in (plan['warnings'] as List? ?? [])) _note(Icons.warning_amber, w.toString(), cs.warning),
       const SectionTitle('部署计划'),
+      Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: InfoCard(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            secondary: const Icon(Icons.shield_outlined),
+            title: const Text('安装 Fail2Ban（推荐）', style: TextStyle(fontWeight: FontWeight.w700)),
+            subtitle: const Text('防 SSH 暴力破解 / 撞库：连续输错 5 次密码封禁该 IP 1 小时。已有 Fail2Ban 保护时保留原配置'),
+            value: flow.installFail2ban,
+            onChanged: (v) => setState(() => flow.installFail2ban = v),
+          ),
+        ),
+      ),
       InfoCard(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Column(
           children: [
-            for (final s in (plan['steps'] as List).map((e) => Map<String, dynamic>.from(e as Map)))
+            for (final s in (plan['steps'] as List).map((e) {
+              final m = Map<String, dynamic>.from(e as Map);
+              if (m['id'] == 'fail2ban' && !flow.installFail2ban) m['action'] = 'skip';
+              return m;
+            }))
               ListTile(
                 dense: true,
                 leading: Icon(switch (s['action']) {
@@ -567,6 +586,7 @@ class _StepTile extends StatelessWidget {
       StepStatus.done => (Icons.check_circle, cs.success),
       StepStatus.kept => (Icons.shield, cs.success),
       StepStatus.skipped => (Icons.remove_circle_outline, cs.outline),
+      StepStatus.warning => (Icons.warning_amber_rounded, cs.warning),
       StepStatus.failed => (Icons.cancel, cs.error),
       StepStatus.running => (Icons.timelapse, cs.primary),
       StepStatus.pending => (Icons.radio_button_unchecked, cs.outlineVariant),

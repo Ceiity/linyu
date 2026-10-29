@@ -135,3 +135,27 @@ def test_napcat_template():
     c = ni.napcat_onebot_config("ws://astrbot:6199/ws", "tok123456")
     ws = c["network"]["websocketClients"][0]
     assert ws["url"] == "ws://astrbot:6199/ws" and ws["token"] == "tok123456" and ws["enable"]
+
+
+def test_fail2ban_jail_text():
+    t = ni.fail2ban_jail_text([22, 2222], systemd=True)
+    assert "[sshd]" in t and "enabled = true" in t and "port = 22,2222" in t
+    assert "maxretry = 5" in t and "bantime = 1h" in t
+    assert "backend = systemd" in t and "_COMM=sshd-session" in t
+    t2 = ni.fail2ban_jail_text([22], systemd=False)
+    assert "backend" not in t2 and "port = 22" in t2
+
+
+def test_plan_fail2ban():
+    def f2b_action(**kw):
+        p = ni.make_plan(_report(fail2ban=kw))
+        return next(s for s in p["steps"] if s["id"] == "fail2ban")["action"]
+    assert f2b_action(installed=False) == "install"
+    assert f2b_action(installed=True, active=False, sshd_jail=False) == "install"
+    # 用户自己已经启用 SSH 防护：保留
+    assert f2b_action(installed=True, active=True, sshd_jail=True, managed=False) == "keep"
+    # 奶龙之前配的：允许幂等更新
+    assert f2b_action(installed=True, active=True, sshd_jail=True, managed=True) == "install"
+    # 旧报告没有该字段也不报错
+    p = ni.make_plan(_report())
+    assert any(s["id"] == "fail2ban" for s in p["steps"])

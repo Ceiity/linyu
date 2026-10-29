@@ -508,18 +508,18 @@ class ThemePage extends StatelessWidget {
                 ),
               ),
               const SectionTitle('按钮风格'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: SegmentedButton<ButtonLook>(
-              segments: const [
-                ButtonSegment(value: ButtonLook.light, icon: Icon(Icons.light_mode_outlined), label: Text('浅色渐变')),
-                ButtonSegment(value: ButtonLook.dark, icon: Icon(Icons.dark_mode_outlined), label: Text('黑色渐变')),
-              ],
-              selected: {s.buttonLook},
-              onSelectionChanged: (v) => s.setButtonLook(v.first),
-            ),
-          ),
-          const SectionTitle('主题色'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SegmentedButton<ButtonLook>(
+                  segments: const [
+                    ButtonSegment(value: ButtonLook.light, icon: Icon(Icons.light_mode_outlined), label: Text('浅色渐变')),
+                    ButtonSegment(value: ButtonLook.dark, icon: Icon(Icons.dark_mode_outlined), label: Text('黑色渐变')),
+                  ],
+                  selected: {s.buttonLook},
+                  onSelectionChanged: (v) => s.setButtonLook(v.first),
+                ),
+              ),
+              const SectionTitle('主题色'),
               GroupCard(
                 children: [
                   SwitchListTile(
