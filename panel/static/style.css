@@ -86,10 +86,10 @@ button{min-height:40px;transition:transform .14s ease,background .14s ease,color
 @media(max-width:720px){.section-head{margin-bottom:12px}.action-bar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-radius:20px;padding:8px}.astr-actions .pill-btn{width:100%;min-height:44px}.log-filters{grid-template-columns:1fr}.log-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.log-actions .pill-btn{min-width:0;width:100%;padding:0 8px}.log-viewer{min-height:52vh;max-height:62vh;border-radius:18px}.log-center-card{padding:14px}}
 
 
-/* Linyu robot brand mark */
+/* Nailong brand mark */
 .logo-mark{overflow:hidden;background:linear-gradient(145deg,#111827,#030712)!important;color:transparent!important;padding:4px;isolation:isolate;position:relative}
 .logo-mark:after{content:"";position:absolute;inset:1px;border-radius:inherit;background:linear-gradient(145deg,rgba(255,255,255,.18),transparent 48%);pointer-events:none}
-.logo-mark img{width:100%;height:100%;display:block;object-fit:contain;border-radius:inherit;filter:drop-shadow(0 8px 14px rgba(56,189,248,.24))}
+.logo-mark img{width:100%;height:100%;display:block;object-fit:contain;border-radius:inherit;filter:drop-shadow(0 8px 14px rgba(247,185,40,.28))}
 .login-card .logo-mark{width:72px;height:72px;border-radius:24px;padding:5px;box-shadow:0 22px 60px rgba(15,23,42,.18)}
 .side-brand .logo-mark.small{width:42px;height:42px;border-radius:14px;padding:3px;box-shadow:0 12px 28px rgba(15,23,42,.16)}
 [data-theme=dark] .logo-mark{background:linear-gradient(145deg,#f8fafc,#cbd5e1)!important}

@@ -5,7 +5,7 @@ source "$LIB_DIR/config.sh"
 source "$LIB_DIR/logging.sh"
 require_root(){ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then fail "Please run as root."; exit 1; fi; }
 ensure_dirs(){ mkdir -p "$INSTALL_PREFIX" "$PROJECT_DIR" "$DATA_DIR" "$COMPOSE_DIR" "$NAPCAT_BASE_DIR" "$BACKUP_DIR" "$LOG_DIR"; }
-load_state(){ [[ -f "$STATE_FILE" ]] && set -a && source "$STATE_FILE" && set +a || true; }
+load_state(){ if [[ -f "$STATE_FILE" ]]; then set -a; source "$STATE_FILE" || true; set +a; fi; ensure_reverse_ws_token; }
 save_state_var(){ local key="$1" val="$2" tmp="${STATE_FILE}.tmp"; touch "$STATE_FILE"; grep -vE "^${key}=" "$STATE_FILE" > "$tmp" || true; printf '%s=%q\n' "$key" "$val" >> "$tmp"; mv "$tmp" "$STATE_FILE"; }
 have_cmd(){ command -v "$1" >/dev/null 2>&1; }
 retry(){ local attempts="$1" delay="$2"; shift 2; local i; for ((i=1;i<=attempts;i++)); do if "$@"; then return 0; fi; warn "Attempt $i/$attempts failed; retrying in ${delay}s: $*"; sleep "$delay"; done; return 1; }
@@ -24,4 +24,18 @@ network_check(){
 compose_cmd(){ if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; else return 1; fi; }
 port_in_use(){ local p="$1"; if have_cmd ss; then ss -ltnH "sport = :$p" 2>/dev/null | grep -q .; elif have_cmd netstat; then netstat -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]$p$"; else timeout 1 bash -c "</dev/tcp/127.0.0.1/$p" >/dev/null 2>&1; fi; }
 find_free_port(){ local p="$1" limit="${2:-2000}" i; for ((i=0;i<limit;i++)); do if ! port_in_use "$((p+i))"; then echo "$((p+i))"; return 0; fi; done; return 1; }
+# Every deployment gets its own AstrBot<->NapCat reverse-WS token. Installs made
+# before this existed relied on the old shared default, so keep that value for
+# them (their NapCat/AstrBot configs already contain it) and persist it.
+ensure_reverse_ws_token(){
+  [[ -n "${ASTRBOT_REVERSE_WS_TOKEN:-}" ]] && return 0
+  if [[ -s "${NAPCAT_INDEX_FILE:-}" || -f "${DATA_DIR:-}/cmd_config.json" ]]; then
+    ASTRBOT_REVERSE_WS_TOKEN="yuyu521521"
+  else
+    ASTRBOT_REVERSE_WS_TOKEN="$(random_token)"
+  fi
+  export ASTRBOT_REVERSE_WS_TOKEN
+  mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null || true
+  save_state_var ASTRBOT_REVERSE_WS_TOKEN "$ASTRBOT_REVERSE_WS_TOKEN" 2>/dev/null || true
+}
 random_token(){ if have_cmd openssl; then openssl rand -hex 18; else tr -dc 'A-Za-z0-9' </dev/urandom | head -c 36; echo; fi; }

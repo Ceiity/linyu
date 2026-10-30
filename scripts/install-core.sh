@@ -10,7 +10,7 @@ install_panel_first(){
   write_deploy_info || true
   local pub panel_user panel_pass
   pub="$(public_ip)"
-  panel_user="admin"
+  panel_user="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); print(d.get("username","nailong"))' "$INSTALL_PREFIX/panel_config.json" 2>/dev/null || echo nailong)"
   panel_pass="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); print(d.get("initial_password","password changed"))' "$INSTALL_PREFIX/panel_config.json" 2>/dev/null || echo "see /opt/astrbot/panel_config.json")"
   printf '\n%s%sWeb 控制台已启动%s\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
   printf '地址：http://%s:%s/\n账号：%s\n密码：%s\n' "$pub" "${WEB_ADMIN_PORT:-7070}" "$panel_user" "$panel_pass"
@@ -22,7 +22,7 @@ install_full_stack(){
   local napcat_count; if [[ -n "${NAPCAT_COUNT:-}" ]]; then napcat_count="$NAPCAT_COUNT"; else read -r -p $'\u8bf7\u8f93\u5165 NapCat \u6570\u91cf\uff1a' napcat_count; fi; [[ -n "$napcat_count" ]] || napcat_count=1
   deploy_astrbot
   apply_astrbot_default_config
-  install_linyu_remote_plugin
+  install_nailong_remote_plugin
   add_napcat_instances "$napcat_count"
   bash "$PROJECT_DIR/scripts/web-admin.sh" setup
   step "Running health checks"; retry 3 5 check_health || warn "Some health checks failed; inspect logs."

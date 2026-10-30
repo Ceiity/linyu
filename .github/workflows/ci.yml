@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: python -m pip install -r panel/requirements.txt pyflakes shellcheck-py
+      - name: Lint
+        run: |
+          python -m pyflakes panel/backend/app.py plugins/astrbot_plugin_nailong_remote_admin/main.py scripts/security-check.py tests
+          shellcheck -S error install.sh manager.sh update.sh backup.sh restore.sh uninstall.sh scripts/*.sh lib/*.sh
+      - name: Validate
+        run: bash scripts/validate.sh

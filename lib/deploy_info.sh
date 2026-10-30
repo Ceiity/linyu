@@ -5,9 +5,9 @@ write_deploy_info(){
   load_state
   local pub priv pass token now count panel_user panel_pass
   pub="$(public_ip)"; priv="$(private_ip)"; pass="$(get_astrbot_password)"; token="$(get_astrbot_token)"; now="$(date '+%F %T %Z')"; count="$(get_napcat_count)"
-  panel_user="admin"; panel_pass="not generated"
+  panel_user="nailong"; panel_pass="not generated"
   if [[ -f "$INSTALL_PREFIX/panel_config.json" ]]; then
-    panel_user="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); print(d.get("username","admin"))' "$INSTALL_PREFIX/panel_config.json" 2>/dev/null || echo admin)"
+    panel_user="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); print(d.get("username","nailong"))' "$INSTALL_PREFIX/panel_config.json" 2>/dev/null || echo nailong)"
     panel_pass="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); print(d.get("initial_password","password changed"))' "$INSTALL_PREFIX/panel_config.json" 2>/dev/null || echo "not generated")"
   fi
   cat > "$DEPLOY_INFO_FILE" <<EOF
@@ -53,9 +53,9 @@ EOF
 }
 print_success_summary(){
   load_state; local pub pass token count panel_user panel_pass; pub="$(public_ip)"; pass="$(get_astrbot_password)"; token="$(get_astrbot_token)"; count="$(get_napcat_count)"
-  panel_user="admin"; panel_pass="not generated"
+  panel_user="nailong"; panel_pass="not generated"
   if [[ -f "$INSTALL_PREFIX/panel_config.json" ]]; then
-    panel_user="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); print(d.get("username","admin"))' "$INSTALL_PREFIX/panel_config.json" 2>/dev/null || echo admin)"
+    panel_user="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); print(d.get("username","nailong"))' "$INSTALL_PREFIX/panel_config.json" 2>/dev/null || echo nailong)"
     panel_pass="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); print(d.get("initial_password","password changed"))' "$INSTALL_PREFIX/panel_config.json" 2>/dev/null || echo "not generated")"
   fi
   printf '\n%s%sDeployment succeeded%s\n' "$C_BOLD" "$C_GREEN" "$C_RESET"

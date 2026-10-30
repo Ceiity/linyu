@@ -78,7 +78,7 @@ build_reserved_ports(){
     reserved+=" $(awk -F'\t' 'NF>=4{printf " %s %s %s",$2,$3,$4}' "$NAPCAT_INDEX_FILE")"
   fi
   reserved+=" $(port_state_values | tr '\n' ' ')"
-  reserved+=" $(docker ps --format '{{.Ports}}' 2>/dev/null | grep -Eo '0\.0\.0\.0:[0-9]+|:::[0-9]+' | grep -Eo '[0-9]+$' | tr '\n' ' ' || true)"
+  reserved+=" $(docker ps --format '{{.Ports}}' 2>/dev/null | grep -Eo '(0\.0\.0\.0|127\.0\.0\.1):[0-9]+|:::[0-9]+' | grep -Eo '[0-9]+$' | tr '\n' ' ' || true)"
   printf '%s\n' "$reserved"
 }
 generate_napcat_config(){
@@ -108,8 +108,8 @@ services:
       - TZ=${DEFAULT_TIMEZONE}
     ports:
       - "${webui_port}:6099"
-      - "${ws_port}:3001"
-      - "${http_port}:3000"
+      - "127.0.0.1:${ws_port}:3001"
+      - "127.0.0.1:${http_port}:3000"
     volumes:
       - ${DATA_DIR}:/AstrBot/data
       - ${dir}/config:/app/napcat/config
@@ -156,7 +156,7 @@ sync_napcat_reverse_configs(){
     id="${name#napcat}"; id="$((10#$id))"
     astrbot_ws_port="$((ASTRBOT_INTERNAL_WS_PORT + id - 1))"
     dir="$NAPCAT_BASE_DIR/$name"
-    token_to_use="${ASTRBOT_REVERSE_WS_TOKEN:-yuyu521521}"
+    token_to_use="$ASTRBOT_REVERSE_WS_TOKEN"
     shopt -s nullglob
     for cfg in "$dir"/config/onebot11*.json; do
       [[ -f "$cfg" ]] || continue
@@ -200,7 +200,7 @@ PY
     done
     shopt -u nullglob
   done < "$NAPCAT_INDEX_FILE"
-  success "NapCat reverse WebSocket configs synced; token=${ASTRBOT_REVERSE_WS_TOKEN:-yuyu521521}"
+  success "NapCat reverse WebSocket configs synced; token=${ASTRBOT_REVERSE_WS_TOKEN}"
 }
 add_napcat_instances(){
   local count="$1" width i id name token webui ws http file total astrbot_ws_port reserved_ports="" ids=()

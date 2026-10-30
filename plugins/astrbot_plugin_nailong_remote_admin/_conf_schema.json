@@ -21,14 +21,14 @@
     "obvious_hint": true
   },
   "owner_ids": {
-    "description": "QQ users allowed to request login.",
+    "description": "QQ users allowed to run owner commands. Empty means nobody.",
     "type": "list",
-    "default": ["3179806299"]
+    "default": []
   },
   "bot_self_ids": {
-    "description": "Bot QQ accounts allowed to respond. Default only allows 2141945863.",
+    "description": "Bot QQ accounts allowed to respond. Empty means no bot responds.",
     "type": "list",
-    "default": ["2141945863"]
+    "default": []
   },
   "allowed_groups": {
     "description": "Allowed group IDs. Empty means no group limit.",

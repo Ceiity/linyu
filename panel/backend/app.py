@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import base64
-import cgi
+import copy
 import hashlib
 import hmac
 import io
@@ -17,14 +17,17 @@ import socket
 import stat
 import subprocess
 import tarfile
+import tempfile
 import threading
 import time
 import traceback
 import uuid
 import zipfile
 from dataclasses import dataclass, field
+from email.message import Message
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
@@ -40,7 +43,7 @@ except Exception:
     hashes = serialization = padding = rsa = AESGCM = None
     LOGIN_CRYPTO_AVAILABLE = False
 
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.1.0"
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", "/opt/astrbot/AstrBot-Deploy"))
 INSTALL_PREFIX = Path(os.environ.get("INSTALL_PREFIX", "/opt/astrbot"))
 STATE_FILE = Path(os.environ.get("STATE_FILE", str(INSTALL_PREFIX / ".env")))
@@ -57,6 +60,7 @@ LOGIN_LOCKS: dict[str, float] = {}
 LOGIN_RATE_LOCK = threading.RLock()
 NAPCAT_CREDENTIAL_CACHE: dict[str, dict] = {}
 NAPCAT_QR_CACHE: dict[str, dict] = {}
+NAPCAT_IDENTITY_CACHE: dict[str, tuple[float, str, str]] = {}
 NAPCAT_LOGIN_ASSIGNMENTS: dict[str, dict] = {}
 NAPCAT_LOGIN_ASSIGNMENT_FILE = Path(os.environ.get("NAPCAT_LOGIN_ASSIGNMENT_FILE", str(INSTALL_PREFIX / "napcat_login_assignments.json")))
 FILE_CENTER_INDEX = Path(os.environ.get("FILE_CENTER_INDEX", str(INSTALL_PREFIX / "file_center_index.json")))
@@ -78,10 +82,32 @@ LOGIN_CHALLENGE_WINDOW_SECONDS = 60
 LOGIN_CHALLENGE_LIMIT = 30
 MAX_LOGIN_CHALLENGES = 2048
 MAX_JSON_BODY_BYTES = 1024 * 1024
+SESSION_TTL_SECONDS = 86400 * 7
+MAX_TASKS = 200
+MAX_IP_GEO_CACHE = 1024
+CONFIG_LOCK = threading.RLock()
+CONFIG_CACHE: dict = {"sig": None, "cfg": None}
+ASSIGNMENT_LOCK = threading.RLock()
+NAPCAT_MUTATION_LOCK = threading.Lock()
+NAPCAT_MUTATION_WAIT_SECONDS = 1800
+LOG_CACHE: dict[tuple[str, int], tuple[float, str]] = {}
+LOG_CACHE_LOCK = threading.Lock()
+REMOTE_PLUGIN_NAME = "astrbot_plugin_nailong_remote_admin"
+LEGACY_REMOTE_PLUGIN_NAME = "astrbot_plugin_linyu_remote_admin"
+LEGACY_REMOTE_KEY_PREFIX = "linyu_remote_"
+REMOTE_KEY_PREFIX = "nailong_remote_"
 LOGIN_RSA_PRIVATE = rsa.generate_private_key(public_exponent=65537, key_size=2048) if LOGIN_CRYPTO_AVAILABLE else None
 
 
 class PayloadTooLarge(ValueError):
+    pass
+
+
+class LoginCryptoError(ValueError):
+    pass
+
+
+class RangeNotSatisfiable(Exception):
     pass
 
 
@@ -120,6 +146,9 @@ def write_json(path: Path, data) -> None:
         path.chmod(0o600)
     except Exception:
         pass
+    if path == PANEL_CONFIG:
+        with CONFIG_LOCK:
+            CONFIG_CACHE["sig"] = None
 
 
 def hash_password(password: str, salt: str | None = None) -> str:
@@ -146,7 +175,7 @@ def password_strength_error(password: str, old_password: str = "") -> str:
         return "\u65b0\u5bc6\u7801\u81f3\u5c11\u9700\u8981 10 \u4f4d"
     if old_password and hmac.compare_digest(value, str(old_password)):
         return "\u65b0\u5bc6\u7801\u4e0d\u80fd\u548c\u5f53\u524d\u5bc6\u7801\u76f8\u540c"
-    weak_words = {"password", "admin", "administrator", "qwerty", "123456", "111111", "000000", "letmein", "linyu", "astrbot", "napcat"}
+    weak_words = {"password", "admin", "administrator", "qwerty", "123456", "111111", "000000", "letmein", "linyu", "nailong", "astrbot", "napcat"}
     if lower in weak_words or any(w in lower for w in ["password", "123456", "qwerty"]):
         return "\u65b0\u5bc6\u7801\u8fc7\u4e8e\u5e38\u89c1\uff0c\u8bf7\u6362\u4e00\u4e2a\u66f4\u5f3a\u7684\u5bc6\u7801"
     if re.fullmatch(r"(.)\1{9,}", value):
@@ -168,7 +197,7 @@ def bump_auth_epoch(cfg: dict) -> int:
 def default_config() -> dict:
     password = os.environ.get("PANEL_DEFAULT_PASSWORD") or secrets.token_urlsafe(12)
     return {
-        "username": "linyu",
+        "username": "nailong",
         "password_hash": hash_password(password),
         "initial_password": password,
         "session_secret": secrets.token_hex(32),
@@ -186,19 +215,19 @@ def default_config() -> dict:
         "napcat_recovery_wait": 25,
         "max_upload_mb": 256,
         "network_name": "astrbot_network",
-        "default_reverse_ws_token": "yuyu521521",
+        "default_reverse_ws_token": secrets.token_hex(12),
         "remote_api_enabled": True,
         "remote_api_token": os.environ.get("PANEL_REMOTE_TOKEN") or secrets.token_urlsafe(24),
         "file_api_tokens": [],
-        "linyu_remote_login_enabled": True,
-        "linyu_remote_public_login_enabled": False,
-        "linyu_remote_server_url": "",
-        "linyu_remote_owner_ids": os.environ.get("LINYU_REMOTE_OWNER_IDS", "3179806299"),
-        "linyu_remote_bot_self_ids": os.environ.get("LINYU_REMOTE_BOT_SELF_IDS", "2141945863"),
-        "linyu_remote_allowed_groups": "",
-        "linyu_remote_triggers": "申请登录",
-        "linyu_remote_qr_retry_seconds": 60,
-        "linyu_remote_cooldown_seconds": 300,
+        "nailong_remote_login_enabled": True,
+        "nailong_remote_public_login_enabled": False,
+        "nailong_remote_server_url": "",
+        "nailong_remote_owner_ids": os.environ.get("NAILONG_REMOTE_OWNER_IDS") or os.environ.get("LINYU_REMOTE_OWNER_IDS") or "",
+        "nailong_remote_bot_self_ids": os.environ.get("NAILONG_REMOTE_BOT_SELF_IDS") or os.environ.get("LINYU_REMOTE_BOT_SELF_IDS") or "",
+        "nailong_remote_allowed_groups": "",
+        "nailong_remote_triggers": "申请登录",
+        "nailong_remote_qr_retry_seconds": 60,
+        "nailong_remote_cooldown_seconds": 300,
         "public_base_url": "",
         "allow_dangerous": False,
         "theme_color": "#2563eb",
@@ -206,29 +235,69 @@ def default_config() -> dict:
     }
 
 
-def load_config() -> dict:
-    cfg = read_json(PANEL_CONFIG, None)
-    if not cfg:
-        cfg = default_config()
-        write_json(PANEL_CONFIG, cfg)
-        return cfg
-    base = default_config()
+DEFAULT_CONFIG_KEYS = tuple(default_config().keys())
+
+
+def _config_signature() -> tuple | None:
+    try:
+        st = PANEL_CONFIG.stat()
+    except OSError:
+        return None
+    return (st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+def migrate_config(cfg: dict) -> bool:
+    """Bring an on-disk config up to date. Returns True when it changed."""
     changed = False
+    # Brand rename: linyu_remote_* -> nailong_remote_*.
+    for key in [k for k in cfg if k.startswith(LEGACY_REMOTE_KEY_PREFIX)]:
+        new_key = REMOTE_KEY_PREFIX + key[len(LEGACY_REMOTE_KEY_PREFIX):]
+        value = cfg.pop(key)
+        cfg.setdefault(new_key, value)
+        changed = True
     # One-time migration: older plugin releases kept this switch beside the
     # plugin. Preserve the administrator's existing choice, then make the
     # panel config the only authority for subsequent authorization checks.
-    if "linyu_remote_public_login_enabled" not in cfg:
-        legacy_state = INSTALL_PREFIX / "data" / "plugins" / "astrbot_plugin_linyu_remote_admin" / "linyu_remote_admin_state.json"
+    if "nailong_remote_public_login_enabled" not in cfg:
+        legacy_state = INSTALL_PREFIX / "data" / "plugins" / LEGACY_REMOTE_PLUGIN_NAME / "linyu_remote_admin_state.json"
         legacy = read_json(legacy_state, {})
-        cfg["linyu_remote_public_login_enabled"] = bool(legacy.get("public_login_enabled", False)) if isinstance(legacy, dict) else False
+        cfg["nailong_remote_public_login_enabled"] = bool(legacy.get("public_login_enabled", False)) if isinstance(legacy, dict) else False
         changed = True
-    for key, value in base.items():
-        if key not in cfg:
-            cfg[key] = value
-            changed = True
-    if changed:
+    # Once the password has been changed the initial one is meaningless; older
+    # releases re-filled it with a fresh random value that never worked.
+    if cfg.get("password_changed_at") and "initial_password" in cfg:
+        cfg.pop("initial_password")
+        changed = True
+    missing = [key for key in DEFAULT_CONFIG_KEYS if key not in cfg and key != "initial_password"]
+    if missing:
+        # default_config() hashes a random password, so only build it when needed.
+        base = default_config()
+        for key in missing:
+            cfg[key] = base[key]
+        changed = True
+    return changed
+
+
+def load_config() -> dict:
+    """Return a private copy of the panel config, cached until the file changes."""
+    with CONFIG_LOCK:
+        sig = _config_signature()
+        if sig is not None and CONFIG_CACHE["sig"] == sig and CONFIG_CACHE["cfg"] is not None:
+            return copy.deepcopy(CONFIG_CACHE["cfg"])
+        cfg = read_json(PANEL_CONFIG, None)
+        if not isinstance(cfg, dict) or not cfg:
+            cfg = default_config()
+            write_json(PANEL_CONFIG, cfg)
+        elif migrate_config(cfg):
+            write_json(PANEL_CONFIG, cfg)
+        CONFIG_CACHE["cfg"] = copy.deepcopy(cfg)
+        CONFIG_CACHE["sig"] = _config_signature()
+        return cfg
+
+
+def save_config(cfg: dict) -> None:
+    with CONFIG_LOCK:
         write_json(PANEL_CONFIG, cfg)
-    return cfg
 
 
 def validated_http_url(value: object, field: str) -> str:
@@ -247,8 +316,12 @@ def validated_http_url(value: object, field: str) -> str:
 
 
 def save_config_patch(patch: dict) -> dict:
-    cfg = load_config()
-    allowed = {"install_prefix", "network_name", "default_reverse_ws_token", "upload_dir", "astrbot_plugin_dir", "napcat_watchdog_enabled", "napcat_watchdog_interval", "napcat_watchdog_abnormal_threshold", "napcat_recovery_max", "napcat_recovery_window", "napcat_recovery_wait", "max_upload_mb", "public_base_url", "allow_dangerous", "theme_color", "linyu_remote_login_enabled", "linyu_remote_server_url", "linyu_remote_owner_ids", "linyu_remote_bot_self_ids", "linyu_remote_allowed_groups", "linyu_remote_triggers", "linyu_remote_qr_retry_seconds", "linyu_remote_cooldown_seconds"}
+    with CONFIG_LOCK:
+        return _save_config_patch(load_config(), patch)
+
+
+def _save_config_patch(cfg: dict, patch: dict) -> dict:
+    allowed = {"install_prefix", "network_name", "default_reverse_ws_token", "upload_dir", "astrbot_plugin_dir", "napcat_watchdog_enabled", "napcat_watchdog_interval", "napcat_watchdog_abnormal_threshold", "napcat_recovery_max", "napcat_recovery_window", "napcat_recovery_wait", "max_upload_mb", "public_base_url", "allow_dangerous", "theme_color", "nailong_remote_login_enabled", "nailong_remote_server_url", "nailong_remote_owner_ids", "nailong_remote_bot_self_ids", "nailong_remote_allowed_groups", "nailong_remote_triggers", "nailong_remote_qr_retry_seconds", "nailong_remote_cooldown_seconds"}
     numeric_limits = {
         "max_upload_mb": (1, 2048),
         "napcat_watchdog_interval": (30, 3600),
@@ -256,8 +329,8 @@ def save_config_patch(patch: dict) -> dict:
         "napcat_recovery_max": (0, 20),
         "napcat_recovery_window": (60, 86400),
         "napcat_recovery_wait": (5, 600),
-        "linyu_remote_qr_retry_seconds": (10, 3600),
-        "linyu_remote_cooldown_seconds": (0, 86400),
+        "nailong_remote_qr_retry_seconds": (10, 3600),
+        "nailong_remote_cooldown_seconds": (0, 86400),
     }
     for k, v in patch.items():
         if k in allowed:
@@ -269,9 +342,9 @@ def save_config_patch(patch: dict) -> dict:
                     raise ValueError("%s \u5fc5\u987b\u662f\u6570\u5b57" % k)
                 if v < lo or v > hi:
                     raise ValueError("%s \u5fc5\u987b\u5728 %s-%s \u4e4b\u95f4" % (k, lo, hi))
-            if k in {"allow_dangerous", "napcat_watchdog_enabled", "linyu_remote_login_enabled"}:
+            if k in {"allow_dangerous", "napcat_watchdog_enabled", "nailong_remote_login_enabled"}:
                 v = bool(v) if isinstance(v, bool) else str(v).lower() == "true"
-            if k in {"public_base_url", "linyu_remote_server_url"}:
+            if k in {"public_base_url", "nailong_remote_server_url"}:
                 v = validated_http_url(v, k)
             if k == "theme_color" and not re.fullmatch(r"#[0-9A-Fa-f]{6}", str(v or "")):
                 raise ValueError("主题色格式不正确")
@@ -282,7 +355,7 @@ def save_config_patch(patch: dict) -> dict:
             cfg[k] = v
     if patch.get("password"):
         raise ValueError("\u8bf7\u5230\u8d26\u53f7\u5b89\u5168\u9875\u4fee\u6539\u5bc6\u7801")
-    write_json(PANEL_CONFIG, cfg)
+    save_config(cfg)
     return cfg
 
 
@@ -295,24 +368,24 @@ def split_csv_ids(value) -> list[str]:
     return [x.strip() for x in text.split(",") if x.strip()]
 
 
-def sync_linyu_remote_plugin_config(origin: str | None = None) -> dict:
+def sync_nailong_remote_plugin_config(origin: str | None = None) -> dict:
     cfg = load_config()
-    plugin_cfg = INSTALL_PREFIX / "data" / "config" / "astrbot_plugin_linyu_remote_admin_config.json"
+    plugin_cfg = INSTALL_PREFIX / "data" / "config" / (REMOTE_PLUGIN_NAME + "_config.json")
     plugin_cfg.parent.mkdir(parents=True, exist_ok=True)
-    server_url = str(cfg.get("linyu_remote_server_url") or cfg.get("public_base_url") or origin or public_origin()).strip().rstrip("/")
+    server_url = str(cfg.get("nailong_remote_server_url") or cfg.get("public_base_url") or origin or public_origin()).strip().rstrip("/")
     if not server_url:
         server_url = "http://127.0.0.1:%s" % str(shell_state().get("WEB_ADMIN_PORT", "7070"))
     payload = {
-        "enabled": bool(cfg.get("linyu_remote_login_enabled", True)),
-        "public_login_enabled": bool(cfg.get("linyu_remote_public_login_enabled", False)),
+        "enabled": bool(cfg.get("nailong_remote_login_enabled", True)),
+        "public_login_enabled": bool(cfg.get("nailong_remote_public_login_enabled", False)),
         "server_url": server_url,
         "remote_token": str(cfg.get("remote_api_token") or ""),
-        "owner_ids": split_csv_ids(cfg.get("linyu_remote_owner_ids")),
-        "bot_self_ids": split_csv_ids(cfg.get("linyu_remote_bot_self_ids")),
-        "allowed_groups": split_csv_ids(cfg.get("linyu_remote_allowed_groups")),
-        "triggers": split_csv_ids(cfg.get("linyu_remote_triggers")) or ["申请登录"],
-        "cooldown_seconds": int(cfg.get("linyu_remote_cooldown_seconds", 300) or 300),
-        "qr_retry_seconds": int(cfg.get("linyu_remote_qr_retry_seconds", 60) or 60),
+        "owner_ids": split_csv_ids(cfg.get("nailong_remote_owner_ids")),
+        "bot_self_ids": split_csv_ids(cfg.get("nailong_remote_bot_self_ids")),
+        "allowed_groups": split_csv_ids(cfg.get("nailong_remote_allowed_groups")),
+        "triggers": split_csv_ids(cfg.get("nailong_remote_triggers")) or ["申请登录"],
+        "cooldown_seconds": int(cfg.get("nailong_remote_cooldown_seconds", 300) or 300),
+        "qr_retry_seconds": int(cfg.get("nailong_remote_qr_retry_seconds", 60) or 60),
     }
     plugin_cfg.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     try:
@@ -320,6 +393,31 @@ def sync_linyu_remote_plugin_config(origin: str | None = None) -> dict:
     except Exception:
         pass
     return {"path": str(plugin_cfg), "server_url": server_url, "enabled": payload["enabled"]}
+
+
+def migrate_legacy_remote_plugin() -> dict:
+    """Swap the pre-rename QQ remote plugin (linyu) for the nailong one, once."""
+    cfg = load_config()
+    plugin_root = Path(cfg.get("astrbot_plugin_dir") or (INSTALL_PREFIX / "data" / "plugins"))
+    legacy_dir = plugin_root / LEGACY_REMOTE_PLUGIN_NAME
+    source = PROJECT_DIR / "plugins" / REMOTE_PLUGIN_NAME
+    if not legacy_dir.is_dir() or not source.is_dir():
+        return {"migrated": False}
+    target = plugin_root / REMOTE_PLUGIN_NAME
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.rmtree(legacy_dir)
+    (INSTALL_PREFIX / "data" / "config" / (LEGACY_REMOTE_PLUGIN_NAME + "_config.json")).unlink(missing_ok=True)
+    sync = sync_nailong_remote_plugin_config()
+    name = astrbot_container()
+    restarted = False
+    if container_status(name).get("running"):
+        code, _ = docker(["restart", name], timeout=180)
+        restarted = code == 0
+    result = {"migrated": True, "plugin_dir": str(target), "config": sync.get("path"), "astrbot_restarted": restarted}
+    audit("system", "remote_plugin.migrate", result, True)
+    return result
 
 
 def sanitize_config(cfg: dict) -> dict:
@@ -339,6 +437,36 @@ def is_https_request(handler) -> bool:
         return True
     forwarded = handler.headers.get("Forwarded", "").lower()
     return "proto=https" in forwarded
+
+
+def _valid_ip(value: str) -> str:
+    value = str(value or "").strip()
+    if value.startswith("[") and "]" in value:
+        value = value[1:value.index("]")]
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return ""
+
+
+def trusted_client_ip(peer: str, headers) -> str:
+    """Real client IP. Proxy headers are only honoured from a loopback peer
+    (the Nginx set up by scripts/https.sh); otherwise they are client-controlled."""
+    peer = str(peer or "")
+    try:
+        loopback = ipaddress.ip_address(peer).is_loopback
+    except ValueError:
+        loopback = False
+    if loopback and headers is not None:
+        real = _valid_ip(headers.get("X-Real-IP", ""))
+        if real:
+            return real
+        forwarded = [x.strip() for x in str(headers.get("X-Forwarded-For", "")).split(",") if x.strip()]
+        if forwarded:
+            last = _valid_ip(forwarded[-1])
+            if last:
+                return last
+    return peer or "unknown"
 
 
 def login_key_for_ip(ip: str) -> str:
@@ -410,72 +538,66 @@ def new_login_challenge(ip_key: str) -> dict:
     return {"enabled": True, "id": cid, "nonce": nonce, "issued_at": issued, "expires_in": LOGIN_CHALLENGE_TTL, "rsa_public_key_pem": public_key, "rsa_n": b64u_int(nums.n), "rsa_e": b64u_int(nums.e), "alg": "RSA-OAEP-256+AES-256-GCM+SHA-256"}
 
 
+def _pop_login_challenge(cid: str, ip_key: str) -> dict:
+    with LOGIN_CHALLENGE_LOCK:
+        challenge = LOGIN_CHALLENGES.pop(cid, None)
+    if not challenge:
+        raise ValueError("登录校验已失效，请刷新页面后重试")
+    if challenge.get("ip_key") != ip_key or float(challenge.get("expires", 0)) <= time.time():
+        raise ValueError("登录校验已过期，请刷新页面后重试")
+    return challenge
+
+
+def _check_login_freshness(ts) -> None:
+    try:
+        skew = abs(int(time.time()) - int(ts or 0))
+    except (TypeError, ValueError):
+        skew = LOGIN_CHALLENGE_TTL + 31
+    if skew > LOGIN_CHALLENGE_TTL + 30:
+        raise LoginCryptoError("登录请求已过期，请检查设备时间后重试")
+
+
 def decrypt_login_payload(data: dict, ip_key: str) -> dict:
     mode = str(data.get("mode") or "")
     if mode not in {"crypto", "rsa-direct"}:
         raise ValueError("\u767b\u5f55\u5fc5\u987b\u4f7f\u7528\u524d\u7aef\u52a0\u5bc6\uff0c\u8bf7\u5237\u65b0\u9875\u9762\u540e\u91cd\u8bd5")
     if not LOGIN_CRYPTO_AVAILABLE or LOGIN_RSA_PRIVATE is None:
-        raise ValueError("????????")
-    if mode == "rsa-direct":
-        enc = data.get("encrypted") if isinstance(data.get("encrypted"), dict) else {}
-        cid = str(enc.get("challenge_id") or "")
-        with LOGIN_CHALLENGE_LOCK:
-            challenge = LOGIN_CHALLENGES.pop(cid, None)
-        if not challenge:
-            raise ValueError("?????????????")
-        if challenge.get("ip_key") != ip_key or float(challenge.get("expires", 0)) <= time.time():
-            raise ValueError("\u8bf7\u8f93\u5165\u8981\u5220\u9664\u7684\u673a\u5668\u4eba\u540d\u79f0")
-        try:
-            plain = LOGIN_RSA_PRIVATE.decrypt(
-                base64.b64decode(str(enc.get("ciphertext") or "")),
-                padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
-            )
+        raise ValueError("服务器缺少 cryptography 组件，暂时无法登录")
+    enc = data.get("encrypted") if isinstance(data.get("encrypted"), dict) else {}
+    cid = str(enc.get("challenge_id") or "")
+    challenge = _pop_login_challenge(cid, ip_key)
+    oaep = padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
+    try:
+        if mode == "rsa-direct":
+            plain = LOGIN_RSA_PRIVATE.decrypt(base64.b64decode(str(enc.get("ciphertext") or "")), oaep)
             payload = json.loads(plain.decode("utf-8"))
             if str(payload.get("c") or "") != cid or str(payload.get("n") or "") != str(challenge.get("nonce") or ""):
-                raise ValueError("????????")
-            if abs(int(time.time()) - int(payload.get("t") or 0)) > LOGIN_CHALLENGE_TTL + 30:
-                raise ValueError("???????????")
+                raise LoginCryptoError("登录校验不匹配，请刷新页面后重试")
+            _check_login_freshness(payload.get("t"))
             digest = str(payload.get("d") or "")
             calc = base64.b64encode(hashlib.sha256((str(payload.get("u") or "") + "." + str(payload.get("n") or "") + "." + str(payload.get("p") or "")).encode("utf-8")).digest()).decode("ascii")
             if digest and not hmac.compare_digest(calc, digest):
-                raise ValueError("??????????")
+                raise LoginCryptoError("登录数据校验失败")
             return {"username": str(payload.get("u") or ""), "password": str(payload.get("p") or ""), "crypto": True}
-        except ValueError:
-            raise
-        except Exception:
-            raise ValueError("??????????")
-    enc = data.get("encrypted") if isinstance(data.get("encrypted"), dict) else {}
-    cid = str(enc.get("challenge_id") or "")
-    with LOGIN_CHALLENGE_LOCK:
-        challenge = LOGIN_CHALLENGES.pop(cid, None)
-    if not challenge:
-        raise ValueError("?????????????")
-    if challenge.get("ip_key") != ip_key or float(challenge.get("expires", 0)) <= time.time():
-        raise ValueError("\u8bf7\u8f93\u5165\u8981\u5220\u9664\u7684\u673a\u5668\u4eba\u540d\u79f0")
-    try:
         wrapped_key = base64.b64decode(str(enc.get("key") or ""))
         iv = base64.b64decode(str(enc.get("iv") or ""))
         ciphertext = base64.b64decode(str(enc.get("ciphertext") or ""))
         aad = str(enc.get("aad") or "").encode("utf-8")
         digest = str(enc.get("digest") or "")
-        aes_key = LOGIN_RSA_PRIVATE.decrypt(
-            wrapped_key,
-            padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
-        )
+        aes_key = LOGIN_RSA_PRIVATE.decrypt(wrapped_key, oaep)
         plain = AESGCM(aes_key).decrypt(iv, ciphertext, aad)
         calc = base64.b64encode(hashlib.sha256(aad + b"." + ciphertext).digest()).decode("ascii")
         if not hmac.compare_digest(calc, digest):
-            raise ValueError("??????????")
+            raise LoginCryptoError("登录数据校验失败")
         payload = json.loads(plain.decode("utf-8"))
         if str(payload.get("challenge_id") or "") != cid or str(payload.get("nonce") or "") != str(challenge.get("nonce") or ""):
-            raise ValueError("????????")
-        if abs(int(time.time()) - int(payload.get("ts") or 0)) > LOGIN_CHALLENGE_TTL + 30:
-            raise ValueError("???????????")
+            raise LoginCryptoError("登录校验不匹配，请刷新页面后重试")
+        _check_login_freshness(payload.get("ts"))
         return {"username": str(payload.get("username") or ""), "password": str(payload.get("password") or ""), "crypto": True}
-    except ValueError:
+    except LoginCryptoError:
         raise
     except Exception:
-        raise ValueError("??????????")
+        raise LoginCryptoError("登录数据解密失败，请刷新页面后重试")
 
 
 def shell_state() -> dict[str, str]:
@@ -490,7 +612,7 @@ def shell_state() -> dict[str, str]:
     data.setdefault("INSTALL_PREFIX", cfg.get("install_prefix", str(INSTALL_PREFIX)))
     data.setdefault("PROJECT_DIR", cfg.get("project_dir", str(PROJECT_DIR)))
     data.setdefault("NETWORK_NAME", cfg.get("network_name", "astrbot_network"))
-    data.setdefault("ASTRBOT_REVERSE_WS_TOKEN", cfg.get("default_reverse_ws_token", "yuyu521521"))
+    data.setdefault("ASTRBOT_REVERSE_WS_TOKEN", cfg.get("default_reverse_ws_token", ""))
     return data
 
 
@@ -612,9 +734,20 @@ def os_pretty_name() -> str:
         return "Linux"
 
 
+def remember_ip_geo(ip: str, geo: dict) -> None:
+    if len(IP_GEO_CACHE) >= MAX_IP_GEO_CACHE:
+        for key in list(IP_GEO_CACHE)[: MAX_IP_GEO_CACHE // 2]:
+            IP_GEO_CACHE.pop(key, None)
+    IP_GEO_CACHE[ip] = {"ts": time.time(), "data": geo}
+
+
 def ip_geo(ip: str) -> dict:
     ip = str(ip or "").strip()
-    if not ip or ip.startswith(("127.", "10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")):
+    try:
+        parsed = ipaddress.ip_address(ip)
+    except ValueError:
+        return {}
+    if not parsed.is_global:
         return {}
     cached = IP_GEO_CACHE.get(ip)
     if cached and time.time() - float(cached.get("ts", 0)) < 86400:
@@ -632,7 +765,7 @@ def ip_geo(ip: str) -> dict:
                 "city": str(data.get("city") or "").strip(),
                 "isp": str(data.get("addr") or "").replace(str(data.get("pro") or ""), "").replace(str(data.get("city") or ""), "").strip(),
             }
-            IP_GEO_CACHE[ip] = {"ts": time.time(), "data": geo}
+            remember_ip_geo(ip, geo)
             return geo
     except Exception:
         pass
@@ -647,11 +780,11 @@ def ip_geo(ip: str) -> dict:
                 "city": str(data.get("city") or ""),
                 "isp": str(data.get("isp") or ""),
             }
-            IP_GEO_CACHE[ip] = {"ts": time.time(), "data": geo}
+            remember_ip_geo(ip, geo)
             return geo
     except Exception:
         pass
-    IP_GEO_CACHE[ip] = {"ts": time.time(), "data": {}}
+    remember_ip_geo(ip, {})
     return {}
 
 
@@ -734,7 +867,7 @@ def _host_is_trusted(host: str, cfg: dict) -> bool:
     except ValueError:
         pass
     allowed = set()
-    for key in ("public_base_url", "linyu_remote_server_url"):
+    for key in ("public_base_url", "nailong_remote_server_url"):
         try:
             configured = urlsplit(str(cfg.get(key) or "")).hostname
             if configured:
@@ -855,10 +988,27 @@ class Task:
         return {"id": self.id, "title": self.title, "kind": self.kind, "status": self.status, "progress": self.progress, "logs": redact_secrets(self.logs), "result": redact_secrets(self.result), "created_at": self.created_at, "updated_at": self.updated_at}
 
 
+def prune_tasks() -> None:
+    """Keep TASKS bounded: drop the oldest finished tasks beyond MAX_TASKS."""
+    with TASK_LOCK:
+        overflow = len(TASKS) - MAX_TASKS
+        if overflow <= 0:
+            return
+        for tid in [tid for tid, t in TASKS.items() if t.status in {"success", "failed"}][:overflow]:
+            TASKS.pop(tid, None)
+
+
+def recent_tasks(limit: int = 50) -> list[dict]:
+    with TASK_LOCK:
+        rows = list(TASKS.values())[-limit:]
+    return [t.to_dict() for t in rows]
+
+
 def create_task(title: str, kind: str, func, user: str, *args) -> Task:
     task = Task(id=secrets.token_hex(8), title=title, kind=kind)
     with TASK_LOCK:
         TASKS[task.id] = task
+    prune_tasks()
 
     def runner():
         ok = False
@@ -943,6 +1093,10 @@ def container_status_many(names: list[str]) -> dict[str, dict]:
     for name in names:
         result.setdefault(name, {"name": name, "exists": False, "status": "missing", "running": False})
     return result
+
+
+def astrbot_container() -> str:
+    return safe_name(shell_state().get("ASTRBOT_CONTAINER") or "astrbot")
 
 
 def current_astrbot_password() -> str:
@@ -1078,29 +1232,28 @@ def requester_key(value: str) -> str:
 
 def load_login_assignments() -> dict[str, dict]:
     global NAPCAT_LOGIN_ASSIGNMENTS
-    if not NAPCAT_LOGIN_ASSIGNMENTS:
-        raw = read_json(NAPCAT_LOGIN_ASSIGNMENT_FILE, {})
-        if isinstance(raw, dict):
-            NAPCAT_LOGIN_ASSIGNMENTS = raw
-    cleanup_login_assignments(write_back=False)
-    return NAPCAT_LOGIN_ASSIGNMENTS
+    with ASSIGNMENT_LOCK:
+        if not NAPCAT_LOGIN_ASSIGNMENTS:
+            raw = read_json(NAPCAT_LOGIN_ASSIGNMENT_FILE, {})
+            if isinstance(raw, dict):
+                NAPCAT_LOGIN_ASSIGNMENTS = raw
+        cleanup_login_assignments(write_back=False)
+        return dict(NAPCAT_LOGIN_ASSIGNMENTS)
 
 
 def save_login_assignments() -> None:
-    ensure_parent(NAPCAT_LOGIN_ASSIGNMENT_FILE)
-    write_json(NAPCAT_LOGIN_ASSIGNMENT_FILE, NAPCAT_LOGIN_ASSIGNMENTS)
+    with ASSIGNMENT_LOCK:
+        write_json(NAPCAT_LOGIN_ASSIGNMENT_FILE, NAPCAT_LOGIN_ASSIGNMENTS)
 
 
 def cleanup_login_assignments(write_back: bool = True) -> None:
     now_ts = time.time()
-    changed = False
-    for key in list(NAPCAT_LOGIN_ASSIGNMENTS.keys()):
-        item = NAPCAT_LOGIN_ASSIGNMENTS.get(key) or {}
-        if float(item.get("expires", 0)) <= now_ts:
+    with ASSIGNMENT_LOCK:
+        expired = [key for key, item in NAPCAT_LOGIN_ASSIGNMENTS.items() if float((item or {}).get("expires", 0)) <= now_ts]
+        for key in expired:
             NAPCAT_LOGIN_ASSIGNMENTS.pop(key, None)
-            changed = True
-    if changed and write_back:
-        save_login_assignments()
+        if expired and write_back:
+            save_login_assignments()
 
 
 def assignment_for_requester(requester: str) -> dict | None:
@@ -1123,20 +1276,26 @@ def assignment_owner(name: str) -> str:
 def assign_login_slot(requester: str, name: str) -> dict:
     key = requester_key(requester)
     item = {"requester": key, "name": safe_name(name), "created": time.time(), "expires": time.time() + NAPCAT_LOGIN_ASSIGNMENT_TTL}
-    NAPCAT_LOGIN_ASSIGNMENTS[key] = item
-    save_login_assignments()
+    with ASSIGNMENT_LOCK:
+        NAPCAT_LOGIN_ASSIGNMENTS[key] = item
+        save_login_assignments()
     return dict(item)
+
+
+def release_login_assignment(requester: str) -> None:
+    with ASSIGNMENT_LOCK:
+        if NAPCAT_LOGIN_ASSIGNMENTS.pop(requester_key(requester), None) is not None:
+            save_login_assignments()
 
 
 def release_login_assignment_by_name(name: str) -> None:
     safe = safe_name(name)
-    changed = False
-    for key in list(NAPCAT_LOGIN_ASSIGNMENTS.keys()):
-        if NAPCAT_LOGIN_ASSIGNMENTS.get(key, {}).get("name") == safe:
+    with ASSIGNMENT_LOCK:
+        keys = [key for key, item in NAPCAT_LOGIN_ASSIGNMENTS.items() if (item or {}).get("name") == safe]
+        for key in keys:
             NAPCAT_LOGIN_ASSIGNMENTS.pop(key, None)
-            changed = True
-    if changed:
-        save_login_assignments()
+        if keys:
+            save_login_assignments()
 
 
 def http_json_post(url: str, payload: dict | None = None, headers: dict | None = None, timeout: int = 10) -> dict:
@@ -1154,7 +1313,7 @@ def http_json_post_optional(url: str, payload: dict | None = None, headers: dict
         return False, str(e)
 
 
-def napcat_webui_credential(row: dict, force_refresh: bool = False) -> str:
+def napcat_webui_credential(row: dict, force_refresh: bool = False, timeout: int = 10) -> str:
     name = str(row.get("name") or row.get("webui_port") or "napcat")
     token = str(row.get("token") or "")
     token_hash = hashlib.sha256((token + ".napcat").encode("utf-8")).hexdigest()
@@ -1165,7 +1324,7 @@ def napcat_webui_credential(row: dict, force_refresh: bool = False) -> str:
     if not force_refresh and cache and cache.get("hash") == token_hash and cache.get("expires", 0) > now_ts + 60:
         return str(cache["credential"])
     port = str(row["webui_port"])
-    res = http_json_post("http://127.0.0.1:%s/api/auth/login" % port, {"hash": token_hash})
+    res = http_json_post("http://127.0.0.1:%s/api/auth/login" % port, {"hash": token_hash}, timeout=timeout)
     if int(res.get("code", -1)) != 0:
         msg = str(res.get("message", "unknown"))
         if "rate" in msg.lower():
@@ -1179,12 +1338,12 @@ def napcat_webui_credential(row: dict, force_refresh: bool = False) -> str:
     return cred
 
 
-def napcat_webui_call(row: dict, path: str, payload: dict | None = None) -> dict:
+def napcat_webui_call(row: dict, path: str, payload: dict | None = None, timeout: int = 10) -> dict:
     port = str(row["webui_port"])
     last = None
     for force in (False, True):
-        cred = napcat_webui_credential(row, force_refresh=force)
-        last = http_json_post("http://127.0.0.1:%s/api/%s" % (port, path.lstrip("/")), payload or {}, {"Authorization": "Bearer " + cred})
+        cred = napcat_webui_credential(row, force_refresh=force, timeout=timeout)
+        last = http_json_post("http://127.0.0.1:%s/api/%s" % (port, path.lstrip("/")), payload or {}, {"Authorization": "Bearer " + cred}, timeout=timeout)
         if int(last.get("code", -1)) != -1 or "Unauthorized" not in str(last.get("message", "")):
             return last
         NAPCAT_CREDENTIAL_CACHE.pop(str(row.get("name") or row.get("webui_port") or "napcat"), None)
@@ -1245,6 +1404,7 @@ def restart_napcat_for_fresh_qr(row: dict, reason: str, wait_seconds: int = 18) 
     name = safe_name(str(row.get("name", "")))
     NAPCAT_CREDENTIAL_CACHE.pop(name, None)
     NAPCAT_QR_CACHE.pop(name, None)
+    NAPCAT_IDENTITY_CACHE.pop(name, None)
     docker(["restart", name], timeout=120)
     deadline = time.time() + max(5, wait_seconds)
     port = str(row.get("webui_port") or "")
@@ -1270,6 +1430,7 @@ def reset_idle_napcat_for_fresh_login(row: dict, reason: str = "reset idle login
     cfg_dir = inst_dir / "config"
     NAPCAT_CREDENTIAL_CACHE.pop(name, None)
     NAPCAT_QR_CACHE.pop(name, None)
+    NAPCAT_IDENTITY_CACHE.pop(name, None)
     docker(["stop", name], timeout=120)
     if ntqq_dir.exists():
         for child in ntqq_dir.iterdir():
@@ -1429,6 +1590,22 @@ def napcat_onebot_quick(row: dict, action: str, timeout: float = 1.4) -> tuple[b
     return http_json_post_optional(url, {}, headers, timeout=timeout)
 
 
+def napcat_cached_identity(row: dict, ttl: float = 120.0) -> tuple[str, str]:
+    """QQ nickname/uin of a logged-in NapCat, cached so pool polling stays cheap."""
+    name = str(row.get("name") or "")
+    hit = NAPCAT_IDENTITY_CACHE.get(name)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1], hit[2]
+    try:
+        info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo", timeout=3)
+        data = (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {}
+        login_name, login_uin = napcat_login_identity(data)
+    except Exception:
+        login_name, login_uin = "", ""
+    NAPCAT_IDENTITY_CACHE[name] = (time.time(), login_name, login_uin)
+    return login_name, login_uin
+
+
 def napcat_pool_item(row: dict) -> dict:
     name = str(row.get("name") or "")
     recovery = row.get("recovery") if isinstance(row.get("recovery"), dict) else {}
@@ -1459,6 +1636,13 @@ def napcat_pool_item(row: dict) -> dict:
         item["assignment_ttl"] = max(0, int(float(assigned.get("expires", 0)) - time.time()))
     if not item["running"]:
         return item
+    try:
+        status = napcat_webui_call(row, "/QQLogin/CheckLoginStatus", timeout=3)
+        if int(status.get("code", -1)) == 0 and (status.get("data") or {}).get("isLogin"):
+            item["online"] = True
+            item["login_name"], item["login_uin"] = napcat_cached_identity(row)
+    except Exception:
+        pass
     ok_status, st = napcat_onebot_quick(row, "/get_status")
     if ok_status and isinstance(st, dict):
         data = st.get("data") or {}
@@ -1468,8 +1652,8 @@ def napcat_pool_item(row: dict) -> dict:
     ok_info, info = napcat_onebot_quick(row, "/get_login_info")
     if ok_info and isinstance(info, dict) and info.get("retcode", 0) in (0, "0"):
         login_name, login_uin = napcat_login_identity(info.get("data") or info)
-        item["login_name"] = login_name
-        item["login_uin"] = login_uin
+        item["login_name"] = login_name or item["login_name"]
+        item["login_uin"] = login_uin or item["login_uin"]
         if login_name or login_uin:
             item["online"] = True
             item["onebot_ok"] = True
@@ -1556,17 +1740,35 @@ def astrbot_data(origin: str | None = None) -> dict:
     st = shell_state()
     origin = origin or public_origin()
     deploy = Path(st.get("DEPLOY_INFO_FILE", str(INSTALL_PREFIX / "deploy_info.txt")))
-    return {"status": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "url": url_for_port(origin, st.get("ASTRBOT_WEB_PORT", "6185")), "username": st.get("ASTRBOT_USERNAME", "astrbot"), "password": current_astrbot_password(), "token": st.get("ASTRBOT_REVERSE_WS_TOKEN", "yuyu521521"), "config_path": str(INSTALL_PREFIX / "data" / "cmd_config.json"), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署"}
+    return {"status": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "url": url_for_port(origin, st.get("ASTRBOT_WEB_PORT", "6185")), "username": st.get("ASTRBOT_USERNAME", "astrbot"), "password": current_astrbot_password(), "token": st.get("ASTRBOT_REVERSE_WS_TOKEN", ""), "config_path": str(INSTALL_PREFIX / "data" / "cmd_config.json"), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署"}
 
 
 def get_logs(target: str, lines: int) -> str:
     target = safe_name(target) if target not in {"deploy", "panel"} else target
+    lines = max(1, min(int(lines or 300), 5000))
     if target == "deploy":
         return tail_file(INSTALL_PREFIX / "logs" / "astrbot-deploy.log", lines)
     if target == "panel":
         return tail_file(AUDIT_LOG, lines)
     _, out = docker(["logs", "--tail", str(lines), target], timeout=30)
     return out
+
+
+def cached_logs(target: str, lines: int, ttl: float = 1.0) -> str:
+    """Share one `docker logs` call between all live log viewers of the same target."""
+    key = (target, lines)
+    now_ts = time.monotonic()
+    with LOG_CACHE_LOCK:
+        hit = LOG_CACHE.get(key)
+        if hit and now_ts - hit[0] < ttl:
+            return hit[1]
+    text = get_logs(target, lines)
+    with LOG_CACHE_LOCK:
+        LOG_CACHE[key] = (time.monotonic(), text)
+        if len(LOG_CACHE) > 64:
+            for old in sorted(LOG_CACHE, key=lambda k: LOG_CACHE[k][0])[:32]:
+                LOG_CACHE.pop(old, None)
+    return text
 
 
 def tail_file(path: Path, lines: int) -> str:
@@ -1673,7 +1875,6 @@ def validate_backup_archive(path: Path) -> None:
             total = 0
             for member in members:
                 name = str(member.name or "").replace("\\", "/")
-                parts = PurePosixPath(name).parts
                 raw_parts = name.split("/")
                 if not name or name.startswith("/") or any(part in {"", ".", ".."} for part in raw_parts) or "\x00" in name:
                     raise ValueError("备份压缩包包含不安全路径：" + name)
@@ -1711,7 +1912,7 @@ def task_install_plugin(task: Task, src: str, restart: bool) -> dict:
     out = ""
     if restart:
         task.line("正在重启 AstrBot 让插件生效", 85)
-        _, out = docker(["restart", "astrbot"], timeout=120)
+        _, out = docker(["restart", astrbot_container()], timeout=120)
         task.line(out, 95)
     return {"ok": True, "plugin_dir": str(plugin_dir), "files": len(extracted), "output": out}
 
@@ -1749,6 +1950,148 @@ def untrusted_file_requires_download(mime: str, filename: str) -> bool:
     media_type = str(mime or "").lower().split(";", 1)[0].strip()
     active_types = {"text/html", "application/xhtml+xml", "image/svg+xml", "text/xml", "application/xml"}
     return media_type in active_types or Path(str(filename or "")).suffix.lower() in {".html", ".htm", ".xhtml", ".svg", ".xml"}
+
+
+class UploadPart:
+    """One multipart/form-data part. File parts live in a temp file at `path`."""
+
+    def __init__(self, name: str, filename: str | None, content_type: str):
+        self.name = name
+        self.filename = filename
+        self.content_type = content_type
+        self.path: Path | None = None
+        self.size = 0
+        self.value = ""
+
+    def discard(self) -> None:
+        if self.path is not None:
+            try:
+                self.path.unlink()
+            except FileNotFoundError:
+                pass
+            self.path = None
+
+
+def multipart_boundary(content_type: str) -> bytes:
+    msg = Message()
+    msg["content-type"] = content_type
+    if msg.get_content_type() != "multipart/form-data":
+        raise ValueError("上传请求必须使用 multipart/form-data")
+    boundary = str(msg.get_param("boundary") or "")
+    if not boundary or len(boundary) > 200 or not boundary.isascii():
+        raise ValueError("multipart boundary 不合法")
+    return boundary.encode("ascii")
+
+
+def _part_headers(raw: bytes) -> tuple[str, str | None, str]:
+    msg = Message()
+    for line in raw.decode("utf-8", errors="replace").split("\r\n"):
+        if ":" in line:
+            key, value = line.split(":", 1)
+            msg[key.strip()] = value.strip()
+    if msg.get("content-disposition") is None:
+        raise ValueError("multipart 缺少 Content-Disposition")
+    name = str(msg.get_param("name", header="content-disposition") or "")
+    filename = msg.get_filename()
+    if filename is None and msg.get_param("filename", header="content-disposition") is not None:
+        filename = ""
+    return name, filename, str(msg.get("content-type") or "")
+
+
+def parse_multipart(stream, content_type: str, content_length: int, tmp_dir: Path, max_file_bytes: int, max_files: int = 50, max_field_bytes: int = 64 * 1024, chunk_size: int = 256 * 1024) -> list[UploadPart]:
+    """Stream a multipart/form-data body to disk without buffering whole files in memory."""
+    sep = b"\r\n--" + multipart_boundary(content_type)
+    remaining = int(content_length)
+    # A leading CRLF lets the first delimiter match the same pattern as the rest.
+    buf = bytearray(b"\r\n")
+    parts: list[UploadPart] = []
+
+    def fill() -> None:
+        nonlocal remaining
+        if remaining <= 0:
+            raise ValueError("上传数据不完整")
+        chunk = stream.read(min(chunk_size, remaining))
+        if not chunk:
+            raise ValueError("上传数据不完整")
+        remaining -= len(chunk)
+        buf.extend(chunk)
+
+    try:
+        while True:
+            idx = buf.find(sep)
+            if idx >= 0:
+                del buf[: idx + len(sep)]
+                break
+            if len(buf) > len(sep):
+                del buf[: len(buf) - len(sep)]
+            fill()
+        while True:
+            while len(buf) < 2:
+                fill()
+            if buf[:2] == b"--":
+                break
+            if buf[:2] != b"\r\n":
+                raise ValueError("multipart 格式不正确")
+            del buf[:2]
+            while True:
+                idx = buf.find(b"\r\n\r\n")
+                if idx >= 0:
+                    break
+                if len(buf) > 16384:
+                    raise ValueError("multipart 头部过大")
+                fill()
+            name, filename, part_type = _part_headers(bytes(buf[:idx]))
+            del buf[: idx + 4]
+            part = UploadPart(name, filename, part_type)
+            parts.append(part)
+            sink = None
+            if filename is not None:
+                if sum(1 for x in parts if x.filename is not None) > max_files:
+                    raise ValueError("单次最多上传 %d 个文件" % max_files)
+                fd, tmp_name = tempfile.mkstemp(prefix=".upload-", dir=str(tmp_dir))
+                part.path = Path(tmp_name)
+                sink = os.fdopen(fd, "wb")
+                limit = max_file_bytes
+            else:
+                field = bytearray()
+                limit = max_field_bytes
+            try:
+                while True:
+                    idx = buf.find(sep)
+                    if idx >= 0:
+                        data, done = buf[:idx], True
+                    else:
+                        keep = len(sep) - 1
+                        data, done = buf[: max(0, len(buf) - keep)], False
+                    if data:
+                        part.size += len(data)
+                        if part.size > limit:
+                            raise PayloadTooLarge("单个文件超过大小限制" if sink else "表单字段过大")
+                        if sink:
+                            sink.write(data)
+                        else:
+                            field.extend(data)
+                    if done:
+                        del buf[: idx + len(sep)]
+                        break
+                    del buf[: len(data)]
+                    fill()
+            finally:
+                if sink:
+                    sink.close()
+            if sink is None:
+                part.value = field.decode("utf-8", errors="replace")
+        # Drain the epilogue so the connection is left in a clean state.
+        while remaining > 0:
+            chunk = stream.read(min(chunk_size, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+        return parts
+    except BaseException:
+        for part in parts:
+            part.discard()
+        raise
 
 
 class FileRepository:
@@ -1856,19 +2199,21 @@ class FileService:
             raise FileNotFoundError("file not found")
         return item
 
-    def upload_field(self, item, visibility: str = "public") -> dict:
-        filename = self.safe_filename(getattr(item, "filename", ""))
+    def max_upload_bytes(self) -> int:
+        return int(self.cfg.get("max_upload_mb", 256)) * 1024 * 1024
+
+    def store_upload(self, part: UploadPart, visibility: str = "public") -> dict:
+        if part.path is None:
+            raise ValueError("上传文件为空")
+        filename = self.safe_filename(part.filename or "")
         fid = uuid.uuid4().hex
         stored = "%s-%s" % (fid[:12], filename)
-        max_size = int(self.cfg.get("max_upload_mb", 256)) * 1024 * 1024
-        data = item.file.read(max_size + 1)
-        if len(data) > max_size:
-            raise ValueError("????????")
         dest = path_under(self.base, stored)
-        dest.write_bytes(data)
+        os.replace(part.path, dest)
+        part.path = None
         mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         now_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        meta = {"id": fid, "filename": filename, "stored_name": stored, "size": len(data), "mime": mime, "kind": file_kind(filename, mime), "created_at": now_text, "updated_at": now_text, "downloads": 0, "views": 0, "public": visibility != "private", "access": visibility or "public", "expires_at": 0, "max_downloads": 0}
+        meta = {"id": fid, "filename": filename, "stored_name": stored, "size": part.size, "mime": mime, "kind": file_kind(filename, mime), "created_at": now_text, "updated_at": now_text, "downloads": 0, "views": 0, "public": visibility != "private", "access": visibility or "public", "expires_at": 0, "max_downloads": 0}
         return self.serialize(self.repo.upsert(meta))
 
     def delete(self, file_id: str) -> dict:
@@ -1942,10 +2287,25 @@ def task_shell(task: Task, title: str, script: str, timeout: int) -> dict:
     return {"ok": code == 0, "output": out}
 
 
+@contextmanager
+def napcat_mutation(task: Task | None = None, wait_seconds: int = NAPCAT_MUTATION_WAIT_SECONDS):
+    """Serialise NapCat create/delete so ports, index and .env are never written concurrently."""
+    if not NAPCAT_MUTATION_LOCK.acquire(blocking=False):
+        if task:
+            task.line("已有机器人创建/删除任务在进行，排队等待中…")
+        if not NAPCAT_MUTATION_LOCK.acquire(timeout=wait_seconds):
+            raise ValueError("已有机器人创建/删除任务在进行，请稍后再试")
+    try:
+        yield
+    finally:
+        NAPCAT_MUTATION_LOCK.release()
+
+
 def task_add_napcat(task: Task, count: int) -> dict:
     task.line("\u6b63\u5728\u51c6\u5907\u521b\u5efa\u673a\u5668\u4eba\uff0c\u4f1a\u81ea\u52a8\u5206\u914d\u7aef\u53e3\u548c\u5bb9\u5668\u76ee\u5f55", 12)
     script = "DOCKER_PULL_TIMEOUT=${DOCKER_PULL_TIMEOUT:-120} add_napcat_instances %d; repair_astrbot_napcat_connection; write_deploy_info" % count
-    return task_shell(task, "\u5f00\u59cb\u521b\u5efa NapCat x%d" % count, script, 1800)
+    with napcat_mutation(task):
+        return task_shell(task, "\u5f00\u59cb\u521b\u5efa NapCat x%d" % count, script, 1800)
 
 
 def task_apply_no_prefix(task: Task) -> dict:
@@ -1961,6 +2321,11 @@ def task_repair_connection(task: Task) -> dict:
 
 
 def delete_napcat(name: str, keep_data: bool) -> tuple[int, str]:
+    with napcat_mutation():
+        return _delete_napcat(name, keep_data)
+
+
+def _delete_napcat(name: str, keep_data: bool) -> tuple[int, str]:
     st = shell_state()
     base = Path(st.get("NAPCAT_BASE_DIR", str(INSTALL_PREFIX / "napcat")))
     idx = Path(st.get("NAPCAT_INDEX_FILE", str(INSTALL_PREFIX / "napcat_index.tsv")))
@@ -2087,8 +2452,7 @@ class Handler(BaseHTTPRequestHandler):
         return data
 
     def remote_client_key(self) -> str:
-        raw = self.client_address[0] if self.client_address else "unknown"
-        return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()
+        return hashlib.sha256(self.client_ip().encode("utf-8", errors="ignore")).hexdigest()
 
     def file_service(self) -> FileService:
         return FileService(load_config(), self.request_origin())
@@ -2128,15 +2492,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def remote_principal_ok(self, data: dict, allow_public_login: bool = False) -> bool:
         cfg = load_config()
-        owners = set(split_csv_ids(cfg.get("linyu_remote_owner_ids")))
-        bots = set(split_csv_ids(cfg.get("linyu_remote_bot_self_ids")))
+        owners = set(split_csv_ids(cfg.get("nailong_remote_owner_ids")))
+        bots = set(split_csv_ids(cfg.get("nailong_remote_bot_self_ids")))
         requester = str(data.get("requester") or "").strip()
         bot_self_id = str(data.get("bot_self_id") or "").strip()
         if not bool(bots) or bot_self_id not in bots:
             return False
         if bool(owners) and requester in owners:
             return True
-        return bool(allow_public_login and cfg.get("linyu_remote_public_login_enabled", False))
+        return bool(allow_public_login and cfg.get("nailong_remote_public_login_enabled", False))
 
     def same_origin_request_ok(self) -> bool:
         source = str(self.headers.get("Origin") or "").strip()
@@ -2191,14 +2555,14 @@ class Handler(BaseHTTPRequestHandler):
         cfg = load_config()
         payload_obj = {
             "sid": secrets.token_urlsafe(18),
-            "exp": time.time() + 86400 * 7,
+            "exp": time.time() + SESSION_TTL_SECONDS,
             "auth_epoch": int(cfg.get("auth_epoch") or 0),
         }
         payload = base64.urlsafe_b64encode(json.dumps(payload_obj, separators=(",", ":")).encode()).decode().rstrip("=")
         sig = hmac.new(cfg["session_secret"].encode(), payload.encode(), hashlib.sha256).hexdigest()
         return payload + "." + sig
 
-    def session_cookie(self, token: str, max_age: int = 86400) -> str:
+    def session_cookie(self, token: str, max_age: int = SESSION_TTL_SECONDS) -> str:
         cookie = "adb_session=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d" % (token, max_age)
         if is_https_request(self):
             cookie += "; Secure"
@@ -2285,7 +2649,7 @@ class Handler(BaseHTTPRequestHandler):
             if p.path == "/api/napcat/open":
                 return self.napcat_open(p)
             if p.path == "/api/tasks":
-                return self.send_api(api(True, [t.to_dict() for t in list(TASKS.values())[-50:]]))
+                return self.send_api(api(True, recent_tasks()))
             if p.path.startswith("/api/tasks/"):
                 t = TASKS.get(p.path.split("/")[-1])
                 return self.send_api(api(bool(t), t.to_dict() if t else None, "" if t else "任务不存在"))
@@ -2326,7 +2690,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_api(api(False, message=str(e), code="FORBIDDEN"), 403)
         except ValueError as e:
             self.send_api(api(False, message=str(e), code="BAD_REQUEST"), 400)
-        except Exception as e:
+        except Exception:
             traceback.print_exc()
             self.send_api(api(False, message="服务器内部错误", code="SERVER_ERROR"), 500)
 
@@ -2349,7 +2713,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_api(api(False, message=str(e), code="FORBIDDEN"), 403)
         except ValueError as e:
             self.send_api(api(False, message=str(e), code="BAD_REQUEST"), 400)
-        except Exception as e:
+        except Exception:
             traceback.print_exc()
             self.send_api(api(False, message="服务器内部错误", code="SERVER_ERROR"), 500)
 
@@ -2431,9 +2795,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.install_plugin(user)
             if p.path == "/api/watchdog/restart":
                 return self.watchdog_restart(user)
-            if p.path == "/api/linyu-remote/sync":
-                res = sync_linyu_remote_plugin_config(self.request_origin())
-                audit(user, "linyu_remote.sync", res, True)
+            if p.path == "/api/nailong-remote/sync":
+                res = sync_nailong_remote_plugin_config(self.request_origin())
+                audit(user, "nailong_remote.sync", res, True)
                 return self.send_api(api(True, res, "已同步 QQ 远程登录插件配置"))
             if p.path == "/api/device/report":
                 return self.device_report(user)
@@ -2443,9 +2807,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.handle_files_post(p, user)
             if p.path == "/api/settings":
                 cfg = save_config_patch(self.read_json())
-                plugin_sync = sync_linyu_remote_plugin_config(self.request_origin())
-                audit(user, "settings.save", {"linyu_remote": plugin_sync}, True)
-                return self.send_api(api(True, {**sanitize_config(cfg), "linyu_remote_plugin": plugin_sync}))
+                plugin_sync = sync_nailong_remote_plugin_config(self.request_origin())
+                audit(user, "settings.save", {"nailong_remote": plugin_sync}, True)
+                return self.send_api(api(True, {**sanitize_config(cfg), "nailong_remote_plugin": plugin_sync}))
             if p.path == "/api/account/password":
                 return self.change_password(user)
             if p.path == "/api/config/astrbot":
@@ -2457,7 +2821,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_api(api(False, message=str(e), code="FORBIDDEN"), 403)
         except ValueError as e:
             self.send_api(api(False, message=str(e), code="BAD_REQUEST"), 400)
-        except Exception as e:
+        except Exception:
             traceback.print_exc()
             self.send_api(api(False, message="服务器内部错误", code="SERVER_ERROR"), 500)
 
@@ -2487,8 +2851,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
     def login_challenge(self):
-        ip = self.client_address[0] if self.client_address else "unknown"
-        key = login_key_for_ip(ip)
+        key = login_key_for_ip(self.client_ip())
         allowed, retry_after = login_challenge_allowed(key)
         if not allowed:
             self.send_response(429)
@@ -2506,8 +2869,7 @@ class Handler(BaseHTTPRequestHandler):
     def login(self):
         data = self.read_json()
         cfg = load_config()
-        ip = self.client_address[0] if self.client_address else "unknown"
-        login_key = login_key_for_ip(ip)
+        login_key = login_key_for_ip(self.client_ip())
         now_ts = time.time()
         with LOGIN_RATE_LOCK:
             lock_until = LOGIN_LOCKS.get(login_key, 0)
@@ -2544,7 +2906,7 @@ class Handler(BaseHTTPRequestHandler):
             body = json.dumps(api(True, public_session_payload(cfg["username"])), ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Set-Cookie", self.session_cookie(token, 86400))
+            self.send_header("Set-Cookie", self.session_cookie(token))
             self.security_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -2659,10 +3021,11 @@ class Handler(BaseHTTPRequestHandler):
         enabled = data.get("enabled")
         if not isinstance(enabled, bool):
             raise ValueError("enabled 必须是布尔值")
-        cfg = load_config()
-        cfg["linyu_remote_public_login_enabled"] = enabled
-        write_json(PANEL_CONFIG, cfg)
-        sync_linyu_remote_plugin_config(None)
+        with CONFIG_LOCK:
+            cfg = load_config()
+            cfg["nailong_remote_public_login_enabled"] = enabled
+            save_config(cfg)
+        sync_nailong_remote_plugin_config(None)
         requester = str(data.get("requester") or "remote")[:64]
         audit("remote", "remote.login.public_access", {"requester": requester, "enabled": enabled}, True)
         return self.send_api(api(True, {"enabled": enabled}))
@@ -2697,8 +3060,7 @@ class Handler(BaseHTTPRequestHandler):
                     audit("remote", "remote.napcat.reuse_assigned_slot", {"name": row.get("name"), "requester": requester}, True)
                     return self.send_api(api(True, bundle))
                 except Exception:
-                    NAPCAT_LOGIN_ASSIGNMENTS.pop(requester, None)
-                    save_login_assignments()
+                    release_login_assignment(requester)
             rows = parse_napcat_index(self.request_origin(), expose_secret=True)
             occupied = []
             last_error = ""
@@ -2767,8 +3129,9 @@ class Handler(BaseHTTPRequestHandler):
                 audit("remote", "remote.napcat.create_login.no_idle", {"requester": str(data.get("requester", ""))[:64], "occupied": len(occupied)}, False)
                 return self.send_api(api(False, {"occupied": occupied, "last_error": last_error}, "\u6ca1\u6709\u7a7a\u95f2\u673a\u5668\u4eba\uff0c\u666e\u901a\u7528\u6237\u4e0d\u80fd\u81ea\u52a8\u521b\u5efa\u65b0\u673a\u5668\u4eba", "NO_IDLE_NAPCAT"), 409)
 
-            before_names = {r.get("name") for r in parse_napcat_index(expose_secret=True)}
-            code, out = bash("ASTRBOT_SYNC_AFTER_NAPCAT=0 add_napcat_instances 1; write_deploy_info; nohup bash -lc 'sleep 60; cd \"$PROJECT_DIR\"; source lib/ops.sh; sync_astrbot_platforms; write_deploy_info' >/opt/astrbot/logs/remote-plugin-delayed-sync.log 2>&1 &", timeout=900)
+            with napcat_mutation(wait_seconds=120):
+                before_names = {r.get("name") for r in parse_napcat_index(expose_secret=True)}
+                code, out = bash("ASTRBOT_SYNC_AFTER_NAPCAT=0 add_napcat_instances 1; write_deploy_info; nohup bash -lc 'sleep 60; cd \"$PROJECT_DIR\"; source lib/ops.sh; sync_astrbot_platforms; write_deploy_info' >\"$LOG_DIR/remote-plugin-delayed-sync.log\" 2>&1 &", timeout=900)
             if code != 0:
                 audit("remote", "remote.napcat.create_login", {"ok": False}, False)
                 return self.send_api(api(False, {"output": out[-4000:], "occupied": occupied, "last_error": last_error}, "create NapCat failed", "CREATE_FAILED"), 500)
@@ -2809,7 +3172,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("name is required")
         requester = requester_key(str(data.get("requester") or self.remote_client_key()))
         assigned = assignment_for_requester(requester)
-        owners = set(split_csv_ids(load_config().get("linyu_remote_owner_ids")))
+        owners = set(split_csv_ids(load_config().get("nailong_remote_owner_ids")))
         is_owner = str(data.get("requester") or "").strip() in owners
         if not is_owner and (not assigned or safe_name(str(assigned.get("name") or "")) != name):
             audit("remote", "remote.napcat.login_status.assignment_denied", {"name": name, "requester": requester[:64]}, False)
@@ -2832,10 +3195,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def astrbot_action(self, user: str):
         action = self.read_json().get("action")
-        mapping = {"start": ["start", "astrbot"], "stop": ["stop", "astrbot"], "restart": ["restart", "astrbot"]}
-        if action not in mapping:
+        if action not in {"start", "stop", "restart"}:
             raise ValueError("操作不支持")
-        code, out = docker(mapping[action], timeout=120)
+        code, out = docker([action, astrbot_container()], timeout=120)
         audit(user, "astrbot." + action, {}, code == 0)
         self.send_api(api(code == 0, {"output": out}, "完成" if code == 0 else out))
 
@@ -2907,19 +3269,20 @@ class Handler(BaseHTTPRequestHandler):
         count = int(data.get("napcat_count", 1))
         if count < 0 or count > 999:
             raise ValueError("NapCat 数量必须是 0-999")
-        token = str(data.get("reverse_token", "")).strip() or "yuyu521521"
+        token = str(data.get("reverse_token", "")).strip() or str(load_config().get("default_reverse_ws_token") or secrets.token_hex(12))
         if not all(c.isalnum() or c in "._-+=" for c in token) or len(token) < 4:
             raise ValueError("连接 Token 格式不合法")
-        cfg = load_config()
-        cfg["default_reverse_ws_token"] = token
-        write_json(PANEL_CONFIG, cfg)
+        with CONFIG_LOCK:
+            cfg = load_config()
+            cfg["default_reverse_ws_token"] = token
+            save_config(cfg)
         script = (
             "save_state_var ASTRBOT_REVERSE_WS_TOKEN %s; "
             ": \"${ASTRBOT_WEB_PORT:=$(find_free_port 6185)}\"; "
             ": \"${ASTRBOT_WS_PORT:=$(find_free_port 6199)}\"; "
             "save_state_var ASTRBOT_WEB_PORT \"$ASTRBOT_WEB_PORT\"; "
             "save_state_var ASTRBOT_WS_PORT \"$ASTRBOT_WS_PORT\"; "
-            "ensure_network; deploy_astrbot; apply_astrbot_default_config; install_linyu_remote_plugin; "
+            "ensure_network; deploy_astrbot; apply_astrbot_default_config; install_nailong_remote_plugin; "
             % sh_quote(token)
         )
         if count > 0:
@@ -2977,7 +3340,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"retry: 2500\n\n")
             last = ""
             for _ in range(1800):
-                text = get_logs(target, 220)
+                text = cached_logs(target, 220)
                 if keyword:
                     text = "\n".join([x for x in text.splitlines() if keyword in x.lower()])
                 if text != last:
@@ -3032,13 +3395,17 @@ class Handler(BaseHTTPRequestHandler):
     def handle_files_delete_id(self, file_id: str, user: str):
         data = self.read_json()
         if data.get("confirm") not in {file_id, "DELETE"}:
-            raise ValueError("???????")
+            raise ValueError("需要二次确认")
         item = self.file_service().delete(file_id)
         audit(user, "file_center.delete", {"id": file_id, "filename": item.get("filename")}, True)
-        return self.send_api(api(True, item, "???"))
+        return self.send_api(api(True, item, "已删除"))
 
     def file_token_action(self, user: str):
         data = self.read_json()
+        with CONFIG_LOCK:
+            return self._file_token_action(user, data)
+
+    def _file_token_action(self, user: str, data: dict):
         action = str(data.get("action") or "create")
         cfg = load_config()
         tokens = [x for x in (cfg.get("file_api_tokens", []) or []) if isinstance(x, dict)]
@@ -3059,7 +3426,7 @@ class Handler(BaseHTTPRequestHandler):
             item = {"id": tid, "name": str(data.get("name") or "AstrBot Plugin")[:80], "hash": hashlib.sha256(raw.encode()).hexdigest(), "last4": raw[-4:], "created_at": now(), "disabled": False, "scopes": scopes}
             tokens.append(item)
             cfg["file_api_tokens"] = tokens
-            write_json(PANEL_CONFIG, cfg)
+            save_config(cfg)
             audit(user, "file_center.token." + action, {"id": tid}, True)
             return self.send_api(api(True, {"token": raw, "item": {k: item[k] for k in ["id", "name", "last4", "created_at", "disabled", "scopes"]}}, "Token 仅显示一次，请立即保存"))
         if action in {"delete", "disable", "enable"}:
@@ -3072,31 +3439,72 @@ class Handler(BaseHTTPRequestHandler):
                     item["disabled"] = action == "disable"
                 out.append(item)
             cfg["file_api_tokens"] = out
-            write_json(PANEL_CONFIG, cfg)
+            save_config(cfg)
             audit(user, "file_center.token." + action, {"id": tid}, True)
             return self.send_api(api(True, {"id": tid}))
         raise ValueError("unsupported token action")
+
+    def requested_range(self, size: int) -> tuple[int, int] | None:
+        """Parse a single `Range: bytes=a-b`. Returns None for a full response."""
+        raw = str(self.headers.get("Range") or "").strip()
+        m = re.fullmatch(r"bytes=(\d*)-(\d*)", raw)
+        if not m or size <= 0 or (not m.group(1) and not m.group(2)):
+            return None
+        if m.group(1):
+            start = int(m.group(1))
+            end = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
+        else:
+            start, end = max(0, size - int(m.group(2))), size - 1
+        if start > end or start >= size:
+            raise RangeNotSatisfiable()
+        return start, end
+
+    def send_path(self, path: Path, content_type: str, filename: str | None = None, attachment: bool = False, untrusted: bool = False) -> None:
+        """Stream a file from disk (with Range support) instead of loading it into memory."""
+        size = path.stat().st_size
+        try:
+            byte_range = self.requested_range(size)
+        except RangeNotSatisfiable:
+            self.send_response(416)
+            self.send_header("Content-Range", "bytes */%d" % size)
+            self.send_header("Content-Length", "0")
+            self.security_headers(untrusted_content=untrusted)
+            self.end_headers()
+            return
+        start, end = byte_range or (0, size - 1)
+        length = max(0, end - start + 1)
+        self.send_response(206 if byte_range else 200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Accept-Ranges", "bytes")
+        self.security_headers(untrusted_content=untrusted)
+        if attachment:
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(filename or path.name))
+        if byte_range:
+            self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, size))
+        self.send_header("Content-Length", str(length))
+        self.end_headers()
+        try:
+            with path.open("rb") as f:
+                f.seek(start)
+                left = length
+                while left > 0:
+                    chunk = f.read(min(256 * 1024, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def send_file_center_download(self, file_id: str, attachment: bool = True):
         svc = self.file_service()
         item = svc.touch(file_id, "downloads" if attachment else "views")
         path = svc.file_path(item)
-        body = path.read_bytes()
         mime = str(item.get("mime") or mimetypes.guess_type(str(path))[0] or "application/octet-stream").lower()
         if untrusted_file_requires_download(mime, str(item.get("filename") or path.name)):
             attachment = True
-        self.send_response(200)
-        self.send_header("Content-Type", mime)
-        self.send_header("Cache-Control", "no-store")
-        self.security_headers(untrusted_content=True)
-        if attachment:
-            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(str(item.get("filename") or path.name)))
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
-            return
+        self.send_path(path, mime, str(item.get("filename") or path.name), attachment=attachment, untrusted=True)
 
     def handle_public_file(self, p):
         parts = [x for x in p.path.split("/") if x]
@@ -3123,17 +3531,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_file_download(self, p):
         f = path_under(Path(load_config()["upload_dir"]), parse_qs(p.query).get("path", [""])[0])
-        body = f.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/octet-stream")
-        self.security_headers()
-        self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(f.name))
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
-            return
+        if not f.is_file():
+            return self.send_api(api(False, message="文件不存在", code="NOT_FOUND"), 404)
+        self.send_path(f, "application/octet-stream", attachment=True)
 
     def server_path(self, raw: str) -> Path:
         if not raw:
@@ -3182,31 +3582,13 @@ class Handler(BaseHTTPRequestHandler):
         path = self.server_path(parse_qs(p.query).get("path", [""])[0])
         if not path.is_file():
             return self.send_api(api(False, message="\u4e0d\u662f\u6587\u4ef6", code="NOT_FILE"), 400)
-        body = path.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/octet-stream")
-        self.security_headers()
-        self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(path.name))
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
-            return
+        self.send_path(path, "application/octet-stream", attachment=True)
 
     def handle_backup_download(self, p):
         f = path_under(INSTALL_PREFIX / "backups", parse_qs(p.query).get("file", [""])[0])
-        body = f.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/gzip")
-        self.security_headers()
-        self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(f.name))
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
-            return
+        if not f.is_file():
+            return self.send_api(api(False, message="备份不存在", code="NOT_FOUND"), 404)
+        self.send_path(f, "application/gzip", attachment=True)
 
     def safe_upload_filename(self, raw: str) -> str:
         name = Path(raw).name.strip().replace("\x00", "")
@@ -3225,23 +3607,20 @@ class Handler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get("Content-Length", "0") or 0)
         except Exception as exc:
             raise ValueError("Content-Length 格式不正确") from exc
-        max_request = int(load_config().get("max_upload_mb", 256)) * 1024 * 1024 + 8 * 1024 * 1024
+        max_request = svc.max_upload_bytes() + 8 * 1024 * 1024
         if content_length <= 0 or content_length > max_request:
             raise PayloadTooLarge("上传总大小超过限制")
-        form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": ctype})
-        fields = form["files"] if "files" in form else (form["file"] if "file" in form else [])
-        if not isinstance(fields, list):
-            fields = [fields]
-        if len(fields) > 50:
-            raise ValueError("单次最多上传 50 个文件")
-        visibility = "private" if str(form.getvalue("access") or form.getvalue("visibility") or "public") == "private" else "public"
-        saved = []
-        for item in fields:
-            if not getattr(item, "filename", ""):
-                continue
-            saved.append(svc.upload_field(item, visibility=visibility))
+        parts = parse_multipart(self.rfile, ctype, content_length, svc.base, svc.max_upload_bytes())
+        try:
+            fields = {p.name: p.value for p in parts if p.filename is None}
+            access = fields.get("access") or fields.get("visibility") or "public"
+            visibility = "private" if access == "private" else "public"
+            saved = [svc.store_upload(p, visibility=visibility) for p in parts if p.name in {"files", "file"} and p.filename]
+        finally:
+            for p in parts:
+                p.discard()
         if not saved:
-            raise ValueError("??????")
+            raise ValueError("没有可上传的文件")
         audit(user, "file_center.upload", {"files": [{"id": x.get("id"), "filename": x.get("filename"), "size": x.get("size")} for x in saved]}, True)
         first = saved[0]
         self.send_api(api(True, {"success": True, "id": first.get("id"), "filename": first.get("filename"), "size": first.get("size"), "url": first.get("url"), "files": saved}))
@@ -3310,12 +3689,12 @@ class Handler(BaseHTTPRequestHandler):
         restart = bool(data.get("restart", False))
         out = ""
         if restart:
-            _, out = docker(["restart", "astrbot"], timeout=120)
+            _, out = docker(["restart", astrbot_container()], timeout=120)
         audit(user, "astrbot.config.save", {"restart": restart}, True)
         self.send_api(api(True, {"output": out}, "配置已保存"))
 
     def client_ip(self) -> str:
-        return (self.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip() or (self.client_address[0] if self.client_address else "unknown"))
+        return trusted_client_ip(self.client_address[0] if self.client_address else "", self.headers)
 
     def short_user_agent(self) -> str:
         return str(self.headers.get("User-Agent") or "")[:240]
@@ -3336,17 +3715,18 @@ class Handler(BaseHTTPRequestHandler):
         data = self.read_json()
         old = str(data.get("old_password", ""))
         new = str(data.get("new_password", ""))
-        cfg = load_config()
-        if not verify_password(old, cfg.get("password_hash", "")):
-            audit(user, "password_changed", {"ip": self.client_ip(), "user_agent": self.short_user_agent(), "result": "bad_old_password"}, False)
-            raise ValueError("\u5f53\u524d\u5bc6\u7801\u4e0d\u6b63\u786e")
-        err = password_strength_error(new, old)
-        if err:
-            raise ValueError(err)
-        cfg["password_hash"] = hash_password(new)
-        cfg.pop("initial_password", None)
-        epoch = bump_auth_epoch(cfg)
-        write_json(PANEL_CONFIG, cfg)
+        with CONFIG_LOCK:
+            cfg = load_config()
+            if not verify_password(old, cfg.get("password_hash", "")):
+                audit(user, "password_changed", {"ip": self.client_ip(), "user_agent": self.short_user_agent(), "result": "bad_old_password"}, False)
+                raise ValueError("\u5f53\u524d\u5bc6\u7801\u4e0d\u6b63\u786e")
+            err = password_strength_error(new, old)
+            if err:
+                raise ValueError(err)
+            cfg["password_hash"] = hash_password(new)
+            cfg.pop("initial_password", None)
+            epoch = bump_auth_epoch(cfg)
+            save_config(cfg)
         detail = {"ip": self.client_ip(), "user_agent": self.short_user_agent(), "auth_epoch": epoch}
         audit(user, "password_changed", detail, True)
         audit(user, "sessions_revoked", detail, True)
@@ -3384,6 +3764,16 @@ def main():
     print("Panel account: %s" % cfg["username"])
     if cfg.get("initial_password"):
         print("Panel initial password: %s" % cfg["initial_password"])
+
+    def run_migrations():
+        try:
+            result = migrate_legacy_remote_plugin()
+            if result.get("migrated"):
+                print("Migrated QQ remote plugin: %s" % result)
+        except Exception:
+            traceback.print_exc()
+
+    threading.Thread(target=run_migrations, daemon=True).start()
     PanelServer((args.host, args.port), Handler).serve_forever()
 
 

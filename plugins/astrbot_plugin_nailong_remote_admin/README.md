@@ -1,11 +1,11 @@
-# astrbot_plugin_linyu_remote_admin
+# astrbot_plugin_nailong_remote_admin
 
 Trigger command: `\u7533\u8bf7\u767b\u5f55`.
 
 Runtime behavior:
 
-- Only QQ user `3179806299` can request login.
-- Only bot self account `2141945863` responds.
+- Only QQ users in `owner_ids` can run owner commands (empty = nobody).
+- Only bot self accounts in `bot_self_ids` respond (empty = none).
 - The plugin sends only the QR image and does not expose the QQ login URL in chat.
 - It reuses idle NapCat instances first; it creates a new one only when no idle slot exists.
 
@@ -18,7 +18,7 @@ Owner commands:
 - `\u5220\u9664\u673a\u5668\u4eba napcat-1`: delete one NapCat instance from QQ, keeping the data directory by default.
 - `\u5220\u9664\u673a\u5668\u4eba 1`: delete the first NapCat instance in the panel index order.
 
-Owner is `3179806299` by default. Bot self account is restricted to `2141945863`.
+There is no built-in owner or bot account: set `owner_ids` and `bot_self_ids` in the panel settings first.
 
 
 Login success notice:

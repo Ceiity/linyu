@@ -98,7 +98,7 @@ EOF
 import json
 p="$INSTALL_PREFIX/panel_config.json"
 d=json.load(open(p,encoding="utf-8"))
-print("账号："+d.get("username","admin"))
+print("账号："+d.get("username","nailong"))
 print("首次密码："+d.get("initial_password","已修改，请使用你设置的密码"))
 print("配置文件："+p)
 PY

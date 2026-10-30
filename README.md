@@ -1,8 +1,8 @@
-# AstrBot-Deploy
+# 奶龙 · AstrBot-Deploy
 
 ## 项目简介
 
-AstrBot-Deploy 是一个面向中文用户的 AstrBot + NapCat Docker 一键部署项目。
+奶龙（AstrBot-Deploy）是一个面向中文用户的 AstrBot + NapCat Docker 一键部署项目，自带「奶龙控制台」Web 面板。
 
 在一台全新的 Debian / Ubuntu 服务器上，用户只需要执行一条命令，就可以自动完成 Docker 安装、AstrBot 部署、NapCat 多实例部署、端口分配、Docker Network 配置、健康检查和登录信息保存。
 
@@ -275,7 +275,21 @@ MIT License
 
 ## 项目商标
 
-Web 控制台内置了全新的“淋雨机器人” SVG 商标，文件位置：`panel/static/linyu-robot.svg`。它会自动用于登录页、侧边栏品牌区和浏览器图标，风格是黑白极简机器人头 + 蓝色雨滴高光，适合浅色/深色模式和手机端显示。
+Web 控制台内置“奶龙” SVG 商标，文件位置：`panel/static/nailong-robot.svg`。它会自动用于登录页、侧边栏品牌区和浏览器图标，造型是一只圆滚滚的黄色小龙，深色圆角底，适合浅色/深色模式和手机端显示。
+
+## v2.1.0 更新说明（淋雨 → 奶龙）
+
+- 品牌统一改名为「奶龙」：控制台标题、Logo、QQ 远程登录插件（`astrbot_plugin_nailong_remote_admin`）。
+- 平滑升级：面板启动时自动把 `panel_config.json` 里的 `linyu_remote_*` 配置迁移为 `nailong_remote_*`，并把已安装的旧插件 `astrbot_plugin_linyu_remote_admin` 替换为新插件（会重启一次 AstrBot）。旧环境变量 `LINYU_REMOTE_*` 仍然兼容。
+- 新安装的面板默认账号为 `nailong`；已有面板账号不变。
+- 兼容 Python 3.13（Debian 13 / Ubuntu 25.04）：移除已被删除的 `cgi` 模块，上传改为流式写盘，不再整文件读进内存。
+- 性能：面板配置按文件变化缓存，不再每次请求重复计算密码哈希；日志实时推送多人共享同一次读取。
+- 下载：备份、文件中心、服务器文件下载改为流式传输，支持断点续传（Range）。
+- 安全：Nginx 反代后登录限流按真实 IP 计算，不再出现一个人输错密码把所有人锁住；伪造的 `X-Forwarded-For` 不再被信任；NapCat 内部 OneBot WS/HTTP 端口只绑定 `127.0.0.1`。
+- 稳定性：配置文件、登录分配表加锁；机器人创建/删除串行执行，避免端口和索引冲突；任务列表和缓存有上限。
+- 机器人池在线状态改为通过 NapCat WebUI 判断，结果更准确。
+- 修复若干乱码提示和错误文案；安装完成提示的面板账号与实际一致。
+- 新增 GitHub Actions：Python 3.12 / 3.13 下跑语法检查、pyflakes、单元测试和安全回归测试。
 
 ## 企业级维护能力
 
@@ -333,7 +347,7 @@ Web 控制台不会写死 IP、域名或 localhost。后端会根据当前请求
 
 ## QQ 内创建扫码机器人
 
-项目内置 AstrBot 插件：`plugins/astrbot_plugin_linyu_remote_admin`。
+项目内置 AstrBot 插件：`plugins/astrbot_plugin_nailong_remote_admin`。
 
 部署时会自动复制到 AstrBot 插件目录。配置好主人 QQ 后，你可以在 QQ 私聊或群聊里直接发送：
 
@@ -354,7 +368,7 @@ Web 控制台不会写死 IP、域名或 localhost。后端会根据当前请求
 插件配置文件位置：
 
 ```bash
-/opt/astrbot/data/config/astrbot_plugin_linyu_remote_admin_config.json
+/opt/astrbot/data/config/astrbot_plugin_nailong_remote_admin_config.json
 ```
 
 如果 AstrBot 在 Docker 容器里运行，`server_url` 不要写 `127.0.0.1`，建议写宿主机内网地址，例如：
