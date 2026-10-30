@@ -150,7 +150,8 @@ class _BackupPageState extends State<BackupPage> {
         onRefresh: _load,
         child: CustomScrollView(
           slivers: [
-            SliverAppBar.large(
+            SliverAppBar(
+              pinned: true,
               title: const Text('备份恢复'),
               actions: [
                 IconButton(

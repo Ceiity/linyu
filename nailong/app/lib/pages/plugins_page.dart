@@ -301,7 +301,7 @@ class _PluginsPageState extends State<PluginsPage> {
         onRefresh: _load,
         child: CustomScrollView(
           slivers: [
-            const SliverAppBar.large(title: Text('插件')),
+            const SliverAppBar(pinned: true, title: Text('插件')),
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),

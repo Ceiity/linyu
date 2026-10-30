@@ -77,12 +77,20 @@ ThemeData buildTheme(ColorScheme scheme, {bool pureBlack = false, ButtonLook loo
       surfaceTintColor: Colors.transparent,
       scrolledUnderElevation: 0,
       centerTitle: false,
+      titleTextStyle: base.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, color: cs.onSurface),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: cs.surfaceContainer,
+      backgroundColor: dark ? cs.surfaceContainer : cs.surfaceContainerLowest,
       indicatorColor: cs.secondaryContainer,
+      indicatorShape: const StadiumBorder(),
       elevation: 0,
-      height: 68,
+      height: 72,
+      iconTheme: WidgetStateProperty.resolveWith(
+        (s) => IconThemeData(
+          size: 24,
+          color: s.contains(WidgetState.selected) ? cs.onSecondaryContainer : cs.onSurfaceVariant,
+        ),
+      ),
       labelTextStyle: WidgetStateProperty.resolveWith(
         (s) => TextStyle(
           fontSize: 12,
@@ -99,7 +107,7 @@ ThemeData buildTheme(ColorScheme scheme, {bool pureBlack = false, ButtonLook loo
       color: cs.surfaceContainer,
       elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
     ),
     // 填充式输入框：标签浮在框内（不要用 OutlineInputBorder，否则浮动标签会卡在上边缘被底色切掉）
     inputDecorationTheme: InputDecorationTheme(
@@ -140,6 +148,20 @@ extension StatusColors on ColorScheme {
 
 const brandGraphite = 0xFF2F3237;
 
+/// 默认主题色：沉稳的靛蓝（浅色界面里做图标、选中态、进度的点缀）。
+const brandIndigo = 0xFF4F5FD8;
+
+/// 功能点缀色（图标底、环形图、折线）：每种服务一种颜色，仿 FlClash 的多彩卡片。
+extension AccentColors on ColorScheme {
+  bool get _dk => brightness == Brightness.dark;
+  Color get cViolet => _dk ? const Color(0xFFB9A7FF) : const Color(0xFF7C5CFC);
+  Color get cBlue => _dk ? const Color(0xFF8DB8FF) : const Color(0xFF2F80ED);
+  Color get cCyan => _dk ? const Color(0xFF6FD6EA) : const Color(0xFF0E9FBF);
+  Color get cGreen => _dk ? const Color(0xFF6EE7A0) : const Color(0xFF16A34A);
+  Color get cOrange => _dk ? const Color(0xFFFFB866) : const Color(0xFFEA7A00);
+  Color get cPink => _dk ? const Color(0xFFFF9CBF) : const Color(0xFFE5487F);
+}
+
 /// 浅色中性背景（白 / 浅灰卡片），主题色只用于按钮、开关等强调元素。
 (ColorScheme, ColorScheme) appSchemes(int seedColor) {
   final seed = Color(seedColor);
@@ -150,7 +172,7 @@ const brandGraphite = 0xFF2F3237;
     dynamicSchemeVariant: DynamicSchemeVariant.tonalSpot,
   );
   light = light.copyWith(
-    surface: const Color(0xFFF6F7F9),
+    surface: const Color(0xFFF1F3F9),
     onSurface: const Color(0xFF1C1E21),
     onSurfaceVariant: const Color(0xFF5F6368),
     surfaceContainerLowest: const Color(0xFFFFFFFF),
@@ -158,10 +180,10 @@ const brandGraphite = 0xFF2F3237;
     surfaceContainer: const Color(0xFFFFFFFF),
     surfaceContainerHigh: const Color(0xFFF0F1F4),
     surfaceContainerHighest: const Color(0xFFE8EAED),
-    secondaryContainer: const Color(0xFFEDEFF2),
-    onSecondaryContainer: const Color(0xFF1C1E21),
-    outline: const Color(0xFF9AA0A6),
-    outlineVariant: const Color(0xFFDADCE0),
+    secondaryContainer: const Color(0xFFE2E7FF),
+    onSecondaryContainer: const Color(0xFF1B2160),
+    outline: const Color(0xFF9AA0AE),
+    outlineVariant: const Color(0xFFDADEE8),
   );
   dark = dark.copyWith(
     surface: const Color(0xFF121315),
@@ -172,12 +194,27 @@ const brandGraphite = 0xFF2F3237;
     surfaceContainer: const Color(0xFF1C1E21),
     surfaceContainerHigh: const Color(0xFF25272B),
     surfaceContainerHighest: const Color(0xFF2E3135),
-    secondaryContainer: const Color(0xFF2E3135),
-    onSecondaryContainer: const Color(0xFFE8EAED),
+    secondaryContainer: const Color(0xFF2B3160),
+    onSecondaryContainer: const Color(0xFFDDE2FF),
     outline: const Color(0xFF7C8187),
     outlineVariant: const Color(0xFF3A3D42),
   );
-  if (seedColor == brandGraphite) {
+  if (seedColor == brandIndigo) {
+    light = light.copyWith(
+      primary: const Color(0xFF4F5FD8),
+      onPrimary: Colors.white,
+      primaryContainer: const Color(0xFFE2E7FF),
+      onPrimaryContainer: const Color(0xFF1B2160),
+      tertiary: const Color(0xFF7C5CFC),
+    );
+    dark = dark.copyWith(
+      primary: const Color(0xFFB4BFFF),
+      onPrimary: const Color(0xFF1B2160),
+      primaryContainer: const Color(0xFF2B3160),
+      onPrimaryContainer: const Color(0xFFDDE2FF),
+      tertiary: const Color(0xFFB9A7FF),
+    );
+  } else if (seedColor == brandGraphite) {
     // 默认主题：石墨灰作为强调色（开关、进度、选中态），不带任何黄色
     light = light.copyWith(
       primary: const Color(0xFF2F3237),

@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../core/connection.dart';
+import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'backup_page.dart';
 import 'conn_scope.dart';
@@ -105,15 +106,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
         onRefresh: poll,
         child: CustomScrollView(
           slivers: [
-            SliverAppBar.large(
-              title: Row(
-                children: [
-                  const AppLogo(size: 34),
-                  const SizedBox(width: 10),
-                  Flexible(child: Text(conn.profile.name, overflow: TextOverflow.ellipsis)),
-                ],
-              ),
-            ),
+            const SliverAppBar(pinned: true, title: Text('奶龙')),
             if (d == null)
               SliverFillRemaining(
                 hasScrollBody: false,
@@ -123,7 +116,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
               )
             else
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
                 sliver: SliverToBoxAdapter(child: _body(d, conn)),
               ),
           ],
@@ -148,13 +141,31 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
         final cols = c.maxWidth >= 560 ? 4 : 2;
         final unit = (c.maxWidth - gap * (cols - 1)) / cols;
         final full = c.maxWidth;
+        final allOk =
+            online &&
+            docker['ok'] == true &&
+            (astr == null || astr['running'] == true) &&
+            (naps.isEmpty || napRunning == naps.length);
         return Wrap(
           spacing: gap,
           runSpacing: gap,
           children: [
             SizedBox(
+              width: full,
+              child: _Hero(
+                name: conn.profile.name,
+                address: conn.profile.address,
+                ok: allOk,
+                online: online,
+                uptime: fmtDuration((m['uptime'] as num?)?.toInt() ?? 0),
+                rx: fmtSpeed(m['net_rx_bps'] as num?),
+                tx: fmtSpeed(m['net_tx_bps'] as num?),
+              ),
+            ),
+            SizedBox(
               width: unit,
               child: _StatusCard(
+                color: cs.cViolet,
                 icon: Icons.smart_toy_outlined,
                 title: 'AstrBot',
                 value: astr == null ? '未接管' : containerStatusText(astr['state']?.toString()),
@@ -164,6 +175,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
             SizedBox(
               width: unit,
               child: _StatusCard(
+                color: cs.cBlue,
                 icon: Icons.chat_bubble_outline,
                 title: 'NapCat',
                 value: naps.isEmpty ? '未接管' : '$napRunning / ${naps.length} 运行',
@@ -174,6 +186,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
             SizedBox(
               width: unit,
               child: _StatusCard(
+                color: cs.cCyan,
                 icon: Icons.view_in_ar_outlined,
                 title: 'Docker',
                 value: docker['ok'] == true ? '正常' : '异常',
@@ -184,6 +197,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
             SizedBox(
               width: unit,
               child: _StatusCard(
+                color: cs.cGreen,
                 icon: Icons.dns_outlined,
                 title: '服务器',
                 value: online ? '在线' : '离线',
@@ -195,6 +209,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
               width: full,
               child: InfoCard(
                 icon: Icons.memory,
+                color: cs.cOrange,
                 title: '资源占用',
                 child: Column(
                   children: [
@@ -204,9 +219,14 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                         RingGauge(
                           percent: (m['cpu_percent'] as num?)?.toDouble() ?? 0,
                           label: 'CPU ${m['cpu_cores']} 核',
+                          color: cs.cBlue,
                         ),
-                        RingGauge(percent: (m['mem_percent'] as num?)?.toDouble() ?? 0, label: '内存'),
-                        RingGauge(percent: (m['disk_percent'] as num?)?.toDouble() ?? 0, label: '磁盘'),
+                        RingGauge(percent: (m['mem_percent'] as num?)?.toDouble() ?? 0, label: '内存', color: cs.cViolet),
+                        RingGauge(
+                          percent: (m['disk_percent'] as num?)?.toDouble() ?? 0,
+                          label: '磁盘',
+                          color: cs.cOrange,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 12),
@@ -221,11 +241,12 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
               width: full,
               child: InfoCard(
                 icon: Icons.swap_vert,
+                color: cs.cBlue,
                 title: '网络',
                 actions: [
-                  _Legend(color: cs.primary, text: '↓ ${fmtSpeed(m['net_rx_bps'] as num?)}'),
+                  _Legend(color: cs.cBlue, text: '↓ ${fmtSpeed(m['net_rx_bps'] as num?)}'),
                   const SizedBox(width: 12),
-                  _Legend(color: cs.tertiary, text: '↑ ${fmtSpeed(m['net_tx_bps'] as num?)}'),
+                  _Legend(color: cs.cViolet, text: '↑ ${fmtSpeed(m['net_tx_bps'] as num?)}'),
                 ],
                 child: SparkLine(values: rx, values2: tx, maxValue: maxNet),
               ),
@@ -234,6 +255,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
               width: full,
               child: InfoCard(
                 icon: Icons.bolt_outlined,
+                color: cs.cPink,
                 title: '快捷操作',
                 child: Column(
                   children: [
@@ -241,29 +263,34 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                       children: [
                         _QuickAction(
                           icon: Icons.play_arrow_rounded,
+                          color: cs.cGreen,
                           label: '启动',
                           busy: busy.contains('astrbot.start'),
                           onTap: astr == null || astr['running'] == true ? null : () => _service('astrbot', 'start'),
                         ),
                         _QuickAction(
                           icon: Icons.stop_rounded,
+                          color: cs.error,
                           label: '停止',
                           busy: busy.contains('astrbot.stop'),
                           onTap: astr?['running'] == true ? () => _service('astrbot', 'stop') : null,
                         ),
                         _QuickAction(
                           icon: Icons.restart_alt_rounded,
+                          color: cs.cOrange,
                           label: '重启',
                           busy: busy.contains('astrbot.restart'),
                           onTap: astr == null ? null : () => _service('astrbot', 'restart'),
                         ),
                         _QuickAction(
                           icon: Icons.receipt_long_outlined,
+                          color: cs.cBlue,
                           label: '日志',
                           onTap: () => widget.onOpenLogs('astrbot'),
                         ),
                         _QuickAction(
                           icon: Icons.backup_outlined,
+                          color: cs.cViolet,
                           label: '备份',
                           onTap: () => pushPage(context, const BackupPage()),
                         ),
@@ -279,6 +306,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
               width: full,
               child: InfoCard(
                 icon: Icons.info_outline,
+                color: cs.cCyan,
                 title: '服务器信息',
                 child: Column(
                   children: [
@@ -327,9 +355,11 @@ class _StatusCard extends StatelessWidget {
   final String value;
   final String? sub;
   final Tone tone;
+  final Color color;
   final VoidCallback? onTap;
 
   const _StatusCard({
+    required this.color,
     required this.icon,
     required this.title,
     required this.value,
@@ -343,6 +373,8 @@ class _StatusCard extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return InfoCard(
       icon: icon,
+      color: color,
+      tint: color,
       title: title,
       onTap: onTap,
       child: SizedBox(
@@ -365,7 +397,8 @@ class _StatusCard extends StatelessWidget {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       value,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                      style: Theme.of(context).textTheme.titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w800, color: cs.onSurface),
                     ),
                   ),
                 ),
@@ -389,8 +422,9 @@ class _QuickAction extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
   final bool busy;
+  final Color color;
 
-  const _QuickAction({required this.icon, required this.label, this.onTap, this.busy = false});
+  const _QuickAction({required this.icon, required this.label, required this.color, this.onTap, this.busy = false});
 
   @override
   Widget build(BuildContext context) {
@@ -408,12 +442,12 @@ class _QuickAction extends StatelessWidget {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: enabled ? cs.secondaryContainer : cs.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(16),
+                  color: enabled ? color.withValues(alpha: 0.14) : cs.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(18),
                 ),
                 child: busy
                     ? const Padding(padding: EdgeInsets.all(14), child: CircularProgressIndicator(strokeWidth: 2.5))
-                    : Icon(icon, color: enabled ? cs.onSecondaryContainer : cs.outline),
+                    : Icon(icon, color: enabled ? color : cs.outline),
               ),
               const SizedBox(height: 6),
               Text(label, style: TextStyle(fontSize: 12.5, color: enabled ? cs.onSurface : cs.outline)),
@@ -443,5 +477,96 @@ class _Legend extends StatelessWidget {
       const SizedBox(width: 4),
       Text(text, style: Theme.of(context).textTheme.labelSmall),
     ],
+  );
+}
+
+class _Hero extends StatelessWidget {
+  final String name;
+  final String address;
+  final bool ok;
+  final bool online;
+  final String uptime;
+  final String rx;
+  final String tx;
+
+  const _Hero({
+    required this.name,
+    required this.address,
+    required this.ok,
+    required this.online,
+    required this.uptime,
+    required this.rx,
+    required this.tx,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = !online ? '服务器离线' : (ok ? '全部服务运行正常' : '部分服务需要关注');
+    return HeroCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.18), shape: BoxShape.circle),
+                child: const AppLogo(size: 40),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(address, style: TextStyle(color: Colors.white.withValues(alpha: 0.78), fontSize: 13)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(99),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(ok && online ? Icons.check_circle : Icons.error_outline, size: 17),
+                const SizedBox(width: 6),
+                Text(label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(children: [_stat('运行时间', uptime), _stat('下载', rx), _stat('上传', tx)]),
+        ],
+      ),
+    );
+  }
+
+  Widget _stat(String k, String v) => Expanded(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(k, style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12)),
+        const SizedBox(height: 2),
+        Text(
+          v,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+        ),
+      ],
+    ),
   );
 }

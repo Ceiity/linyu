@@ -35,12 +35,13 @@ class DeployPage extends StatefulWidget {
 
 class _DeployPageState extends State<DeployPage> {
   late final DeployFlow flow = widget.debugFlow ?? (DeployFlow(store)..savePassword = widget.savePassword);
-  late final AppStore store = StoreScope.read(context);
+  late final AppStore store;
   bool showLogs = false;
 
   @override
   void initState() {
     super.initState();
+    store = StoreScope.read(context); // 不能留到 dispose 里再查（此时 context 已失效）
     flow.addListener(() => mounted ? setState(() {}) : null);
     if (widget.debugFlow == null) WidgetsBinding.instance.addPostFrameCallback((_) => _start());
   }
@@ -100,7 +101,8 @@ class _DeployPageState extends State<DeployPage> {
       child: Scaffold(
         body: CustomScrollView(
           slivers: [
-            SliverAppBar.large(
+            SliverAppBar(
+              pinned: true,
               title: Text(switch (phase) {
                 FlowPhase.report => '环境检测报告',
                 FlowPhase.success => '部署成功',

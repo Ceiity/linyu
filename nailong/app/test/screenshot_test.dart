@@ -197,7 +197,7 @@ void main() {
   });
 
   Widget app(Widget child, {bool dark = false, ButtonLook look = ButtonLook.light}) {
-    final (light, darkCs) = appSchemes(brandGraphite);
+    final (light, darkCs) = appSchemes(brandIndigo);
     ThemeData t(ColorScheme cs) {
       final base = buildTheme(cs, look: look);
       return base.copyWith(

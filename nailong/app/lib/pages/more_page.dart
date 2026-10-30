@@ -26,34 +26,57 @@ class MorePage extends StatelessWidget {
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          const SliverAppBar.large(title: Text('更多')),
+          const SliverAppBar(pinned: true, title: Text('更多')),
           SliverList.list(
             children: [
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: InfoCard(
+                child: GestureDetector(
                   onTap: () => pushPage(context, const ServersPage()),
-                  child: Row(
-                    children: [
-                      const AppLogo(size: 52),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(conn.profile.name, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-                            Text(
-                              '${conn.profile.user}@${conn.profile.address}',
-                              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
-                            ),
-                          ],
+                  child: HeroCard(
+                    padding: const EdgeInsets.all(18),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.18),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const AppLogo(size: 44),
                         ),
-                      ),
-                      StatusChip(
-                        conn.state == ConnState.online ? '在线' : '离线',
-                        conn.state == ConnState.online ? Tone.ok : Tone.bad,
-                      ),
-                    ],
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                conn.profile.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${conn.profile.user}@${conn.profile.address}',
+                                style: TextStyle(color: Colors.white.withValues(alpha: 0.78), fontSize: 13),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(99),
+                          ),
+                          child: Text(
+                            conn.state == ConnState.online ? '● 在线' : '○ 离线',
+                            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -162,7 +185,7 @@ class _DockerPageState extends State<DockerPage> {
         onRefresh: _load,
         child: CustomScrollView(
           slivers: [
-            const SliverAppBar.large(title: Text('Docker 容器')),
+            const SliverAppBar(pinned: true, title: Text('Docker 容器')),
             if (rows == null)
               SliverFillRemaining(
                 hasScrollBody: false,
@@ -241,7 +264,7 @@ class ServersPage extends StatelessWidget {
       ),
       body: CustomScrollView(
         slivers: [
-          const SliverAppBar.large(title: Text('服务器管理')),
+          const SliverAppBar(pinned: true, title: Text('服务器管理')),
           SliverList.list(
             children: [
               for (final s in store.servers)
@@ -410,7 +433,7 @@ class _DevicesPageState extends State<DevicesPage> {
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          const SliverAppBar.large(title: Text('设备授权')),
+          const SliverAppBar(pinned: true, title: Text('设备授权')),
           if (data == null)
             SliverFillRemaining(
               hasScrollBody: false,
@@ -479,7 +502,17 @@ class _DevicesPageState extends State<DevicesPage> {
 
 // ---------------------------------------------------------------- 主题
 
-const _colors = [brandGraphite, 0xFFFF8D28, 0xFFFF2D55, 0xFFCB30E0, 0xFF5856D6, 0xFF007AFF, 0xFF34C759, 0xFF8E8E93];
+const _colors = [
+  brandIndigo,
+  brandGraphite,
+  0xFFFF8D28,
+  0xFFFF2D55,
+  0xFFCB30E0,
+  0xFF5856D6,
+  0xFF007AFF,
+  0xFF34C759,
+  0xFF8E8E93,
+];
 
 class ThemePage extends StatelessWidget {
   const ThemePage({super.key});
@@ -491,7 +524,7 @@ class ThemePage extends StatelessWidget {
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          const SliverAppBar.large(title: Text('主题')),
+          const SliverAppBar(pinned: true, title: Text('主题')),
           SliverList.list(
             children: [
               const SectionTitle('外观'),

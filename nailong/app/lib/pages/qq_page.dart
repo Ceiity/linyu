@@ -116,7 +116,7 @@ class _QqPageState extends State<QqPage> with WidgetsBindingObserver, PollingMix
         onRefresh: poll,
         child: CustomScrollView(
           slivers: [
-            const SliverAppBar.large(title: Text('QQ 登录')),
+            const SliverAppBar(pinned: true, title: Text('QQ 登录')),
             if (rows == null)
               SliverFillRemaining(
                 hasScrollBody: false,

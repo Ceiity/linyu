@@ -9,9 +9,36 @@ import 'theme.dart';
 
 // ---------- 卡片 ----------
 
-/// FlClash 风格信息卡：顶部图标 + 标题，下方内容。
+/// 圆角方块图标底（仿 FlClash 的彩色图标）。
+class IconChip extends StatelessWidget {
+  final IconData icon;
+  final Color? color;
+  final double size;
+
+  const IconChip(this.icon, {super.key, this.color, this.size = 34});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final c = color ?? cs.accentText;
+    final dark = cs.brightness == Brightness.dark;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: dark ? 0.20 : 0.13),
+        borderRadius: BorderRadius.circular(size * 0.34),
+      ),
+      child: Icon(icon, size: size * 0.56, color: c),
+    );
+  }
+}
+
+/// FlClash 风格信息卡：顶部彩色图标 + 标题，下方内容；可带淡彩底色。
 class InfoCard extends StatelessWidget {
   final IconData? icon;
+  final Color? color;
+  final Color? tint;
   final String? title;
   final List<Widget> actions;
   final Widget child;
@@ -22,6 +49,8 @@ class InfoCard extends StatelessWidget {
   const InfoCard({
     super.key,
     this.icon,
+    this.color,
+    this.tint,
     this.title,
     this.actions = const [],
     required this.child,
@@ -33,9 +62,15 @@ class InfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final dark = cs.brightness == Brightness.dark;
+    final bg = selected
+        ? cs.secondaryContainer
+        : tint == null
+        ? cs.surfaceContainer
+        : Color.alphaBlend(tint!.withValues(alpha: dark ? 0.16 : 0.10), cs.surfaceContainer);
     return Material(
-      color: selected ? cs.secondaryContainer : cs.surfaceContainer,
-      borderRadius: BorderRadius.circular(16),
+      color: bg,
+      borderRadius: BorderRadius.circular(22),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
@@ -49,20 +84,17 @@ class InfoCard extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: SizedBox(
-                    height: 28,
+                    height: 34,
                     child: Row(
                       children: [
-                        if (icon != null) ...[
-                          Icon(icon, size: 20, color: cs.onSurfaceVariant),
-                          const SizedBox(width: 10),
-                        ],
+                        if (icon != null) ...[IconChip(icon!, color: color), const SizedBox(width: 10)],
                         Expanded(
                           child: Text(
                             title!,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w600, color: cs.onSurfaceVariant),
+                                ?.copyWith(fontWeight: FontWeight.w700, color: cs.onSurface),
                           ),
                         ),
                         ...actions,
@@ -73,6 +105,38 @@ class InfoCard extends StatelessWidget {
               child,
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 渐变总览卡（深靛蓝→紫），白色文字；用于首页与“更多”页顶部。
+class HeroCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  const HeroCard({super.key, required this.child, this.padding = const EdgeInsets.all(20)});
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: dark ? const [Color(0xFF2B3A8F), Color(0xFF4A3FA8)] : const [Color(0xFF3547C8), Color(0xFF7A5BEA)],
+        ),
+      ),
+      child: DefaultTextStyle.merge(
+        style: const TextStyle(color: Colors.white),
+        child: IconTheme.merge(
+          data: const IconThemeData(color: Colors.white),
+          child: child,
         ),
       ),
     );
@@ -117,21 +181,41 @@ class GroupCard extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final items = <Widget>[];
     for (var i = 0; i < children.length; i++) {
-      items.add(children[i]);
+      items.add(_chipify(children[i]));
       if (i != children.length - 1) {
-        items.add(Divider(height: 1, indent: 56, color: cs.outlineVariant.withValues(alpha: 0.4)));
+        items.add(Divider(height: 1, indent: 70, color: cs.outlineVariant.withValues(alpha: 0.4)));
       }
     }
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Material(
         color: cs.surfaceContainer,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(22),
         clipBehavior: Clip.antiAlias,
         child: Column(children: items),
       ),
     );
   }
+}
+
+/// 列表行里的纯图标 → 圆角方块彩色图标（整个 App 统一成 FlClash 的设置列表样式）。
+Widget _chipify(Widget w) {
+  if (w is ListTile && w.leading is Icon) {
+    final ic = w.leading as Icon;
+    return ListTile(
+      leading: IconChip(ic.icon!, color: ic.color, size: 38),
+      title: w.title,
+      subtitle: w.subtitle,
+      trailing: w.trailing,
+      onTap: w.onTap,
+      onLongPress: w.onLongPress,
+      dense: w.dense,
+      enabled: w.enabled,
+      isThreeLine: w.isThreeLine,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+    );
+  }
+  return w;
 }
 
 // ---------- 状态标签 ----------
@@ -233,7 +317,7 @@ class RingGauge extends StatelessWidget {
             ? cs.error
             : percent >= 75
             ? cs.warning
-            : cs.primary);
+            : cs.cBlue);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -292,8 +376,18 @@ class SparkLine extends StatelessWidget {
   final List<double>? values2;
   final double maxValue;
   final double height;
+  final Color? color;
+  final Color? color2;
 
-  const SparkLine({super.key, required this.values, this.values2, this.maxValue = 100, this.height = 110});
+  const SparkLine({
+    super.key,
+    required this.values,
+    this.values2,
+    this.maxValue = 100,
+    this.height = 110,
+    this.color,
+    this.color2,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -301,7 +395,9 @@ class SparkLine extends StatelessWidget {
     return SizedBox(
       height: height,
       width: double.infinity,
-      child: CustomPaint(painter: _SparkPainter(values, values2, maxValue, cs.primary, cs.tertiary, cs.outlineVariant)),
+      child: CustomPaint(
+        painter: _SparkPainter(values, values2, maxValue, color ?? cs.cBlue, color2 ?? cs.cViolet, cs.outlineVariant),
+      ),
     );
   }
 }

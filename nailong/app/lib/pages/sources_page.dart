@@ -225,7 +225,7 @@ class _SourcesPageState extends State<SourcesPage> {
           : null,
       body: CustomScrollView(
         slivers: [
-          const SliverAppBar.large(title: Text('下载加速')),
+          const SliverAppBar(pinned: true, title: Text('下载加速')),
           SliverList.list(
             children: [
               Padding(
