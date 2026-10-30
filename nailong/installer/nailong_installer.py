@@ -647,6 +647,26 @@ def rank_registries(registries: list[str], image_key: str, arch: str, use_cache:
     return results
 
 
+def rank_by_latency(bases: list[str], probe_path: str, timeout: float = 6) -> list[str]:
+    """并发探测各下载源，按响应速度从快到慢排序；不可达的排在最后（保留作兜底）。
+    只做排序，不改变信任：之后仍然校验 GPG 指纹 / 哈希 / 摘要。"""
+    import concurrent.futures
+
+    def one(base: str) -> tuple[bool, float]:
+        try:
+            status, _, _, ttfb = http_request(base + probe_path, method="GET", timeout=timeout, max_bytes=4096)
+            return status in (200, 301, 302), ttfb
+        except Exception:
+            return False, 1e9
+
+    if len(bases) < 2:
+        return list(bases)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(bases))) as ex:
+        res = list(ex.map(one, bases))
+    order = sorted(range(len(bases)), key=lambda i: (not res[i][0], res[i][1], i))
+    return [bases[i] for i in order]
+
+
 # ---------------------------------------------------------------- 环境检测
 
 def os_info() -> dict:
@@ -1159,7 +1179,10 @@ class Deployer:
         keyring.parent.mkdir(parents=True, exist_ok=True)
         last_err = ""
         chosen = None
-        for base in self.docker_apt:
+        codename = osi["codename"] or run(["sh", "-c", ". /etc/os-release; echo $VERSION_CODENAME"],
+                                          check=False)[1].strip()
+        self.progress("docker", 3, "测速 Docker 软件源")
+        for base in rank_by_latency(self.docker_apt, "/linux/%s/gpg" % osi["id"]):
             check_cancel()
             url = "%s/linux/%s/gpg" % (base, osi["id"])
             self.progress("docker", 5, "下载 Docker 软件源密钥：%s" % base)
@@ -1172,6 +1195,11 @@ class Deployer:
                     raise InstallError("GPG_MISMATCH", "密钥指纹不匹配，已拒绝该下载源")
                 keyring.write_bytes(body)
                 os.chmod(keyring, 0o644)
+                line = "deb [arch=%s signed-by=%s] %s/linux/%s %s stable\n" % (self.arch, keyring, base, osi["id"],
+                                                                                codename)
+                Path("/etc/apt/sources.list.d/docker.list").write_text(line)
+                self.progress("docker", 15, "更新软件包索引")
+                self.apt(["update"])
                 chosen = base
                 break
             except InstallError as e:
@@ -1181,15 +1209,9 @@ class Deployer:
                 last_err = "%s：%s" % (base, e)
                 log("Docker 源不可用：" + last_err)
         if not chosen:
+            Path("/etc/apt/sources.list.d/docker.list").unlink(missing_ok=True)
             raise InstallError("DOCKER_SOURCE_FAILED", "无法访问 Docker 软件源，请在设置中添加可信的 Docker APT 镜像",
                                last_err)
-        codename = osi["codename"] or run(["sh", "-c", ". /etc/os-release; echo $VERSION_CODENAME"],
-                                          check=False)[1].strip()
-        line = "deb [arch=%s signed-by=%s] %s/linux/%s %s stable\n" % (self.arch, keyring, chosen, osi["id"],
-                                                                        codename)
-        Path("/etc/apt/sources.list.d/docker.list").write_text(line)
-        self.progress("docker", 15, "更新软件包索引")
-        self.apt(["update"])
         self.progress("docker", 30, "安装 Docker Engine、containerd、Compose 插件")
         self.apt(["install", "--no-install-recommends", "docker-ce", "docker-ce-cli", "containerd.io",
                   "docker-buildx-plugin", "docker-compose-plugin"])
@@ -1603,15 +1625,24 @@ class Deployer:
             shutil.rmtree(tmp)
         tmp.mkdir(parents=True)
         errors = []
-        for index in self.pypi:
+        # 先用 App 自带的离线包（同样做哈希校验，零网络）；缺失或失败再走（测速后的）镜像
+        sources: list[str | None] = []
+        if (BASE / "agent" / "app" / "wheels").is_dir():
+            sources.append(None)
+        sources += rank_by_latency(self.pypi, "/pip/", 6) if len(self.pypi) > 1 else list(self.pypi)
+        for index in sources:
             check_cancel()
-            self.progress("agent", 20, "安装 Agent 依赖（%s，哈希校验）" % urllib.parse.urlsplit(index).netloc)
+            if index is None:
+                self.progress("agent", 20, "安装 Agent 依赖（App 内置离线包，哈希校验）")
+                net = ["--no-index", "--find-links", "/req/wheels"]
+            else:
+                self.progress("agent", 20, "安装 Agent 依赖（%s，哈希校验）" % urllib.parse.urlsplit(index).netloc)
+                net = ["--index-url", index, "--timeout", "30", "--retries", "3"]
             name = "nailong-pip-%s" % secrets.token_hex(4)
             spec = {
                 "Image": self.local_ref("python"),
                 "Cmd": ["pip", "install", "--no-cache-dir", "--disable-pip-version-check", "--require-hashes",
-                        "--only-binary", ":all:", "--target", "/deps", "-r", "/req/requirements.lock",
-                        "--index-url", index, "--timeout", "30", "--retries", "3"],
+                        "--only-binary", ":all:", "--target", "/deps", "-r", "/req/requirements.lock"] + net,
                 "Env": ["PIP_CERT=/etc/ssl/certs/ca-certificates.crt"] if host_ca_binds() else [],
                 "HostConfig": {"Binds": ["%s:/deps" % tmp, "%s:/req:ro" % (BASE / "agent" / "app")] + host_ca_binds(),
                                "NetworkMode": "host", "AutoRemove": False},

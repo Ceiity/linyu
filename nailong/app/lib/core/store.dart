@@ -63,7 +63,28 @@ class ServerProfile {
   );
 }
 
-/// 用户配置的下载源（只含 HTTPS 地址，不硬编码任何第三方镜像）。
+/// App 内置的国内常用下载源。部署时由服务器并发测速，快的优先，官方源始终兜底。
+/// 内置不等于信任：Docker 镜像按固定摘要校验、Docker 软件包按官方 GPG 指纹校验、
+/// Agent 依赖按 SHA-256 哈希校验，镜像站无法篡改内容。
+const builtinRegistries = [
+  'docker.1ms.run',
+  'docker.xuanyuan.me',
+  'docker.m.daocloud.io',
+  'dockerproxy.net',
+  'docker.1panel.live',
+];
+const builtinPypi = [
+  'https://mirrors.aliyun.com/pypi/simple',
+  'https://pypi.tuna.tsinghua.edu.cn/simple',
+  'https://mirrors.ustc.edu.cn/pypi/simple',
+];
+const builtinDockerApt = [
+  'https://mirrors.aliyun.com/docker-ce',
+  'https://mirrors.tuna.tsinghua.edu.cn/docker-ce',
+  'https://mirrors.ustc.edu.cn/docker-ce',
+];
+
+/// 用户自己添加的下载源（只含 HTTPS 地址）；内置源在 [forInstaller] 里合并。
 class SourceSettings {
   List<Map<String, dynamic>> github;
   List<String> registries;
@@ -83,11 +104,19 @@ class SourceSettings {
 
   /// 传给安装器：官方源始终作为兜底。
   Map<String, dynamic> forInstaller() => {
-    'docker_apt': [...dockerApt, 'https://download.docker.com'],
-    'registries': registries,
-    'pypi': [...pypi, 'https://pypi.org/simple'],
+    'docker_apt': _merge(dockerApt, builtinDockerApt, 'https://download.docker.com'),
+    'registries': _merge(registries, builtinRegistries, null),
+    'pypi': _merge(pypi, builtinPypi, 'https://pypi.org/simple'),
     'github': github,
   };
+
+  static List<String> _merge(List<String> user, List<String> builtin, String? official) {
+    final out = <String>[];
+    for (final u in [...user, ...builtin, ?official]) {
+      if (!out.contains(u)) out.add(u);
+    }
+    return out;
+  }
 }
 
 String newId([int n = 16]) {

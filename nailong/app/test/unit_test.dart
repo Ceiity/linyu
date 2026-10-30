@@ -26,12 +26,19 @@ void main() {
     expect(formatFingerprint(raw).contains('='), isFalse);
   });
 
-  test('下载源：官方源始终兜底', () {
+  test('下载源：内置国内源 + 用户源 + 官方兜底', () {
     final s = SourceSettings(pypi: ['https://pypi.example.com/simple'], registries: ['mirror.example.com']);
     final m = s.forInstaller();
-    expect(m['pypi'], ['https://pypi.example.com/simple', 'https://pypi.org/simple']);
-    expect(m['docker_apt'], contains('https://download.docker.com'));
-    expect(m['registries'], ['mirror.example.com']);
+    final pypi = m['pypi'] as List;
+    expect(pypi.first, 'https://pypi.example.com/simple'); // 用户的排最前
+    expect(pypi, containsAll(builtinPypi));
+    expect(pypi.last, 'https://pypi.org/simple'); // 官方兜底在最后
+    expect(m['docker_apt'], containsAll([...builtinDockerApt, 'https://download.docker.com']));
+    final regs = m['registries'] as List;
+    expect(regs.first, 'mirror.example.com');
+    expect(regs, containsAll(builtinRegistries));
+    expect(regs.toSet().length, regs.length); // 无重复
+    expect(SourceSettings().forInstaller()['registries'], builtinRegistries);
   });
 
   test('错误提示是中文', () {

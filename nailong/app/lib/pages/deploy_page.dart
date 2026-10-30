@@ -175,7 +175,7 @@ class _DeployPageState extends State<DeployPage> {
           Expanded(
             child: FilledButton.icon(
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-              onPressed: canContinue && !(flow.ssh?.isClosed ?? true) ? flow.deploy : _start,
+              onPressed: canContinue ? flow.resume : _start,
               icon: const Icon(Icons.refresh),
               label: Text(canContinue ? '继续部署' : '重试'),
             ),

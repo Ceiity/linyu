@@ -40,6 +40,14 @@ def main():
             with open(installer, "rb") as f:
                 tar.addfile(info, f)
             add_tree(tar, ROOT / "agent" / "nailong_agent", "agent/nailong_agent")
+            wheels = ROOT / "agent" / "wheels"
+            if not list(wheels.glob("*.whl")):
+                raise SystemExit("缺少离线依赖，请先运行 python3 tool/fetch_wheels.py")
+            for w in sorted(wheels.glob("*.whl")):
+                info = tar.gettarinfo(str(w), arcname="agent/wheels/" + w.name)
+                info.uid = info.gid = 0; info.uname = info.gname = "root"; info.mtime = 0; info.mode = 0o644
+                with open(w, "rb") as f:
+                    tar.addfile(info, f)
             for name in ("requirements.lock",):
                 p = ROOT / "agent" / name
                 info = tar.gettarinfo(str(p), arcname="agent/" + name)

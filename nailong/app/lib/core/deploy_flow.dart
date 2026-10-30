@@ -185,6 +185,36 @@ class DeployFlow extends ChangeNotifier {
 
   List<String> get blockers => ((plan['blockers'] ?? []) as List).map((e) => e.toString()).toList();
 
+  /// “继续部署”：SSH 断了就用已核对的指纹静默重连，然后直接接着部署，不回到环境报告页。
+  Future<void> resume() async {
+    if (installer == null || target == null) return;
+    if (ssh == null || ssh!.isClosed) {
+      error = null;
+      phase = FlowPhase.deploying;
+      reconnecting = true;
+      status = '正在重新连接服务器…';
+      _update();
+      Object? last;
+      for (var i = 0; i < 4; i++) {
+        try {
+          installer!.ssh = await _reconnectSsh();
+          last = null;
+          break;
+        } catch (e) {
+          last = e;
+          if (e is NailongError && (e.code == 'AUTH_FAILED' || e.code.startsWith('HOSTKEY'))) break;
+          await Future.delayed(Duration(seconds: 2 + i * 3));
+        }
+      }
+      reconnecting = false;
+      if (last != null) {
+        _fail(last);
+        return;
+      }
+    }
+    await deploy();
+  }
+
   /// 第 2 步：用户确认后执行部署（也用于“继续部署”）。
   Future<void> deploy({bool attach = false}) async {
     if (installer == null || target == null) return;

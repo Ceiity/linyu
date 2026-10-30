@@ -60,7 +60,8 @@ sudo rm -rf /opt/nailong/agent
 
 ```bash
 cd nailong
-python3 tool/bundle_server.py          # 打包安装器 + Agent，生成 app/assets/server/bundle.{tar.gz,json}
+python3 tool/fetch_wheels.py            # 下载并校验 Agent 离线依赖（SHA-256 对照 requirements.lock）
+python3 tool/bundle_server.py          # 打包安装器 + Agent + 离线依赖，生成 app/assets/server/bundle.{tar.gz,json}
 cd app
 flutter pub get
 flutter analyze

@@ -9,6 +9,7 @@ import 'package:nailong/core/errors.dart';
 import 'package:nailong/core/installer.dart';
 import 'package:nailong/core/keys.dart';
 import 'package:nailong/core/ssh.dart';
+import 'package:nailong/core/store.dart';
 
 void main() {
   final env = Platform.environment;
@@ -70,7 +71,7 @@ void main() {
       expect(plan['blockers'], isEmpty);
 
       final events = <InstallerEvent>[];
-      await for (final ev in inst.deploy({'ssh_user': user, 'sources': {}})) {
+      await for (final ev in inst.deploy({'ssh_user': user, 'sources': SourceSettings().forInstaller()})) {
         events.add(ev);
         if (ev.type == 'step_done' || ev.type == 'error') {
           stdout.writeln('${ev.type} ${ev.id} ${ev.data['status'] ?? ''} ${ev.data['message']}');

@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nailong/core/installer.dart';
 import 'package:nailong/core/ssh.dart';
+import 'package:nailong/core/store.dart';
 
 void main() {
   final env = Platform.environment;
@@ -36,7 +37,7 @@ void main() {
 
       final events = <InstallerEvent>[];
       var dropped = 0;
-      await for (final ev in inst.deploy({'ssh_user': target.user, 'sources': {}, 'fail2ban': true})) {
+      await for (final ev in inst.deploy({'ssh_user': target.user, 'sources': SourceSettings().forInstaller(), 'fail2ban': true})) {
         events.add(ev);
         if (ev.type == 'step_done') stdout.writeln('step_done ${ev.id} ${ev.data['status']} ${ev.data['message']}');
         if (ev.type == 'reconnecting') stdout.writeln('>> ${ev.data['message']}');

@@ -15,7 +15,7 @@
 | 路径穿越 | 备份/插件 ZIP 拒绝绝对路径、`..`、链接与设备文件；恢复只写入登记的根目录内 |
 | 上传校验 | 插件只收 ZIP（魔数 + 结构 + 大小上限）；备份必须带 manifest 且逐文件 SHA-256 匹配 |
 | 日志脱敏 | 安装器与 Agent 都会替换已知密钥（WebUI Token、OneBot Token、jwt_secret）以及 token/password/Bearer/JWT 模式 |
-| 下载完整性 | 安装包 SHA-256；Docker 软件源 GPG 指纹；镜像按摘要拉取；Agent 依赖 `--require-hashes`；GitHub 插件固定到提交 SHA，可强制 SHA-256 |
+| 下载完整性（内置国内镜像也不能篡改） | 安装包 SHA-256；Docker 软件源 GPG 指纹；镜像按摘要拉取；Agent 依赖 `--require-hashes`；GitHub 插件固定到提交 SHA，可强制 SHA-256 |
 | 危险操作 | 停止服务、删除、卸载需确认；恢复备份需输入文件名；撤销本机授权有额外提示 |
 | 已有数据 | 已有容器只读接管；修改 AstrBot 配置前先停服务并备份，保留文件原有编码（BOM） |
 

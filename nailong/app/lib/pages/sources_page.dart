@@ -6,7 +6,7 @@ import '../ui/widgets.dart';
 import 'conn_scope.dart';
 
 /// 下载加速：GitHub 下载源、Docker 镜像加速器、PyPI 镜像、Docker 软件源。
-/// 全部由用户自行添加，默认只有官方源；只接受 HTTPS。
+/// 内置国内常用源（自动测速、官方源兜底），也可以自己添加；只接受 HTTPS。
 class SourcesPage extends StatefulWidget {
   const SourcesPage({super.key});
 
@@ -199,6 +199,17 @@ class _SourcesPageState extends State<SourcesPage> {
         }),
       ),
     );
+    Widget builtin(List<String> items) => Column(
+      children: [
+        for (final b in items)
+          ListTile(
+            dense: true,
+            leading: Icon(Icons.bolt_outlined, color: cs.onSurfaceVariant),
+            title: Text(b, maxLines: 1, overflow: TextOverflow.ellipsis),
+            subtitle: const Text('内置 · 国内常用 · 部署时自动测速'),
+          ),
+      ],
+    );
     Widget official(String text) => ListTile(
       leading: Icon(Icons.verified, color: cs.success),
       title: Text(text),
@@ -220,7 +231,7 @@ class _SourcesPageState extends State<SourcesPage> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Text(
-                  '奶龙不内置任何第三方镜像站。你添加的来源只在测速可用时才会使用；无论从哪下载，'
+                  '已内置国内常用镜像（阿里云、清华、中科大、毫秒、轩辕、DaoCloud 等），部署时自动测速，快的优先，官方源兜底，你也可以再添加。无论从哪下载，'
                   'Docker 镜像都按固定摘要校验，Docker 软件包按官方 GPG 签名校验，Agent 依赖按哈希校验，GitHub 插件包校验 ZIP 结构与 SHA-256。',
                   style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13, height: 1.6),
                 ),
@@ -286,6 +297,7 @@ class _SourcesPageState extends State<SourcesPage> {
               GroupCard(
                 children: [
                   official('Docker Hub（registry-1.docker.io）'),
+                  builtin(builtinRegistries),
                   for (final r in [...s.registries]) urlTile(r, s.registries, sub: '部署时自动测速：可达性、摘要存在、架构、TLS'),
                   ListTile(
                     leading: const Icon(Icons.add),
@@ -305,6 +317,7 @@ class _SourcesPageState extends State<SourcesPage> {
               GroupCard(
                 children: [
                   official('https://pypi.org/simple'),
+                  builtin(builtinPypi),
                   for (final r in [...s.pypi]) urlTile(r, s.pypi),
                   ListTile(
                     leading: const Icon(Icons.add),
@@ -317,6 +330,7 @@ class _SourcesPageState extends State<SourcesPage> {
               GroupCard(
                 children: [
                   official('https://download.docker.com'),
+                  builtin(builtinDockerApt),
                   for (final r in [...s.dockerApt]) urlTile(r, s.dockerApt),
                   ListTile(
                     leading: const Icon(Icons.add),
