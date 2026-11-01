@@ -6,7 +6,7 @@
   <title>奶龙控制台</title>
   <link rel="icon" href="/assets/nailong-robot.svg" type="image/svg+xml">
   <meta name="theme-color" content="#f5f4f3">
-  <link rel="stylesheet" href="/assets/style.css?v=20261101-flclash">
+  <link rel="stylesheet" href="/assets/style.css?v=20261101-flclash-m">
 </head>
 <body>
   <div id="login" class="login-screen">
@@ -27,21 +27,21 @@
       <nav id="nav"></nav>
     </aside>
     <header class="topbar">
-      <button class="icon-btn mobile-only" onclick="toggleDrawer()" aria-label="打开菜单"><svg class="adb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <button id="backBtn" class="icon-btn back-btn" onclick="go('more')" aria-label="返回"><svg class="adb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5.5M11 5.5 4.5 12l6.5 6.5"/></svg></button>
       <div><h2 id="pageTitle">仪表盘</h2><span id="pageSub">系统总览</span></div>
       <div class="top-actions">
-        <button class="icon-btn" onclick="refresh(true,true)" title="刷新" aria-label="刷新"><svg class="adb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11.5A8 8 0 1 0 17.6 17"/><path d="M20 5v6.5h-6.5"/></svg></button>
+        <button class="icon-btn refresh-btn" onclick="refresh(true,true)" title="刷新" aria-label="刷新"><svg class="adb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11.5A8 8 0 1 0 17.6 17"/><path d="M20 5v6.5h-6.5"/></svg></button>
         <button id="themeToggle" class="theme-toggle" onclick="cycleThemeMode()" aria-label="切换主题"></button>
         <button id="globalStatus" class="status-orb grey" onclick="go('astrbot')" title="检测中" aria-label="检测中"><svg class="adb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2.5-6 5 12 2.5-6H21"/></svg></button>
       </div>
     </header>
     <main id="content" class="content"></main>
-    <nav id="bottomNav" class="bottom-nav"></nav>
+    <nav id="bottomNav" class="bottom-nav" role="tablist" aria-label="主导航"></nav>
   </div>
 
   <div id="themeMenu" class="theme-menu hidden" role="menu"></div>
   <div id="modal" class="modal hidden"><div class="modal-card"><div id="modalBody"></div><div class="modal-actions"><button onclick="closeModal()">&#x53d6;&#x6d88;</button><button id="modalOk" class="danger">&#x786e;&#x8ba4;</button></div></div></div>
   <div id="toast" class="toast"></div>
-  <script src="/assets/app.js?v=20261101-flclash"></script>
+  <script src="/assets/app.js?v=20261101-flclash-m"></script>
 </body>
 </html>
