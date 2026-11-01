@@ -6,7 +6,7 @@
   <title>奶龙控制台</title>
   <link rel="icon" href="/assets/nailong-robot.svg" type="image/svg+xml">
   <meta name="theme-color" content="#f5f4f3">
-  <link rel="stylesheet" href="/assets/style.css?v=20261101-flclash-m">
+  <link rel="stylesheet" href="/assets/style.css?v=20261101-glass">
 </head>
 <body>
   <div id="login" class="login-screen">
@@ -14,9 +14,9 @@
       <div class="brand-mark logo-mark"><img src="/assets/nailong-robot.svg" alt="奶龙商标"></div>
       <h1>奶龙控制台</h1>
       <p>管理 AstrBot 与 NapCat 机器人，从这里开始。</p>
-      <label>账号<input id="loginUser" autocomplete="off" spellcheck="false" placeholder="请输入面板账号"></label>
-      <label>密码<input id="loginPass" type="password" autocomplete="off" placeholder="请输入面板密码"></label>
-      <button class="primary wide" onclick="login()">进入面板</button>
+      <label>账号<input id="loginUser" autocomplete="username" autocapitalize="off" spellcheck="false" enterkeyhint="next" placeholder="请输入面板账号"></label>
+      <label>密码<input id="loginPass" type="password" autocomplete="current-password" enterkeyhint="go" placeholder="请输入面板密码"></label>
+      <button id="loginBtn" class="primary wide" onclick="login()">进入面板</button>
       <div id="loginMsg" class="muted"></div>
     </div>
   </div>
@@ -36,12 +36,13 @@
       </div>
     </header>
     <main id="content" class="content"></main>
-    <nav id="bottomNav" class="bottom-nav" role="tablist" aria-label="主导航"></nav>
+    <nav id="bottomNav" role="tablist" aria-label="主导航"></nav>
   </div>
 
   <div id="themeMenu" class="theme-menu hidden" role="menu"></div>
   <div id="modal" class="modal hidden"><div class="modal-card"><div id="modalBody"></div><div class="modal-actions"><button onclick="closeModal()">&#x53d6;&#x6d88;</button><button id="modalOk" class="danger">&#x786e;&#x8ba4;</button></div></div></div>
   <div id="toast" class="toast"></div>
-  <script src="/assets/app.js?v=20261101-flclash-m"></script>
+  <script src="/assets/motion.js?v=20261101-glass"></script>
+  <script src="/assets/app.js?v=20261101-glass"></script>
 </body>
 </html>

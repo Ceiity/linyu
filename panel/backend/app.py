@@ -43,7 +43,7 @@ except Exception:
     hashes = serialization = padding = rsa = AESGCM = None
     LOGIN_CRYPTO_AVAILABLE = False
 
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", "/opt/astrbot/AstrBot-Deploy"))
 INSTALL_PREFIX = Path(os.environ.get("INSTALL_PREFIX", "/opt/astrbot"))
 STATE_FILE = Path(os.environ.get("STATE_FILE", str(INSTALL_PREFIX / ".env")))
@@ -233,7 +233,7 @@ def default_config() -> dict:
         "nailong_remote_cooldown_seconds": 300,
         "public_base_url": "",
         "allow_dangerous": False,
-        "theme_color": "#2563eb",
+        "theme_color": "#007aff",
         "created_at": now(),
     }
 
@@ -270,6 +270,10 @@ def migrate_config(cfg: dict) -> bool:
     # releases re-filled it with a fresh random value that never worked.
     if cfg.get("password_changed_at") and "initial_password" in cfg:
         cfg.pop("initial_password")
+        changed = True
+    # v2.3 switched the default accent to iOS blue; only the untouched old default moves.
+    if str(cfg.get("theme_color") or "").lower() == "#2563eb" and not cfg.get("theme_color_customized"):
+        cfg["theme_color"] = "#007aff"
         changed = True
     missing = [key for key in DEFAULT_CONFIG_KEYS if key not in cfg and key != "initial_password"]
     if missing:
@@ -351,6 +355,8 @@ def _save_config_patch(cfg: dict, patch: dict) -> dict:
                 v = validated_http_url(v, k)
             if k == "theme_color" and not re.fullmatch(r"#[0-9A-Fa-f]{6}", str(v or "")):
                 raise ValueError("主题色格式不正确")
+            if k == "theme_color":
+                cfg["theme_color_customized"] = True
             if k == "network_name" and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}", str(v or "")):
                 raise ValueError("Docker 网络名称格式不正确")
             if k == "default_reverse_ws_token" and not re.fullmatch(r"[A-Za-z0-9._+=-]{4,128}", str(v or "")):
