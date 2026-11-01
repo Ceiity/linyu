@@ -522,6 +522,152 @@
     el._pageTimer = setTimeout(() => el.classList.remove("page-push", "page-pop", "page-fade"), 700);
   }
 
+  /* ---------- notices ---------- */
+  // Stacked messages under the top edge: they drop in from 16px above at
+  // 94% size, can be swiped away sideways, and the oldest gives way when
+  // more than two (phone) or four (desktop) are showing.
+  const NOTICE_ICONS = {
+    success: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2" fill="currentColor" stroke="none" opacity=".16"/><path d="m8 12.3 2.7 2.7L16.2 9.5"/></svg>',
+    error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="9.2" fill="currentColor" stroke="none" opacity=".16"/><path d="M12 7.6v5.2M12 16.4h.01"/></svg>',
+    info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="9.2" fill="currentColor" stroke="none" opacity=".16"/><path d="M12 11v5.2M12 7.7h.01"/></svg>',
+    loading: '<span class="notice-spin"></span>',
+  };
+  const Notices = {
+    host: null,
+    items: [],
+    ensureHost() {
+      if (this.host?.isConnected) return this.host;
+      this.host = document.createElement("div");
+      this.host.className = "notices";
+      this.host.setAttribute("role", "status");
+      this.host.setAttribute("aria-live", "polite");
+      document.body.appendChild(this.host);
+      return this.host;
+    },
+    show(text, level = "success") {
+      const host = this.ensureHost();
+      const same = this.items.find((n) => n.text === text && !n.leaving);
+      const life = level === "error" ? 4200 : level === "loading" ? 1800 : 2600;
+      if (same) {
+        same.el.className = `notice ${level}`;
+        same.el.querySelector(".notice-icon").innerHTML = NOTICE_ICONS[level] || NOTICE_ICONS.info;
+        clearTimeout(same.timer);
+        same.timer = setTimeout(() => this.dismiss(same), life);
+        same.el.animate?.([{ transform: "scale(1.03)" }, { transform: "scale(1)" }], { duration: 260, easing: "cubic-bezier(.2,.8,.2,1)" });
+        return;
+      }
+      const el = document.createElement("div");
+      el.className = `notice ${level}`;
+      el.innerHTML = `<span class="notice-icon">${NOTICE_ICONS[level] || NOTICE_ICONS.info}</span><span class="notice-text"></span>`;
+      el.querySelector(".notice-text").textContent = text;
+      host.prepend(el);
+      const item = { el, text, leaving: false };
+      this.items.unshift(item);
+      this.swipe(item);
+      item.timer = setTimeout(() => this.dismiss(item), life);
+      const max = matchMedia("(max-width: 720px)").matches ? 2 : 4;
+      this.items.filter((n) => !n.leaving).slice(max).forEach((n) => this.dismiss(n));
+    },
+    dismiss(item, dx = 0) {
+      if (!item || item.leaving) return;
+      item.leaving = true;
+      clearTimeout(item.timer);
+      const el = item.el;
+      const h = el.offsetHeight;
+      el.style.height = `${h}px`;
+      el.classList.add("leaving");
+      if (dx) el.style.transform = `translateX(${dx > 0 ? 110 : -110}%)`;
+      setTimeout(() => {
+        el.style.height = "0px";
+        el.style.marginBottom = "0px";
+        el.style.paddingTop = el.style.paddingBottom = "0px";
+      }, reduceMotion.matches ? 0 : 200);
+      setTimeout(() => {
+        el.remove();
+        this.items = this.items.filter((n) => n !== item);
+      }, reduceMotion.matches ? 0 : 420);
+    },
+    swipe(item) {
+      const el = item.el;
+      let x0 = 0, t0 = 0, dx = 0, id = null;
+      el.addEventListener("pointerdown", (e) => {
+        id = e.pointerId;
+        x0 = e.clientX;
+        t0 = e.timeStamp;
+        dx = 0;
+        el.setPointerCapture?.(id);
+        el.classList.add("dragging");
+        clearTimeout(item.timer);
+      });
+      el.addEventListener("pointermove", (e) => {
+        if (e.pointerId !== id) return;
+        dx = e.clientX - x0;
+        el.style.transform = `translateX(${dx}px)`;
+        el.style.opacity = String(Math.max(0.2, 1 - Math.abs(dx) / el.offsetWidth));
+      });
+      const up = (e) => {
+        if (e.pointerId !== id) return;
+        id = null;
+        el.classList.remove("dragging");
+        const v = (dx / Math.max(1, e.timeStamp - t0)) * 1000;
+        if (Math.abs(dx) > el.offsetWidth * 0.35 || Math.abs(v) > 700) {
+          this.dismiss(item, dx || v);
+        } else {
+          el.style.transform = "";
+          el.style.opacity = "";
+          item.timer = setTimeout(() => this.dismiss(item), 1800);
+        }
+      };
+      el.addEventListener("pointerup", up);
+      el.addEventListener("pointercancel", up);
+    },
+  };
+
+  /* ---------- sidebar selection indicator ---------- */
+  // The bar reaches toward the new row before its tail catches up (320ms).
+  const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+  const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  const SideIndicator = {
+    from: null,
+    move(nav) {
+      if (!nav) return;
+      const active = nav.querySelector(".nav-item.active");
+      let bar = nav.querySelector(".side-indicator");
+      if (!active) {
+        bar?.remove();
+        return;
+      }
+      if (!bar) {
+        bar = document.createElement("i");
+        bar.className = "side-indicator";
+        nav.appendChild(bar);
+      }
+      const H = 16;
+      const to = active.offsetTop + (active.offsetHeight - H) / 2;
+      const from = this.from ?? to;
+      this.from = to;
+      const place = (top, bottom) => {
+        bar.style.transform = `translateY(${top.toFixed(1)}px)`;
+        bar.style.height = `${(bottom - top + H).toFixed(1)}px`;
+      };
+      if (reduceMotion.matches || from === to) {
+        place(to, to);
+        return;
+      }
+      const start = performance.now();
+      const run = (now) => {
+        const t = Math.min(1, (now - start) / 320);
+        const lead = easeOutCubic(Math.min(1, t / 0.6));
+        const trail = easeInOutCubic(Math.max(0, (t - 0.35) / 0.65));
+        const a = from + (to - from) * lead;
+        const b = from + (to - from) * trail;
+        to >= from ? place(b, a) : place(a, b);
+        if (t < 1 && bar.isConnected) requestAnimationFrame(run);
+      };
+      requestAnimationFrame(run);
+    },
+  };
+
   Elastic.init();
-  window.NailongMotion = { Spring, SPRING, Loop, Dock, Switches, pageTransition, rubberBand };
+  window.NailongMotion = { Spring, SPRING, Loop, Dock, Switches, Notices, SideIndicator, pageTransition, rubberBand };
 })();
