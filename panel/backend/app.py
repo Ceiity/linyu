@@ -32,6 +32,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, quote, urlparse, urlsplit
+from urllib import error as urlerror
 from urllib import request as urlrequest
 
 try:
@@ -43,7 +44,7 @@ except Exception:
     hashes = serialization = padding = rsa = AESGCM = None
     LOGIN_CRYPTO_AVAILABLE = False
 
-APP_VERSION = "2.5.4"
+APP_VERSION = "2.6.0"
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", "/opt/astrbot/AstrBot-Deploy"))
 INSTALL_PREFIX = Path(os.environ.get("INSTALL_PREFIX", "/opt/astrbot"))
 STATE_FILE = Path(os.environ.get("STATE_FILE", str(INSTALL_PREFIX / ".env")))
@@ -1345,12 +1346,26 @@ def release_login_assignment_by_name(name: str) -> None:
             save_login_assignments()
 
 
+class NapCatError(ValueError):
+    """A NapCat WebUI problem the user can act on; shown as-is instead of a 500."""
+
+
 def http_json_post(url: str, payload: dict | None = None, headers: dict | None = None, timeout: int = 10) -> dict:
     data = json.dumps(payload or {}).encode("utf-8")
     req = urlrequest.Request(url, data=data, method="POST", headers={"Content-Type": "application/json", **(headers or {})})
-    with urlrequest.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read().decode("utf-8", errors="replace")
-    return json.loads(raw)
+    try:
+        with urlrequest.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urlerror.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        try:
+            return json.loads(raw)
+        except Exception:
+            raise NapCatError("NapCat WebUI 返回 HTTP %s" % e.code) from e
+    try:
+        return json.loads(raw)
+    except Exception as e:
+        raise NapCatError("NapCat WebUI 返回了无法识别的内容，可能版本不兼容或端口被其他程序占用") from e
 
 
 def http_json_post_optional(url: str, payload: dict | None = None, headers: dict | None = None, timeout: int = 5) -> tuple[bool, dict | str]:
@@ -1367,20 +1382,29 @@ def napcat_webui_credential(row: dict, force_refresh: bool = False, timeout: int
     cache = NAPCAT_CREDENTIAL_CACHE.get(name)
     now_ts = time.time()
     if cache and cache.get("rate_limited_until", 0) > now_ts:
-        raise RuntimeError("NapCat WebUI 登录限速中，请稍等 %d 秒后再试。" % int(cache.get("rate_limited_until", 0) - now_ts + 1))
+        raise NapCatError("NapCat WebUI 登录限速中，请稍等 %d 秒后再试。" % int(cache.get("rate_limited_until", 0) - now_ts + 1))
     if not force_refresh and cache and cache.get("hash") == token_hash and cache.get("expires", 0) > now_ts + 60:
         return str(cache["credential"])
     port = str(row["webui_port"])
-    res = http_json_post("http://127.0.0.1:%s/api/auth/login" % port, {"hash": token_hash}, timeout=timeout)
+    try:
+        res = http_json_post("http://127.0.0.1:%s/api/auth/login" % port, {"hash": token_hash}, timeout=timeout)
+    except NapCatError:
+        raise
+    except (urlerror.URLError, ConnectionError, TimeoutError, OSError) as e:
+        raise NapCatError("连不上 %s 的 NapCat WebUI（端口 %s）。容器可能还在启动，等 10 秒再试；一直这样请重启这个机器人。" % (napcat_display_name(name), port)) from e
     if int(res.get("code", -1)) != 0:
         msg = str(res.get("message", "unknown"))
         if "rate" in msg.lower():
             NAPCAT_CREDENTIAL_CACHE[name] = {"hash": token_hash, "rate_limited_until": now_ts + 75}
-            raise RuntimeError("NapCat WebUI \u767b\u5f55\u592a\u9891\u7e41\uff0c\u5df2\u89e6\u53d1\u9650\u6d41\u3002\u5f53\u524d\u5b9e\u4f8b\u9700\u8981\u7a0d\u7b49 1-3 \u5206\u949f\uff0c\u6216\u91cd\u542f\u8be5\u673a\u5668\u4eba\u540e\u518d\u70b9\u626b\u7801\u767b\u5f55\u3002")
-        raise RuntimeError("NapCat WebUI \u9274\u6743\u5931\u8d25\uff1a%s" % msg)
+            raise NapCatError("NapCat WebUI \u767b\u5f55\u592a\u9891\u7e41\uff0c\u5df2\u89e6\u53d1\u9650\u6d41\u3002\u5f53\u524d\u5b9e\u4f8b\u9700\u8981\u7a0d\u7b49 1-3 \u5206\u949f\uff0c\u6216\u91cd\u542f\u8be5\u673a\u5668\u4eba\u540e\u518d\u70b9\u626b\u7801\u767b\u5f55\u3002")
+        if "invalid" in msg.lower():
+            raise NapCatError("NapCat WebUI 密钥不匹配：可能在 NapCat 里改过 WebUI 密码。请重启这个机器人，或在面板里重新创建。")
+        if "not initialized" in msg.lower():
+            raise NapCatError("NapCat WebUI 还没准备好，等几秒再试。")
+        raise NapCatError("NapCat WebUI \u9274\u6743\u5931\u8d25\uff1a%s" % msg)
     cred = (res.get("data") or {}).get("Credential")
     if not cred:
-        raise RuntimeError("NapCat WebUI \u6ca1\u6709\u8fd4\u56de Credential")
+        raise NapCatError("NapCat WebUI \u6ca1\u6709\u8fd4\u56de Credential")
     NAPCAT_CREDENTIAL_CACHE[name] = {"credential": cred, "hash": token_hash, "expires": now_ts + 3300}
     return cred
 
@@ -1390,11 +1414,64 @@ def napcat_webui_call(row: dict, path: str, payload: dict | None = None, timeout
     last = None
     for force in (False, True):
         cred = napcat_webui_credential(row, force_refresh=force, timeout=timeout)
-        last = http_json_post("http://127.0.0.1:%s/api/%s" % (port, path.lstrip("/")), payload or {}, {"Authorization": "Bearer " + cred}, timeout=timeout)
+        try:
+            last = http_json_post("http://127.0.0.1:%s/api/%s" % (port, path.lstrip("/")), payload or {}, {"Authorization": "Bearer " + cred}, timeout=timeout)
+        except NapCatError:
+            raise
+        except (urlerror.URLError, ConnectionError, TimeoutError, OSError) as e:
+            raise NapCatError("NapCat WebUI（端口 %s）没有响应，容器可能正在重启，稍后再试。" % port) from e
         if int(last.get("code", -1)) != -1 or "Unauthorized" not in str(last.get("message", "")):
             return last
         NAPCAT_CREDENTIAL_CACHE.pop(str(row.get("name") or row.get("webui_port") or "napcat"), None)
     return last or {"code": -1, "message": "NapCat WebUI \u8c03\u7528\u5931\u8d25"}
+
+
+def parse_qq_login_error(text: str) -> dict:
+    """NapCat reports failures as '登录失败: [<raw listener args>]' or plain text.
+    Pull out Tencent's serverErrorCode and message when present."""
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    out = {"raw": raw, "message": raw, "code": ""}
+    if raw.startswith("登录失败:"):
+        try:
+            args = json.loads(raw.split(":", 1)[1].strip())
+        except Exception:
+            args = None
+        info = None
+        if isinstance(args, list):
+            info = next((a for a in args if isinstance(a, dict) and (a.get("message") or a.get("serverErrorCode") or a.get("errMsg"))), None)
+        if info:
+            out["message"] = str(info.get("message") or info.get("errMsg") or "登录失败")
+            out["code"] = str(info.get("serverErrorCode") or info.get("errCode") or info.get("result") or "")
+        else:
+            out["message"] = "登录失败"
+    out["expired"] = "过期" in raw or "失效" in raw
+    out["already"] = "已登录" in raw
+    return out
+
+
+def qq_login_state(st: dict) -> dict:
+    phase = str(st.get("loginPhase") or "waiting_qrcode")
+    err = parse_qq_login_error(str(st.get("loginError") or ""))
+    return {
+        "phase": phase,
+        "scanned": phase == "qrcode_scanned",
+        "initializing": phase == "initializing" or bool(st.get("qrLoginAccepted")) and phase != "qrcode_scanned",
+        "reconnecting": phase == "reconnecting",
+        "offline": bool(st.get("isOffline")) or phase == "offline",
+        "error": err,
+    }
+
+
+def qq_login_done(row: dict, name: str, already: bool = False) -> dict:
+    mark_napcat_recovery_online(name)
+    try:
+        info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
+        login_info = (info.get("data") or {}) if int(info.get("code", -1)) == 0 else {}
+    except NapCatError:
+        login_info = {}
+    return {"name": name, "is_login": True, "already_login": already, "login_info": login_info}
 
 
 def napcat_onebot_call(row: dict, action: str) -> tuple[bool, dict | str]:
@@ -1505,11 +1582,13 @@ def reset_idle_napcat_for_fresh_login(row: dict, reason: str = "reset idle login
 
 
 def qr_svg_for_text(text_value: str) -> str:
+    """Server-rendered QR as SVG, or "" when the qrcode module is missing.
+    The web panel draws the code itself from qrcode_url, so this is optional."""
     try:
         import qrcode
         import qrcode.image.svg
-    except Exception as e:
-        raise RuntimeError("\u670d\u52a1\u5668\u7f3a\u5c11\u4e8c\u7ef4\u7801\u5e93\uff1a\u8bf7\u5b89\u88c5 python3-qrcode \u6216 pip install qrcode\u3002\u539f\u59cb\u4e8c\u7ef4\u7801\u5185\u5bb9\uff1a%s" % text_value) from e
+    except Exception:
+        return ""
     img = qrcode.make(text_value, image_factory=qrcode.image.svg.SvgPathImage, box_size=10, border=2)
     return img.to_string(encoding="unicode")
 
@@ -1518,7 +1597,7 @@ def qr_png_base64_for_text(text_value: str) -> str:
     try:
         import qrcode
     except Exception as e:
-        raise RuntimeError("服务器缺少二维码库：请安装 qrcode[pil]。") from e
+        raise NapCatError("服务器缺少二维码库，无法发二维码图片：请在服务器执行 apt-get install -y python3-qrcode python3-pil 后重启面板。") from e
     img = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=2)
     img.add_data(text_value)
     img.make(fit=True)
@@ -1554,14 +1633,15 @@ def napcat_login_bundle(row: dict) -> dict:
             "login_name": login_name,
             "login_uin": login_uin,
         }
-    napcat_webui_call(row, "/QQLogin/RefreshQRcode")
-    time.sleep(1)
-    res = napcat_webui_call(row, "/QQLogin/GetQQLoginQrcode")
-    if int(res.get("code", -1)) != 0:
-        raise RuntimeError(str(res.get("message", "获取二维码失败")))
-    qrcode_url = (res.get("data") or {}).get("qrcode") or ""
+    # RefreshQRcode waits (up to ~10s) for NapCat to hand back a fresh code.
+    res = napcat_webui_call(row, "/QQLogin/RefreshQRcode", timeout=15)
+    qrcode_url = str((res.get("data") or {}).get("qrcodeurl") or "") if int(res.get("code", -1)) == 0 else ""
     if not qrcode_url:
-        raise RuntimeError("NapCat 没有返回二维码链接，可能正在初始化或已经登录。")
+        res = napcat_webui_call(row, "/QQLogin/GetQQLoginQrcode")
+        if int(res.get("code", -1)) == 0:
+            qrcode_url = str((res.get("data") or {}).get("qrcode") or "")
+    if not qrcode_url:
+        raise NapCatError("NapCat 还没生成二维码：%s" % (res.get("message") or "登录服务可能还在启动，请稍后再申请"))
     bundle = {
         "name": row.get("name"),
         "display_name": napcat_display_name(str(row.get("name", ""))),
@@ -1594,12 +1674,15 @@ def napcat_login_status_bundle(row: dict) -> dict:
             "login_name": login_name,
             "login_uin": login_uin,
         }
-    return {
+    out = {
         "name": row.get("name"),
         "display_name": napcat_display_name(str(row.get("name", ""))),
         "already_login": False,
         "status": status,
     }
+    if int(status.get("code", -1)) == 0:
+        out.update(qq_login_state(status.get("data") or {}))
+    return out
 
 
 def napcat_login_identity(info: dict) -> tuple[str, str]:
@@ -3283,35 +3366,60 @@ class Handler(BaseHTTPRequestHandler):
         action = str(data.get("action", "qrcode"))
         row = napcat_row(name)
         if action == "refresh":
-            res = napcat_webui_call(row, "/QQLogin/RefreshQRcode")
-            audit(user, "napcat.qq.refresh", {"name": name}, int(res.get("code", -1)) == 0)
-            return self.send_api(api(int(res.get("code", -1)) == 0, res, res.get("message", "")))
+            res = napcat_webui_call(row, "/QQLogin/RefreshQRcode", timeout=15)
+            ok = int(res.get("code", -1)) == 0
+            audit(user, "napcat.qq.refresh", {"name": name}, ok)
+            if not ok:
+                msg = str(res.get("message", ""))
+                if "Logined" in msg:
+                    return self.send_api(api(True, qq_login_done(row, name, already=True)))
+                raise NapCatError("刷新二维码失败：%s" % (msg or "NapCat 没有响应"))
+            d = res.get("data") or {}
+            if d.get("restarting"):
+                return self.send_api(api(True, {"name": name, "restarting": True}))
+            url = str(d.get("qrcodeurl") or "")
+            return self.send_api(api(True, {"name": name, "qrcode_url": url, "svg": qr_svg_for_text(url) if url else ""}))
         if action == "status":
             res = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
-            if int(res.get("code", -1)) == 0 and (res.get("data") or {}).get("isLogin"):
-                mark_napcat_recovery_online(name)
-                info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
-                if int(info.get("code", -1)) == 0:
-                    res.setdefault("data", {})["loginInfo"] = info.get("data") or {}
-            if (res.get("data") or {}).get("isLogin"):
+            if int(res.get("code", -1)) != 0:
+                raise NapCatError("查询登录状态失败：%s" % (res.get("message") or "NapCat 没有响应"))
+            st = res.get("data") or {}
+            if st.get("isLogin"):
                 audit(user, "napcat.qq.login_ok", {"name": name}, True)
-            return self.send_api(api(int(res.get("code", -1)) == 0, res, res.get("message", "")))
+                return self.send_api(api(True, qq_login_done(row, name)))
+            out = qq_login_state(st)
+            url = str(st.get("qrcodeurl") or "")
+            if url and url != str(data.get("known_url") or ""):
+                out["qrcode_url"] = url
+                out["svg"] = qr_svg_for_text(url)
+            return self.send_api(api(True, out))
         if action == "qrcode":
             status = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")
-            if int(status.get("code", -1)) == 0 and (status.get("data") or {}).get("isLogin"):
-                mark_napcat_recovery_online(name)
-                info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
+            st = status.get("data") or {} if int(status.get("code", -1)) == 0 else {}
+            if st.get("isLogin"):
                 audit(user, "napcat.qq.already_login", {"name": name}, True)
-                return self.send_api(api(True, {"name": name, "already_login": True, "status": status, "login_info": (info.get("data") if int(info.get("code", -1)) == 0 else {}) or {}}))
-            res = napcat_webui_call(row, "/QQLogin/GetQQLoginQrcode")
-            if int(res.get("code", -1)) != 0:
-                return self.send_api(api(False, res, res.get("message", "获取二维码失败")))
-            qrcode_url = (res.get("data") or {}).get("qrcode") or ""
-            if not qrcode_url:
-                return self.send_api(api(False, res, "NapCat 没有返回二维码链接，可能已经登录或二维码还没生成"))
-            svg = qr_svg_for_text(qrcode_url)
+                return self.send_api(api(True, qq_login_done(row, name, already=True)))
+            url = str(st.get("qrcodeurl") or "")
+            if not url:
+                res = napcat_webui_call(row, "/QQLogin/GetQQLoginQrcode")
+                if int(res.get("code", -1)) == 0:
+                    url = str((res.get("data") or {}).get("qrcode") or "")
+                elif "Logined" in str(res.get("message", "")):
+                    return self.send_api(api(True, qq_login_done(row, name, already=True)))
+            if not url:
+                # The first QR code is generated asynchronously after the container starts;
+                # ask NapCat for one and wait (it blocks up to ~10s for a fresh code).
+                res = napcat_webui_call(row, "/QQLogin/RefreshQRcode", timeout=15)
+                d = res.get("data") or {}
+                if int(res.get("code", -1)) == 0 and d.get("restarting"):
+                    raise NapCatError("NapCat 正在重新连接 QQ 登录服务，等 10 秒再点刷新。")
+                url = str(d.get("qrcodeurl") or "") if int(res.get("code", -1)) == 0 else ""
+                if not url:
+                    raise NapCatError("NapCat 还没生成二维码：%s" % (res.get("message") or "登录服务可能还在启动，等 10 秒再点刷新"))
             audit(user, "napcat.qq.qrcode", {"name": name}, True)
-            return self.send_api(api(True, {"name": name, "already_login": False, "qrcode_url": qrcode_url, "svg": svg, "status": res}))
+            out = qq_login_state(st)
+            out.update({"name": name, "already_login": False, "qrcode_url": url, "svg": qr_svg_for_text(url)})
+            return self.send_api(api(True, out))
         raise ValueError("QQ 登录操作不支持")
 
     def napcat_action(self, user: str):

@@ -115,16 +115,16 @@
   --ui-scale: 1;
 }
 @media (min-width: 1600px) and (hover: hover) and (pointer: fine) {
-  :root { --ui-scale: 1.08; }
+  :root { --ui-scale: 1.04; }
 }
 @media (min-width: 1880px) and (hover: hover) and (pointer: fine) {
-  :root { --ui-scale: 1.15; }
+  :root { --ui-scale: 1.08; }
 }
 @media (min-width: 2300px) and (hover: hover) and (pointer: fine) {
-  :root { --ui-scale: 1.25; }
+  :root { --ui-scale: 1.12; }
 }
 @media (min-width: 3000px) and (hover: hover) and (pointer: fine) {
-  :root { --ui-scale: 1.4; }
+  :root { --ui-scale: 1.2; }
 }
 html {
   zoom: var(--ui-scale);
@@ -4958,8 +4958,59 @@ html.scroll-locked {
 }
 .qrx-veil-text {
   display: none;
+  max-width: 80%;
   font-size: 15px;
   font-weight: 650;
+}
+/* scanned: phone has the code, waiting for the user to tap confirm */
+.qrx-scan {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.66);
+  color: #1c1b1a;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s var(--ease);
+}
+.qrx-phone {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 0 0 0 rgba(var(--primary-rgb), 0.45);
+  transform: scale(0.6);
+  transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.qrx-phone svg {
+  width: 30px;
+  height: 30px;
+  stroke-width: 2.6;
+}
+.qrx-scan b {
+  font-size: 16px;
+  font-weight: 700;
+}
+.qrx-scan small {
+  color: #5f5b56;
+  font-size: 12.5px;
+}
+.qrx[data-state="scanned"] .qrx-scan {
+  opacity: 1;
+}
+.qrx[data-state="scanned"] .qrx-phone {
+  transform: none;
+  animation: qrxPing 1.6s ease-out 0.45s infinite;
+}
+@keyframes qrxPing {
+  0% { box-shadow: 0 0 0 0 rgba(var(--primary-rgb), 0.45); }
+  100% { box-shadow: 0 0 0 18px rgba(var(--primary-rgb), 0); }
 }
 .qrx-done {
   display: flex;
@@ -5035,9 +5086,20 @@ html.scroll-locked {
   filter: blur(5px);
 }
 .qrx[data-state="refreshing"] .qrx-veil,
+.qrx[data-state="initializing"] .qrx-veil,
 .qrx[data-state="expired"] .qrx-veil,
 .qrx[data-state="error"] .qrx-veil {
   opacity: 1;
+}
+.qrx[data-state="initializing"] .qrx-code,
+.qrx[data-state="scanned"] .qrx-code {
+  opacity: 1;
+  transform: none;
+  filter: blur(6px) saturate(0.6);
+}
+.qrx[data-state="refreshing"] .qrx-veil-text:not(:empty),
+.qrx[data-state="initializing"] .qrx-veil-text {
+  display: block;
 }
 .qrx[data-state="expired"] .qrx-veil .spin,
 .qrx[data-state="error"] .qrx-veil .spin {
@@ -5114,7 +5176,10 @@ html.scroll-locked {
 .qrx-status {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  max-width: 100%;
+  text-align: left;
   min-height: 20px;
   color: var(--text-2);
   font-size: 13.5px;
@@ -5127,6 +5192,14 @@ html.scroll-locked {
   border-radius: 50%;
   background: var(--muted);
 }
+.qrx[data-tone="warn"] .qrx-status {
+  color: var(--orange);
+}
+.qrx[data-tone="bad"] .qrx-status {
+  color: var(--red);
+}
+.qrx[data-state="scanned"] .qrx-status i,
+.qrx[data-state="initializing"] .qrx-status i,
 .qrx[data-state="ready"] .qrx-status i {
   background: var(--primary);
   animation: qrxBreath 1.6s ease-in-out infinite;
@@ -5165,6 +5238,7 @@ html.scroll-locked {
     transform: scale(1.03);
   }
 }
+.qrx[data-state="initializing"] .qrx-refresh svg,
 .qrx[data-state="refreshing"] .qrx-refresh svg,
 .qrx[data-state="loading"] .qrx-refresh svg {
   animation: spin 0.8s linear infinite;

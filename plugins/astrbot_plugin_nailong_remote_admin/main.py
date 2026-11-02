@@ -285,17 +285,32 @@ class Main(Star):
         }
         return await asyncio.to_thread(self._post_json_sync, "/api/remote/login/public-access", payload)
 
-    async def _wait_login_success(self, event: AstrMessageEvent, name: str, timeout_seconds: int = 180, interval_seconds: int = 5) -> dict | None:
+    async def _watch_login(self, event: AstrMessageEvent, name: str, timeout_seconds: int = 180, interval_seconds: int = 4):
+        """Yield (kind, data): "scanned" once when the phone has scanned, "error" when
+        NapCat reports a login failure, "ok" on success. Ends after ok/error/timeout."""
         deadline = time.time() + timeout_seconds
+        scanned = False
+        last_error = ""
         while time.time() < deadline:
             await asyncio.sleep(interval_seconds)
             try:
                 data = await self._login_status(event, name)
-                if data.get("already_login"):
-                    return data
             except Exception:
                 logger.exception("NapCat login status poll failed")
-        return None
+                continue
+            if data.get("already_login"):
+                yield "ok", data
+                return
+            if data.get("scanned") and not scanned:
+                scanned = True
+                yield "scanned", data
+            err = data.get("error") or {}
+            raw = str(err.get("raw") or "")
+            if raw and raw != last_error and not err.get("expired"):
+                last_error = raw
+                yield "error", data
+                return
+        yield "timeout", {}
 
     @staticmethod
     def _avatar_url(qq: str) -> str:
@@ -469,18 +484,24 @@ class Main(Star):
                 yield event.plain_result("\u68c0\u6d4b\u5230\u767b\u5f55\u72b6\u6001\u5f02\u5e38\uff0c\u5df2\u81ea\u52a8\u91cd\u542f\u5e76\u751f\u6210\u65b0\u4e8c\u7ef4\u7801\u3002")
             else:
                 yield event.plain_result("\u4e8c\u7ef4\u7801\u5df2\u751f\u6210\uff0c\u8bf7\u626b\u7801\u767b\u5f55\u3002")
-            status = await self._wait_login_success(event, str(data.get("container") or data.get("name") or ""), timeout_seconds=180, interval_seconds=5)
-            if status:
-                login_uin = str(status.get("login_uin") or "")
-                msg = self._login_success_text(status, "\u767b\u5f55\u6210\u529f")
-                if login_uin:
-                    try:
-                        avatar = await self._download_avatar(login_uin)
-                        yield self._image_text_result(event, avatar, msg)
-                        return
-                    except Exception:
-                        logger.exception("QQ avatar send failed")
-                yield event.plain_result(msg)
+            async for kind, status in self._watch_login(event, str(data.get("container") or data.get("name") or ""), timeout_seconds=180):
+                if kind == "scanned":
+                    yield event.plain_result("已扫码，请在手机 QQ 上点「确认登录」。")
+                elif kind == "error":
+                    err = status.get("error") or {}
+                    code = f"（错误码 {err.get('code')}）" if err.get("code") else ""
+                    yield event.plain_result(f"登录没有成功：{err.get('message') or '手机端拒绝或登录失败'}{code}\n可以重新发送申请登录再试。")
+                elif kind == "ok":
+                    login_uin = str(status.get("login_uin") or "")
+                    msg = self._login_success_text(status, "\u767b\u5f55\u6210\u529f")
+                    if login_uin:
+                        try:
+                            avatar = await self._download_avatar(login_uin)
+                            yield self._image_text_result(event, avatar, msg)
+                            return
+                        except Exception:
+                            logger.exception("QQ avatar send failed")
+                    yield event.plain_result(msg)
         except Exception:
             logger.exception("QR image send failed")
             yield event.plain_result("\u4e8c\u7ef4\u7801\u56fe\u7247\u53d1\u9001\u5931\u8d25\uff0c\u8bf7\u6253\u5f00 Web \u9762\u677f\u626b\u7801\u3002")
