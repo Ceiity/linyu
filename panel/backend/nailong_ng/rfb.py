@@ -39,8 +39,8 @@ def vnc_des_response(password: str, challenge: bytes) -> bytes:
 
     key = (password.encode("latin-1", errors="ignore") + b"\0" * 8)[:8]
     key = bytes(_reverse_bits(b) for b in key)
-    # A 64-bit TripleDES key degrades to single DES (K1 == K2 == K3), which is what VNC uses.
-    enc = Cipher(TripleDES(key), modes.ECB()).encryptor()
+    # TripleDES with K1 == K2 == K3 is exactly single DES, which is what VNC uses.
+    enc = Cipher(TripleDES(key * 3), modes.ECB()).encryptor()
     return enc.update(challenge) + enc.finalize()
 
 
@@ -202,7 +202,11 @@ class RFBClient:
                 self.sock = None
 
     def __enter__(self):
-        return self.connect()
+        try:
+            return self.connect()
+        except BaseException:
+            self.close()
+            raise
 
     def __exit__(self, *exc):
         self.close()
@@ -224,8 +228,8 @@ def content_box(img, threshold: int = 28, bar_ratio: float = 0.85, pad: int = 14
     bg = max(colors, key=lambda c: c[0])[1]
     diff = ImageChops.difference(img, Image.new("RGB", img.size, bg)).convert("L")
     mask = diff.point(lambda v: 255 if v > threshold else 0)
-    rows = list(mask.resize((1, h), Image.BOX).getdata())
-    cols = list(mask.resize((w, 1), Image.BOX).getdata())
+    rows = list(mask.resize((1, h), Image.BOX).tobytes())
+    cols = list(mask.resize((w, 1), Image.BOX).tobytes())
     bar_level = 255 * bar_ratio
     ys = [i for i, v in enumerate(rows) if 2 < v < bar_level]
     xs = [i for i, v in enumerate(cols) if 2 < v < bar_level]
