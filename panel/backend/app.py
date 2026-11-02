@@ -16,6 +16,7 @@ import shutil
 import socket
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
@@ -44,7 +45,15 @@ except Exception:
     hashes = serialization = padding = rsa = AESGCM = None
     LOGIN_CRYPTO_AVAILABLE = False
 
-APP_VERSION = "2.6.0"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from nailong_ng import NG_VERSION  # noqa: E402
+from nailong_ng.host import Host as NGHost  # noqa: E402
+from nailong_ng.login_codes import catalog_table as ng_codes_table  # noqa: E402
+from nailong_ng.manager import ProtocolManager  # noqa: E402
+from nailong_ng.protocols import ProtocolError, Unsupported  # noqa: E402
+from nailong_ng.sshdeploy import SSHError, SSHServers  # noqa: E402
+
+APP_VERSION = "3.0.0"
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", "/opt/astrbot/AstrBot-Deploy"))
 INSTALL_PREFIX = Path(os.environ.get("INSTALL_PREFIX", "/opt/astrbot"))
 STATE_FILE = Path(os.environ.get("STATE_FILE", str(INSTALL_PREFIX / ".env")))
@@ -990,6 +999,15 @@ def redact_secret_text(text: str) -> str:
         (r"(?i)(password=)[^\s&]+", r"\1***"),
         (r'(?i)("(?:token|password|passwd|credential|secret)"\s*:\s*)"?[^",\s}]+"?', r'\1"***"'),
         (r"(?i)(webui\?token=)[A-Za-z0-9._@#%+=:-]{6,}", r"\1***"),
+        (r'(?i)("(?:accessToken|access_token|ws_reverse_token|password_enc|vnc_passwd)"\s*:\s*)"[^"]*"', r'\1"***"'),
+        (r"(?i)(access_token=)[^\s&\"']+", r"\1***"),
+        (r"(?i)(Authorization:\s*(?:Bearer|Token)\s+)[^\s\"']+", r"\1***"),
+        (r"(?i)(VNC_PASSWD=)\S+", r"\1***"),
+        (r"(远程桌面密码[:：]\s*)\S+", r"\1***"),
+        (r"(?i)(remote desktop password:\s*)\S+", r"\1***"),
+        (r"(临时密码[:：]\s*)\S+", r"\1***"),
+        (r"(?i)(initial credentials:.*password=)\S+", r"\1***"),
+        (r"(?i)(Initial password:\s*)\S+", r"\1***"),
     ]
     for pat, repl in patterns:
         value = re.sub(pat, repl, value)
@@ -1764,6 +1782,17 @@ def napcat_pool_item(row: dict) -> dict:
     assigned = assignment_for_requester(assigned_to) if assigned_to else None
     if assigned:
         item["assignment_ttl"] = max(0, int(float(assigned.get("expires", 0)) - time.time()))
+    item["protocol"] = ng_active_protocol(name)
+    if item["protocol"] != "napcat":
+        # The account is served by SnowLuma; NapCat is intentionally stopped. Never "idle".
+        item["pool_state"] = "protocol"
+        item["pool_state_text"] = "SnowLuma 接管"
+        try:
+            st = ng().adapters["snowluma"].get_login_status(name, quick=True)
+            item.update({"online": bool(st.get("online")), "login_uin": st.get("uin", ""), "login_name": st.get("nickname", "")})
+        except Exception:
+            pass
+        return item
     if not item["running"]:
         return item
     try:
@@ -1843,7 +1872,85 @@ def system_metrics() -> dict:
     disk_path = str(INSTALL_PREFIX if INSTALL_PREFIX.exists() else Path("/"))
     du = shutil.disk_usage(disk_path)
     load = os.getloadavg() if hasattr(os, "getloadavg") else (0, 0, 0)
-    return {"load": load, "memory": {"total": total * 1024, "available": free * 1024, "used_percent": round((1 - free / total) * 100, 1) if total else 0}, "disk": {"total": du.total, "used": du.used, "free": du.free, "used_percent": round(du.used / du.total * 100, 1)}}
+    return {"load": load, "memory": {"total": total * 1024, "available": free * 1024, "used_percent": round((1 - free / total) * 100, 1) if total else 0}, "disk": {"total": du.total, "used": du.used, "free": du.free, "used_percent": round(du.used / du.total * 100, 1)}, **host_rates()}
+
+
+HOST_RATE_LOCK = threading.Lock()
+HOST_RATE_PREV: dict = {}
+
+
+def host_rates() -> dict:
+    """CPU busy % and network throughput since the previous call (/proc/stat, /proc/net/dev)."""
+    out = {"cpu_percent": None, "cpu_count": os.cpu_count() or 1, "net": {"rx_rate": None, "tx_rate": None, "rx_total": 0, "tx_total": 0}}
+    try:
+        cpu = [int(x) for x in Path("/proc/stat").read_text().splitlines()[0].split()[1:]]
+        idle, total = cpu[3] + (cpu[4] if len(cpu) > 4 else 0), sum(cpu)
+    except Exception:
+        idle = total = 0
+    rx = tx = 0
+    try:
+        for line in Path("/proc/net/dev").read_text().splitlines()[2:]:
+            name, rest = line.split(":", 1)
+            name = name.strip()
+            if name == "lo" or name.startswith(("veth", "docker", "br-")):
+                continue
+            cols = rest.split()
+            rx += int(cols[0])
+            tx += int(cols[8])
+    except Exception:
+        pass
+    now_ts = time.time()
+    with HOST_RATE_LOCK:
+        prev = dict(HOST_RATE_PREV)
+        HOST_RATE_PREV.update({"ts": now_ts, "idle": idle, "total": total, "rx": rx, "tx": tx})
+    out["net"]["rx_total"], out["net"]["tx_total"] = rx, tx
+    if prev and now_ts - prev.get("ts", 0) > 0.5:
+        dt = now_ts - prev["ts"]
+        dtotal = total - prev.get("total", 0)
+        if dtotal > 0:
+            out["cpu_percent"] = round((1 - (idle - prev.get("idle", 0)) / dtotal) * 100, 1)
+        out["net"]["rx_rate"] = max(0, int((rx - prev.get("rx", 0)) / dt))
+        out["net"]["tx_rate"] = max(0, int((tx - prev.get("tx", 0)) / dt))
+    return out
+
+
+def ng_docker_overview() -> dict:
+    code, ps = docker(["ps", "-a", "--format", "{{json .}}"], timeout=20)
+    containers = []
+    for line in ps.splitlines() if code == 0 else []:
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        containers.append({"name": row.get("Names"), "image": row.get("Image"), "state": row.get("State"), "status": row.get("Status"), "ports": row.get("Ports")})
+    _, stats = docker(["stats", "--no-stream", "--format", "{{json .}}"], timeout=30)
+    usage = {}
+    for line in stats.splitlines():
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        usage[row.get("Name")] = {"cpu": row.get("CPUPerc"), "mem": row.get("MemUsage"), "mem_percent": row.get("MemPerc"), "net": row.get("NetIO")}
+    for c in containers:
+        c["usage"] = usage.get(c["name"], {})
+    _, imgs = docker(["images", "--format", "{{json .}}"], timeout=20)
+    images = []
+    for line in imgs.splitlines():
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        images.append({"repo": row.get("Repository"), "tag": row.get("Tag"), "id": row.get("ID"), "size": row.get("Size"), "created": row.get("CreatedSince")})
+    net = shell_state().get("NETWORK_NAME", "astrbot_network")
+    _, nets = docker(["network", "inspect", net, "--format", "{{json .Containers}}"], timeout=15)
+    members = []
+    try:
+        for v in (json.loads(nets) or {}).values():
+            members.append({"name": v.get("Name"), "ip": v.get("IPv4Address")})
+    except Exception:
+        pass
+    _, ver = docker(["version", "--format", "{{.Server.Version}}"], timeout=10)
+    return {"ok": code == 0, "version": ver.strip(), "containers": containers, "images": images, "network": {"name": net, "members": members}}
 
 
 def sample_metrics() -> None:
@@ -1899,7 +2006,14 @@ def astrbot_data(origin: str | None = None) -> dict:
     st = shell_state()
     origin = origin or public_origin()
     deploy = Path(st.get("DEPLOY_INFO_FILE", str(INSTALL_PREFIX / "deploy_info.txt")))
-    return {"status": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "url": url_for_port(origin, st.get("ASTRBOT_WEB_PORT", "6185")), "username": st.get("ASTRBOT_USERNAME", "astrbot"), "password": current_astrbot_password(), "token": st.get("ASTRBOT_REVERSE_WS_TOKEN", ""), "config_path": str(INSTALL_PREFIX / "data" / "cmd_config.json"), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署"}
+    return {"status": container_status(st.get("ASTRBOT_CONTAINER", "astrbot")), "url": url_for_port(origin, st.get("ASTRBOT_WEB_PORT", "6185")), "username": st.get("ASTRBOT_USERNAME", "astrbot"), "password": current_astrbot_password(), "token": mask_secret(st.get("ASTRBOT_REVERSE_WS_TOKEN", "")), "token_masked": True, "config_path": str(INSTALL_PREFIX / "data" / "cmd_config.json"), "deploy_info": redact_secret_text(deploy.read_text(encoding="utf-8", errors="replace")) if deploy.exists() else "尚未部署"}
+
+
+def mask_secret(value: str) -> str:
+    value = str(value or "")
+    if len(value) <= 6:
+        return "*" * len(value)
+    return value[:3] + "*" * max(4, len(value) - 6) + value[-3:]
 
 
 def get_logs(target: str, lines: int) -> str:
@@ -2485,6 +2599,8 @@ def delete_napcat(name: str, keep_data: bool) -> tuple[int, str]:
 
 
 def _delete_napcat(name: str, keep_data: bool) -> tuple[int, str]:
+    if ng_snowluma_installed(name):
+        raise ValueError("%s 安装了 SnowLuma，请先在「协议端」页切换回 NapCat 并卸载 SnowLuma，再删除机器人" % napcat_display_name(name))
     st = shell_state()
     base = Path(st.get("NAPCAT_BASE_DIR", str(INSTALL_PREFIX / "napcat")))
     idx = Path(st.get("NAPCAT_INDEX_FILE", str(INSTALL_PREFIX / "napcat_index.tsv")))
@@ -2551,6 +2667,144 @@ def task_cleanup_idle_napcat(task: Task, keep_data: bool = True) -> dict:
             task.line("清理 %s 返回异常，继续处理下一个" % name)
     task.line("空闲机器人清理完成，共清理 %d 个" % len(deleted), 95)
     return {"ok": True, "deleted": deleted, "output": "\n".join(outputs)[-8000:]}
+
+
+# ---------------------------------------------------------------------------
+# Nailong Next Generation 2.0: protocol ends, unified login, diagnostics, SSH
+# ---------------------------------------------------------------------------
+NG_LOCK = threading.Lock()
+NG_STATE: dict = {}
+NG_CRITICAL_KINDS = ("deploy.start", "napcat.add", "napcat.delete", "napcat.cleanup_idle", "backup.restore", "update.")
+
+
+def ng_busy(slot: str) -> str:
+    with TASK_LOCK:
+        running = [t for t in TASKS.values() if t.status in {"queued", "running"}]
+    for t in running:
+        kind = str(t.kind)
+        if kind.startswith(NG_CRITICAL_KINDS):
+            return "%s（任务 %s）" % (t.title, t.id)
+        if kind.startswith(("protocol.", "snowluma.")) and slot in t.title and kind != "protocol.switch":
+            return "%s（任务 %s）" % (t.title, t.id)
+    return ""
+
+
+def ng_on_login_success(slot: str, proto: str) -> None:
+    NAPCAT_QR_CACHE.pop(slot, None)
+    NAPCAT_IDENTITY_CACHE.pop(slot, None)
+    if proto == "napcat":
+        mark_napcat_recovery_online(slot)
+    release_login_assignment_by_name(slot)
+
+
+def ng() -> "ProtocolManager":
+    with NG_LOCK:
+        mgr = NG_STATE.get("manager")
+        if mgr is None:
+            host = NGHost(
+                install_prefix=INSTALL_PREFIX, project_dir=PROJECT_DIR, run=run_process, docker=docker, bash=bash,
+                shell_state=shell_state, audit=audit,
+                napcat_rows=lambda: parse_napcat_index(expose_secret=True),
+                napcat_webui_call=lambda row, path, payload=None, timeout=10: napcat_webui_call(row, path, payload, timeout),
+                redact=redact_secret_text, busy=ng_busy,
+                extra={"mutation_lock": NAPCAT_MUTATION_LOCK, "on_login_success": ng_on_login_success},
+            )
+            mgr = ProtocolManager(host)
+            NG_STATE["manager"] = mgr
+            NG_STATE["ssh"] = SSHServers(INSTALL_PREFIX)
+        return mgr
+
+
+def ng_ssh() -> "SSHServers":
+    ng()
+    return NG_STATE["ssh"]
+
+
+def ng_active_protocol(slot: str) -> str:
+    try:
+        return ng().active(slot)
+    except Exception:
+        return "napcat"
+
+
+def ng_snowluma_installed(slot: str) -> bool:
+    try:
+        return bool(ng().store.snowluma_instance(slot))
+    except Exception:
+        return False
+
+
+def task_ng_switch(task: Task, slot: str, target: str, user: str) -> dict:
+    task.line("准备把 %s 切换到 %s" % (napcat_display_name(slot), {"napcat": "NapCat", "snowluma": "SnowLuma"}.get(target, target)), 8)
+    steps = {"①": 12, "②": 20, "③": 26, "④": 35, "⑦": 50, "⑤": 60, "⑥": 85, "⑧": 85, "⑨": 98}
+
+    def log(text):
+        prog = next((v for k, v in steps.items() if str(text).startswith(k)), None)
+        task.line(str(text), prog)
+    res = ng().switch(slot, target, log, user)
+    invalidate_ng_caches()
+    return res
+
+
+def task_ng_snowluma(task: Task, op: str, slot: str, keep_data: bool = True) -> dict:
+    mgr = ng()
+    a = mgr.adapters["snowluma"] if op != "repair_napcat" else mgr.adapters["napcat"]
+    progress = {"n": 10}
+
+    def log(text):
+        progress["n"] = min(95, progress["n"] + 4)
+        task.line(str(text), progress["n"])
+    if op == "install":
+        res = a.install(slot, log)
+    elif op == "update":
+        res = a.update(slot, log)
+    elif op in ("repair", "repair_napcat"):
+        res = a.repair(slot, log)
+    elif op == "uninstall":
+        res = a.uninstall(slot, keep_data, log)
+    elif op == "update_napcat":
+        res = mgr.adapters["napcat"].update(slot, log)
+    else:
+        raise ValueError("操作不支持")
+    invalidate_ng_caches()
+    return res
+
+
+def task_ng_ssh_deploy(task: Task, sid: str, mirror: bool, napcat_count: int) -> dict:
+    counter = {"n": 5}
+
+    def log(text):
+        counter["n"] = min(95, counter["n"] + 1)
+        task.line(str(text), counter["n"])
+    return ng_ssh().deploy(sid, log, mirror=mirror, napcat_count=napcat_count)
+
+
+def invalidate_ng_caches() -> None:
+    with LOG_CACHE_LOCK:
+        LOG_CACHE.clear()
+
+
+NG_LOG_SOURCES = {"login": "login.log", "switch": "protocol-switch.log", "watchdog": "napcat-watchdog.log"}
+
+
+def ng_log_text(source: str, lines: int, since: str = "") -> str:
+    if source in NG_LOG_SOURCES:
+        text = tail_file(INSTALL_PREFIX / "logs" / NG_LOG_SOURCES[source], lines)
+    elif source == "onebot":
+        rows = []
+        for slot in ng().slots():
+            a = ng().adapters[ng().active(slot)]
+            for line in a.get_logs(slot, max(50, lines // 4), since).splitlines():
+                if re.search(r"onebot|websocket|ws[_ -]?client|reverse|wsClients|反向|connect|configuration applied|session (started|closed)", line, re.I):
+                    rows.append("[%s] %s" % (slot, line))
+        text = "\n".join(rows[-lines:])
+    else:
+        target = safe_name(source)
+        args = ["logs", "--tail", str(max(1, min(lines, 5000)))]
+        if since:
+            args += ["--since", since]
+        _, text = docker(args + [target], timeout=30)
+    return redact_secret_text(text)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -2793,6 +3047,8 @@ class Handler(BaseHTTPRequestHandler):
             user = self.require_auth()
             if not user:
                 return
+            if p.path.startswith("/api/ng/"):
+                return self.ng_get(p, user)
             if p.path == "/api/me":
                 return self.send_api(api(True, {"login": True, "config": sanitize_config(load_config())}))
             if p.path == "/api/dashboard":
@@ -2904,6 +3160,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not self.same_origin_request_ok():
                 return self.send_api(api(False, message="跨站请求已拒绝", code="CSRF_REJECTED"), 403)
+            if p.path.startswith("/api/ng/"):
+                return self.ng_post(p, user)
             if p.path == "/api/astrbot/action":
                 return self.astrbot_action(user)
             if p.path == "/api/astrbot/no-prefix":
@@ -2983,6 +3241,192 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             traceback.print_exc()
             self.send_api(api(False, message="服务器内部错误", code="SERVER_ERROR"), 500)
+
+    # ------------------------------------------------------------------
+    # Nailong NG 2.0 endpoints (/api/ng/...)
+    # ------------------------------------------------------------------
+    def send_text_download(self, text: str, filename: str):
+        body = text.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Disposition", "attachment; filename=\"%s\"" % re.sub(r"[^A-Za-z0-9._-]", "_", filename))
+        self.send_header("Cache-Control", "no-store")
+        self.security_headers(untrusted_content=True)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def ng_get(self, p, user: str):
+        qs = parse_qs(p.query)
+        arg = lambda k, d="": qs.get(k, [d])[0]  # noqa: E731
+        mgr = ng()
+        path = p.path
+        try:
+            if path == "/api/ng/info":
+                return self.send_api(api(True, {"version": NG_VERSION, "panel": APP_VERSION, "protocols": ["napcat", "snowluma"],
+                                                "capabilities": {k: a.capabilities for k, a in mgr.adapters.items()}}))
+            if path == "/api/ng/protocols":
+                return self.send_api(api(True, mgr.overview()))
+            if path == "/api/ng/protocols/slot":
+                return self.send_api(api(True, mgr.slot_overview(safe_name(arg("slot")))))
+            if path == "/api/ng/protocols/config":
+                slot = safe_name(arg("slot"))
+                return self.send_api(api(True, mgr.adapter(arg("protocol", mgr.active(slot))).get_config(slot)))
+            if path == "/api/ng/snowluma/preflight":
+                return self.send_api(api(True, {"checks": mgr.adapters["snowluma"].preflight(), "license": mgr.overview()["snowluma"]["license"]}))
+            if path == "/api/ng/login":
+                slot = safe_name(arg("slot"))
+                snap = mgr.logins.snapshot(slot, int(arg("since_seq", "0") or 0))
+                if snap.get("state") == "IDLE" or snap.get("terminal"):
+                    snap["current"] = mgr.adapters[mgr.active(slot)].get_login_status(slot, quick=True)
+                snap["active_protocol"] = mgr.active(slot)
+                return self.send_api(api(True, snap))
+            if path == "/api/ng/login/codes":
+                return self.send_api(api(True, ng_codes_table()))
+            if path == "/api/ng/diagnose":
+                slot = arg("slot")
+                slots = [safe_name(slot)] if slot else mgr.slots()
+                reports = []
+                for s in slots:
+                    try:
+                        reports.append(mgr.diagnose(s))
+                    except Exception as e:
+                        reports.append({"slot": s, "display_name": napcat_display_name(s), "label": "", "ok": False, "checks": [], "summary": str(e), "generated_at": now()})
+                if arg("format") == "text":
+                    text = "\n\n".join(mgr.diagnose_text(r) if r.get("checks") else "%s：%s" % (r["display_name"], r["summary"]) for r in reports)
+                    return self.send_text_download(redact_secret_text(text), "nailong-diagnose-%s.txt" % time.strftime("%Y%m%d-%H%M%S"))
+                return self.send_api(api(True, {"reports": reports}))
+            if path == "/api/ng/logs":
+                source = arg("source", "login")
+                lines = max(1, min(int(arg("lines", "400") or 400), 5000))
+                since = arg("since")
+                if since and not re.fullmatch(r"\d+[smh]|\d{10}", since):
+                    raise ValueError("时间筛选格式不正确")
+                text = ng_log_text(source, lines, since)
+                if arg("download") == "1":
+                    return self.send_text_download(text, "nailong-%s-%s.log" % (source, time.strftime("%Y%m%d-%H%M%S")))
+                return self.send_api(api(True, {"source": source, "content": text}))
+            if path == "/api/ng/log-sources":
+                sources = [{"id": "astrbot", "label": "AstrBot", "group": "AstrBot"}]
+                for s in mgr.slots():
+                    sources.append({"id": s, "label": "%s · NapCat" % napcat_display_name(s), "group": "NapCat"})
+                    if ng_snowluma_installed(s):
+                        c = mgr.adapters["snowluma"].container(s)
+                        sources.append({"id": c, "label": "%s · SnowLuma" % napcat_display_name(s), "group": "SnowLuma"})
+                sources += [{"id": "onebot", "label": "OneBot 通信", "group": "面板"}, {"id": "login", "label": "登录日志", "group": "面板"},
+                            {"id": "switch", "label": "协议切换", "group": "面板"}, {"id": "watchdog", "label": "掉线守护", "group": "面板"},
+                            {"id": "deploy", "label": "部署日志", "group": "面板"}, {"id": "panel", "label": "面板审计", "group": "面板"}]
+                return self.send_api(api(True, sources))
+            if path == "/api/ng/ssh":
+                return self.send_api(api(True, {"servers": ng_ssh().list()}))
+            if path == "/api/ng/docker":
+                return self.send_api(api(True, ng_docker_overview()))
+        except Unsupported as e:
+            return self.send_api(api(False, message=str(e), code="UNSUPPORTED"), 400)
+        self.send_error(404)
+
+    def ng_post(self, p, user: str):
+        data = self.read_json()
+        mgr = ng()
+        path = p.path
+        slot = safe_name(str(data.get("slot") or "")) if data.get("slot") else ""
+        try:
+            if path == "/api/ng/protocols/action":
+                proto, action = str(data.get("protocol") or ""), str(data.get("action") or "")
+                if action in ("stop", "restart"):
+                    require_confirm(data, action)
+                res = mgr.action(slot, proto, action)
+                audit(user, "protocol.%s.%s" % (proto, action), {"slot": slot}, bool(res.get("ok")))
+                return self.send_api(api(bool(res.get("ok")), res, "" if res.get("ok") else "操作失败：%s" % (res.get("output") or "")[-200:]))
+            if path == "/api/ng/protocols/switch":
+                target = str(data.get("target") or "")
+                require_confirm(data, "SWITCH")
+                if not slot:
+                    raise ValueError("缺少机器人")
+                t = create_task("切换协议端 %s → %s" % (slot, target), "protocol.switch", task_ng_switch, user, slot, target, user)
+                return self.send_api(api(True, t.to_dict()))
+            if path == "/api/ng/snowluma/consent":
+                require_confirm(data, "我已阅读并同意")
+                consent = mgr.store.set_consent(user)
+                audit(user, "snowluma.consent", consent, True)
+                return self.send_api(api(True, consent))
+            if path == "/api/ng/snowluma/image":
+                mgr.store.set_snowluma_image(str(data.get("image") or ""), str(data.get("pinned_digest") or "").strip())
+                audit(user, "snowluma.image", {"image": data.get("image"), "pinned": bool(data.get("pinned_digest"))}, True)
+                return self.send_api(api(True, mgr.store.snowluma()))
+            if path in ("/api/ng/snowluma/install", "/api/ng/snowluma/update", "/api/ng/snowluma/repair", "/api/ng/snowluma/uninstall",
+                        "/api/ng/napcat/repair", "/api/ng/napcat/update"):
+                if not slot:
+                    raise ValueError("缺少机器人")
+                op = {"/api/ng/napcat/repair": "repair_napcat", "/api/ng/napcat/update": "update_napcat"}.get(path, path.rsplit("/", 1)[-1])
+                keep = bool(data.get("keep_data", True))
+                if op == "uninstall":
+                    require_confirm(data, slot)
+                    if not keep and not load_config()["allow_dangerous"]:
+                        raise ValueError("删除 SnowLuma 数据需要先在系统设置里开启危险操作")
+                titles = {"install": "安装 SnowLuma", "update": "更新 SnowLuma", "repair": "修复 SnowLuma", "uninstall": "卸载 SnowLuma",
+                          "repair_napcat": "修复 NapCat 连接", "update_napcat": "更新 NapCat"}
+                kind = ("snowluma." if "napcat" not in op else "protocol.") + op
+                t = create_task("%s · %s" % (titles[op], slot), kind, task_ng_snowluma, user, op, slot, keep)
+                return self.send_api(api(True, t.to_dict()))
+            if path == "/api/ng/login":
+                action = str(data.get("action") or "request")
+                task_id = str(data.get("task_id") or "")
+                if action in ("request", "restart"):
+                    if mgr.store.slot(slot).get("switching"):
+                        raise ValueError("正在切换协议端，请稍后再申请登录")
+                    task = mgr.logins.request(slot, restart=action == "restart", user=user)
+                    audit(user, "login.%s" % action, {"slot": slot, "task": task.id, "protocol": task.protocol}, True)
+                    return self.send_api(api(True, task.to_dict()))
+                if action == "cancel":
+                    task = mgr.logins.cancel(slot, task_id)
+                    audit(user, "login.cancel", {"slot": slot, "task": task_id}, True)
+                    return self.send_api(api(True, task.to_dict() if task else mgr.logins.snapshot(slot)))
+                if action == "refresh":
+                    return self.send_api(api(True, mgr.logins.refresh(slot, task_id).to_dict(True)))
+                if action == "click":
+                    x, y = float(data.get("x", -1)), float(data.get("y", -1))
+                    if x < 0 or y < 0 or x > 10000 or y > 10000:
+                        raise ValueError("坐标不合法")
+                    return self.send_api(api(True, mgr.logins.click(slot, task_id, x, y).to_dict(True)))
+                raise ValueError("登录操作不支持")
+            if path == "/api/ng/secret/reveal":
+                cfg = load_config()
+                if not verify_password(str(data.get("password") or ""), str(cfg.get("password_hash") or "")):
+                    audit(user, "secret.reveal", {"what": data.get("what")}, False)
+                    raise PermissionError("面板密码不正确")
+                what = str(data.get("what") or "")
+                if what != "reverse_token":
+                    raise ValueError("不支持的密钥")
+                audit(user, "secret.reveal", {"what": what}, True)
+                return self.send_api(api(True, {"value": shell_state().get("ASTRBOT_REVERSE_WS_TOKEN", "")}))
+            if path == "/api/ng/ssh/save":
+                row = ng_ssh().save(data)
+                audit(user, "ssh.save", {"id": row.get("id"), "host": row.get("host")}, True)
+                return self.send_api(api(True, row))
+            if path == "/api/ng/ssh/delete":
+                require_confirm(data, "DELETE")
+                ng_ssh().delete(str(data.get("id") or ""))
+                audit(user, "ssh.delete", {"id": data.get("id")}, True)
+                return self.send_api(api(True, {}))
+            if path == "/api/ng/ssh/detect":
+                return self.send_api(api(True, ng_ssh().detect(str(data.get("id") or ""))))
+            if path == "/api/ng/ssh/deploy":
+                require_confirm(data, "DEPLOY")
+                sid = str(data.get("id") or "")
+                srv = ng_ssh().get(sid)
+                count = max(0, min(int(data.get("napcat_count") or 0), 50))
+                t = create_task("远程部署 %s" % srv.get("host"), "ssh.deploy", task_ng_ssh_deploy, user, sid, bool(data.get("mirror")), count)
+                return self.send_api(api(True, t.to_dict()))
+            if path == "/api/ng/reconcile":
+                return self.send_api(api(True, {"actions": mgr.reconcile()}))
+        except Unsupported as e:
+            return self.send_api(api(False, message=str(e), code="UNSUPPORTED"), 400)
+        except SSHError as e:
+            return self.send_api(api(False, message=str(e), code="SSH_ERROR"), 400)
+        except ProtocolError as e:
+            return self.send_api(api(False, message=str(e), code="PROTOCOL_ERROR"), 400)
+        self.send_error(404)
 
     def static(self, path: str):
         rel = "index.html" if path == "/" else path.removeprefix("/assets/")
@@ -3220,7 +3664,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_api(api(True, bundle))
                 except Exception:
                     release_login_assignment(requester)
-            rows = parse_napcat_index(self.request_origin(), expose_secret=True)
+            rows = [r for r in parse_napcat_index(self.request_origin(), expose_secret=True) if ng_active_protocol(str(r.get("name") or "")) == "napcat"]
             occupied = []
             last_error = ""
             for row in rows:
@@ -3363,6 +3807,8 @@ class Handler(BaseHTTPRequestHandler):
     def napcat_qq_login(self, user: str):
         data = self.read_json()
         name = safe_name(str(data.get("name", "")))
+        if ng_active_protocol(name) != "napcat":
+            raise ValueError("%s 当前使用 SnowLuma，请在「登录」页扫码" % napcat_display_name(name))
         action = str(data.get("action", "qrcode"))
         row = napcat_row(name)
         if action == "refresh":
@@ -3432,10 +3878,23 @@ class Handler(BaseHTTPRequestHandler):
             t = create_task("\u65b0\u589e NapCat x%d" % count, "napcat.add", task_add_napcat, user, count)
             return self.send_api(api(True, t.to_dict()))
         if action == "restart_all":
-            code, out = bash("while IFS=$'\\t' read -r name _; do [[ -n \"$name\" ]] && docker restart \"$name\"; done < \"$NAPCAT_INDEX_FILE\"", timeout=300)
-            audit(user, "napcat.restart_all", {}, code == 0)
-            return self.send_api(api(code == 0, {"output": out}))
+            outs, ok_all = [], True
+            for r in parse_napcat_index():
+                n = str(r.get("name") or "")
+                if not n:
+                    continue
+                if ng_active_protocol(n) != "napcat":
+                    outs.append("%s 使用 SnowLuma，跳过 NapCat 重启" % n)
+                    continue
+                c, o = docker(["restart", n], timeout=180)
+                ok_all = ok_all and c == 0
+                outs.append(o.strip() or n)
+            out = "\n".join(outs)
+            audit(user, "napcat.restart_all", {}, ok_all)
+            return self.send_api(api(ok_all, {"output": out}))
         name = safe_name(str(data.get("name", "")))
+        if action in {"start", "restart"} and ng_active_protocol(name) != "napcat":
+            raise ValueError("%s 当前使用 SnowLuma 协议端；同一账号不能同时由两个协议端接管，请在「协议端」页切换回 NapCat" % napcat_display_name(name))
         if action in {"start", "stop", "restart"}:
             code, out = docker([action, name], timeout=120)
             audit(user, "napcat." + action, {"name": name}, code == 0)
@@ -3960,6 +4419,10 @@ def main():
 
     threading.Thread(target=run_migrations, daemon=True).start()
     threading.Thread(target=metric_sampler_loop, daemon=True).start()
+    try:
+        ng().start_reconciler()
+    except Exception:
+        traceback.print_exc()
     PanelServer((args.host, args.port), Handler).serve_forever()
 
 
