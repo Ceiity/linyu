@@ -630,7 +630,7 @@ label {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 22px 32px 14px;
+  padding: 22px var(--page-pad-r, 32px) 14px var(--page-pad-l, 32px);
   padding-top: calc(22px + var(--safe-top));
   background: var(--bg);
 }
@@ -727,13 +727,18 @@ label {
   }
 }
 
+/* Wide screens: content and the title bar share one centred column, so
+   nothing hugs the left edge with an empty band on the right. */
 .content {
   grid-column: 2;
   min-width: 0;
   width: 100%;
-  max-width: 1360px;
-  padding: 10px 32px 40px;
-  padding-right: calc(32px + var(--safe-right));
+  padding: 10px var(--page-pad-r) 40px var(--page-pad-l);
+}
+.app {
+  --content-max: 1760px;
+  --page-pad-l: max(32px, calc((100vw - var(--rail-w) - var(--content-max)) / 2));
+  --page-pad-r: calc(var(--page-pad-l) + var(--safe-right));
 }
 
 /* ---------- layout grid & cards ---------- */
@@ -2393,6 +2398,21 @@ pre.code,
 }
 
 /* ---------- logs ---------- */
+/* ANSI colours from container logs */
+.ab { font-weight: 700; }
+.ak { color: #8a8a8e; }
+.ar { color: #d93025; }
+.ag { color: #1a8a3a; }
+.ay { color: #a86b00; }
+.abl { color: #1f6feb; }
+.am { color: #a24bc4; }
+.ac { color: #0b7f93; }
+[data-theme="dark"] .ar { color: #ff8a80; }
+[data-theme="dark"] .ag { color: #7ee08f; }
+[data-theme="dark"] .ay { color: #ffd479; }
+[data-theme="dark"] .abl { color: #8ab4ff; }
+[data-theme="dark"] .am { color: #e2a3ff; }
+[data-theme="dark"] .ac { color: #7fd8e8; }
 .log-toolbar {
   display: flex;
   align-items: center;
