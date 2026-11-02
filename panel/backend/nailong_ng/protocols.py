@@ -45,8 +45,10 @@ PROTOCOLS = (NAPCAT, SNOWLUMA)
 LABELS = {NAPCAT: "NapCat", SNOWLUMA: "SnowLuma"}
 
 SNOWLUMA_DEFAULT_IMAGE = "motricseven7/snowluma:latest"
-# Registry prefixes from SnowLuma's own docs (guide/china-network); tried only when Docker Hub fails.
-SNOWLUMA_MIRROR_PREFIXES = ("docker.1ms.run/", "docker.xuanyuan.me/", "docker.m.daocloud.io/")
+# Registry prefixes from SnowLuma's own docs (guide/china-network) plus the ones lib/mirror.sh
+# already uses for this project.  They are speed-tested before every pull.
+SNOWLUMA_MIRROR_PREFIXES = ("docker.1ms.run/", "docker.xuanyuan.me/", "docker.m.daocloud.io/",
+                            "dockerproxy.net/", "hub.rat.dev/", "docker.1panel.live/")
 SNOWLUMA_LICENSE = {
     "license": "SnowLuma Source-Available Non-Commercial License 1.0 (2026-06-19)",
     "eula": "SnowLuma EULA 1.1 (2026-07-21)",
@@ -207,6 +209,75 @@ def _hex_ip(h: str) -> str:
 # ---------------------------------------------------------------------------
 # persistent state
 # ---------------------------------------------------------------------------
+
+def _probe_registry(host_name: str, timeout: float = 4.0) -> float | None:
+    """Latency (ms) of a registry's /v2/ endpoint; 200 and 401 both mean 'alive'."""
+    url = "https://%s/v2/" % host_name
+    t0 = time.time()
+    req = urlrequest.Request(url, method="GET")
+    try:
+        with urlrequest.urlopen(req, timeout=timeout):
+            pass
+    except urlerror.HTTPError as e:
+        if e.code not in (401, 403):
+            return None
+    except Exception:
+        return None
+    return (time.time() - t0) * 1000
+
+
+def registry_order(host: Host, log=None) -> list[str]:
+    """Pull sources fastest first: "" = Docker Hub (or the daemon's own registry-mirrors),
+    otherwise a mirror prefix.  NAILONG_MIRROR=off → Docker Hub only."""
+    if os.environ.get("NAILONG_MIRROR", host.state.get("NAILONG_MIRROR", "auto")) == "off":
+        return [""]
+    code, out = host.docker(["info", "--format", "{{json .RegistryConfig.Mirrors}}"], timeout=15)
+    daemon_mirrors = []
+    try:
+        daemon_mirrors = json.loads(out) if code == 0 and out.strip() else []
+    except Exception:
+        daemon_mirrors = []
+    results: dict[str, float | None] = {}
+    targets = {"": "registry-1.docker.io", **{p: p.rstrip("/") for p in SNOWLUMA_MIRROR_PREFIXES}}
+    threads = [threading.Thread(target=lambda k=k, h=h: results.__setitem__(k, _probe_registry(h)), daemon=True) for k, h in targets.items()]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(6)
+    alive = sorted((v, k) for k, v in results.items() if v is not None)
+    if log:
+        log("镜像源测速：" + ("，".join("%s %dms" % (k.rstrip("/") or "Docker Hub", v) for v, k in alive) or "全部超时"))
+        if daemon_mirrors:
+            log("Docker 已配置加速源：%s" % ", ".join(daemon_mirrors))
+    order = [k for _, k in alive]
+    if daemon_mirrors or results.get("") is not None and results[""] < 1500:
+        order = [""] + [k for k in order if k]  # plain pull already goes through the daemon mirrors
+    if "" not in order:
+        order.append("")  # last resort
+    return order
+
+
+def pull_with_mirrors(host: Host, image: str, log, timeout: int = 1200) -> str:
+    """docker pull *image*, trying sources fastest first; re-tags mirror pulls as *image*."""
+    bare = image.removeprefix("docker.io/")
+    mirrorable = "/" in bare.split(":")[0] and "." not in bare.split("/")[0]  # Docker Hub image
+    order = registry_order(host, log) if mirrorable else [""]
+    last = ""
+    for prefix in order[:5]:
+        ref = prefix + bare if prefix else image
+        log("拉取 %s" % ref)
+        code, out = host.docker(["pull", ref], timeout=timeout)
+        if code == 0:
+            if prefix:
+                host.docker(["tag", ref, image], timeout=60)
+                log("已通过加速源 %s 拉取并标记为 %s" % (prefix.rstrip("/"), image))
+            else:
+                log("已拉取 %s" % image)
+            return image
+        last = out.strip()[-200:]
+        log("失败：%s" % last)
+    raise ProtocolError("拉取镜像 %s 失败（%s）。请检查服务器网络，或设置 Docker 镜像加速后重试" % (image, last))
+
 
 class ProtocolStore:
     def __init__(self, host: Host):
@@ -846,10 +917,12 @@ class NapCatAdapter(ProtocolAdapter):
         backup = backup_dirs(self.host, slot, NAPCAT, self.config_dirs(slot), "pre-update")
         log("已备份配置：%s" % backup)
         active = self.store.active(slot) == NAPCAT
-        script = "timeout 900 $(compose_cmd) -f %s pull" % shlex_quote(str(compose))
+        image = self.docker.state(slot).get("image") or self.host.state.get("NAPCAT_IMAGE") or "mlikiowa/napcat-docker:latest"
+        pull_with_mirrors(self.host, image, log)
+        script = "true"
         if active:
-            script += " && timeout 900 $(compose_cmd) -f %s up -d" % shlex_quote(str(compose))
-        code, out = self.host.bash(script, timeout=1900)
+            script = "timeout 900 $(compose_cmd) -f %s up -d" % shlex_quote(str(compose))
+        code, out = self.host.bash(script, timeout=1000)
         log(out[-3000:])
         if code != 0:
             raise ProtocolError("NapCat 更新失败，配置备份在 %s" % backup)
@@ -1278,23 +1351,7 @@ networks:
         return self.host.bash("cd %s && timeout %d $(compose_cmd) -f %s %s" % (shlex_quote(str(f.parent)), timeout, shlex_quote(str(f)), args), timeout=timeout + 60)
 
     def pull_image(self, image: str, log) -> str:
-        code, out = self.host.docker(["pull", image], timeout=1800)
-        if code == 0:
-            log("已从 Docker Hub 拉取 %s" % image)
-            return image
-        log("Docker Hub 拉取失败：%s" % out.strip()[-300:])
-        if "/" not in image.split(":")[0] or image.startswith(("docker.io/", "motricseven7/")):
-            bare = image.removeprefix("docker.io/")
-            for prefix in SNOWLUMA_MIRROR_PREFIXES:
-                ref = prefix + bare
-                log("尝试 SnowLuma 文档列出的镜像加速前缀：%s" % ref)
-                code, out = self.host.docker(["pull", ref], timeout=1800)
-                if code == 0:
-                    self.host.docker(["tag", ref, image], timeout=60)
-                    log("已通过 %s 拉取并标记为 %s" % (prefix, image))
-                    return image
-                log("失败：%s" % out.strip()[-200:])
-        raise ProtocolError("拉取 SnowLuma 官方镜像失败，请检查网络或在服务器上配置镜像加速后重试")
+        return pull_with_mirrors(self.host, image, log)
 
     def image_digest(self, image: str) -> dict:
         code, out = self.host.docker(["image", "inspect", "--format", "{{json .RepoDigests}}|{{.Id}}|{{index .Config.Labels \"org.opencontainers.image.version\"}}", image], timeout=30)

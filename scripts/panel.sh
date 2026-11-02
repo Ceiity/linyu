@@ -48,7 +48,7 @@ PY
     fi
   fi
   # SSH remote deployment (NG 2.0) needs paramiko; optional, the rest of the panel works without it.
-  python3 -c 'import paramiko' >/dev/null 2>&1 || apt-get install -y python3-paramiko >/dev/null 2>&1 || python3 -m pip install --break-system-packages 'paramiko>=3.4.0' >/dev/null 2>&1 || warn "paramiko 未安装：SSH 远程部署不可用，其余功能不受影响。"
+  python3 -c 'import paramiko' >/dev/null 2>&1 || apt-get install -y python3-paramiko >/dev/null 2>&1 || { setup_pip_mirror || true; python3 -m pip install --break-system-packages 'paramiko>=3.4.0' >/dev/null 2>&1; } || warn "paramiko 未安装：SSH 远程部署不可用，其余功能不受影响。"
   if systemctl list-unit-files astrbot-deploy-web.service >/dev/null 2>&1; then
     systemctl disable --now astrbot-deploy-web.service >/dev/null 2>&1 || true
   fi
