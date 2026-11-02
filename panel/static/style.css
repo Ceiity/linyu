@@ -630,7 +630,7 @@ label {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 22px 32px 14px;
+  padding: 22px var(--page-pad-r, 32px) 14px var(--page-pad-l, 32px);
   padding-top: calc(22px + var(--safe-top));
   background: var(--bg);
 }
@@ -727,13 +727,17 @@ label {
   }
 }
 
+/* Content fills the window at every width; the gutter grows a little on
+   big screens and each page's grid adds columns instead of stretching. */
 .content {
   grid-column: 2;
   min-width: 0;
   width: 100%;
-  max-width: 1360px;
-  padding: 10px 32px 40px;
-  padding-right: calc(32px + var(--safe-right));
+  padding: 10px var(--page-pad-r) 40px var(--page-pad-l);
+}
+.app {
+  --page-pad-l: clamp(32px, 2.2vw, 56px);
+  --page-pad-r: calc(var(--page-pad-l) + var(--safe-right));
 }
 
 /* ---------- layout grid & cards ---------- */
@@ -2393,6 +2397,21 @@ pre.code,
 }
 
 /* ---------- logs ---------- */
+/* ANSI colours from container logs */
+.ab { font-weight: 700; }
+.ak { color: #8a8a8e; }
+.ar { color: #d93025; }
+.ag { color: #1a8a3a; }
+.ay { color: #a86b00; }
+.abl { color: #1f6feb; }
+.am { color: #a24bc4; }
+.ac { color: #0b7f93; }
+[data-theme="dark"] .ar { color: #ff8a80; }
+[data-theme="dark"] .ag { color: #7ee08f; }
+[data-theme="dark"] .ay { color: #ffd479; }
+[data-theme="dark"] .abl { color: #8ab4ff; }
+[data-theme="dark"] .am { color: #e2a3ff; }
+[data-theme="dark"] .ac { color: #7fd8e8; }
 .log-toolbar {
   display: flex;
   align-items: center;
@@ -2754,6 +2773,13 @@ pre.code,
 .settings-page {
   padding-bottom: 84px;
 }
+/* Wide windows: settings groups sit two per row so a label and its
+   field are never a whole screen apart. */
+@media (min-width: 1680px) {
+  .settings-page .set-group {
+    grid-column: span 6;
+  }
+}
 .set-card {
   padding: 4px 0 !important;
 }
@@ -2821,6 +2847,69 @@ pre.code,
 }
 .set-input:focus {
   text-align: left;
+}
+/* number settings: no native spin arrows, rounded − value + stepper */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.num-field {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  gap: 2px;
+  height: 40px;
+  padding: 3px;
+  border-radius: var(--r-pill);
+  background: var(--tile);
+  transition: box-shadow 0.16s var(--ease);
+}
+.num-field:focus-within {
+  box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.35);
+}
+.num-field .set-input {
+  width: 84px;
+  min-height: 34px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: center;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.num-field .set-input:focus {
+  text-align: center;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.num-btn {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--text-2);
+  box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.08);
+}
+.num-btn svg {
+  width: 15px;
+  height: 15px;
+}
+@media (hover: hover) {
+  .num-btn:hover {
+    background: var(--card);
+    color: var(--primary-ink);
+  }
 }
 .set-color {
   width: 64px;
@@ -4537,6 +4626,7 @@ html.scroll-locked {
     padding: 12px 18px;
   }
   .set-row:has(> .switch),
+  .set-row:has(> .num-field),
   .set-row:has(> .set-color),
   .set-row.is-link {
     grid-template-columns: minmax(0, 1fr) auto;
