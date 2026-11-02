@@ -2842,6 +2842,69 @@ pre.code,
 .set-input:focus {
   text-align: left;
 }
+/* number settings: no native spin arrows, rounded − value + stepper */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.num-field {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  gap: 2px;
+  height: 40px;
+  padding: 3px;
+  border-radius: var(--r-pill);
+  background: var(--tile);
+  transition: box-shadow 0.16s var(--ease);
+}
+.num-field:focus-within {
+  box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.35);
+}
+.num-field .set-input {
+  width: 84px;
+  min-height: 34px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: center;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.num-field .set-input:focus {
+  text-align: center;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.num-btn {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--text-2);
+  box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.08);
+}
+.num-btn svg {
+  width: 15px;
+  height: 15px;
+}
+@media (hover: hover) {
+  .num-btn:hover {
+    background: var(--card);
+    color: var(--primary-ink);
+  }
+}
 .set-color {
   width: 64px;
   min-height: 36px;
@@ -4557,6 +4620,7 @@ html.scroll-locked {
     padding: 12px 18px;
   }
   .set-row:has(> .switch),
+  .set-row:has(> .num-field),
   .set-row:has(> .set-color),
   .set-row.is-link {
     grid-template-columns: minmax(0, 1fr) auto;
