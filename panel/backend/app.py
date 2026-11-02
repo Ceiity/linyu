@@ -43,7 +43,7 @@ except Exception:
     hashes = serialization = padding = rsa = AESGCM = None
     LOGIN_CRYPTO_AVAILABLE = False
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.4.0"
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", "/opt/astrbot/AstrBot-Deploy"))
 INSTALL_PREFIX = Path(os.environ.get("INSTALL_PREFIX", "/opt/astrbot"))
 STATE_FILE = Path(os.environ.get("STATE_FILE", str(INSTALL_PREFIX / ".env")))
@@ -92,6 +92,9 @@ NAPCAT_MUTATION_LOCK = threading.Lock()
 NAPCAT_MUTATION_WAIT_SECONDS = 1800
 LOG_CACHE: dict[tuple[str, int], tuple[float, str]] = {}
 LOG_CACHE_LOCK = threading.Lock()
+METRIC_SAMPLES: deque = deque(maxlen=30)
+METRIC_SAMPLE_SECONDS = 10
+METRIC_LOCK = threading.Lock()
 REMOTE_PLUGIN_NAME = "astrbot_plugin_nailong_remote_admin"
 LEGACY_REMOTE_PLUGIN_NAME = "astrbot_plugin_linyu_remote_admin"
 LEGACY_REMOTE_KEY_PREFIX = "linyu_remote_"
@@ -230,7 +233,7 @@ def default_config() -> dict:
         "nailong_remote_cooldown_seconds": 300,
         "public_base_url": "",
         "allow_dangerous": False,
-        "theme_color": "#2563eb",
+        "theme_color": "#007aff",
         "created_at": now(),
     }
 
@@ -267,6 +270,10 @@ def migrate_config(cfg: dict) -> bool:
     # releases re-filled it with a fresh random value that never worked.
     if cfg.get("password_changed_at") and "initial_password" in cfg:
         cfg.pop("initial_password")
+        changed = True
+    # v2.3 switched the default accent to iOS blue; only the untouched old default moves.
+    if str(cfg.get("theme_color") or "").lower() == "#2563eb" and not cfg.get("theme_color_customized"):
+        cfg["theme_color"] = "#007aff"
         changed = True
     missing = [key for key in DEFAULT_CONFIG_KEYS if key not in cfg and key != "initial_password"]
     if missing:
@@ -348,6 +355,8 @@ def _save_config_patch(cfg: dict, patch: dict) -> dict:
                 v = validated_http_url(v, k)
             if k == "theme_color" and not re.fullmatch(r"#[0-9A-Fa-f]{6}", str(v or "")):
                 raise ValueError("主题色格式不正确")
+            if k == "theme_color":
+                cfg["theme_color_customized"] = True
             if k == "network_name" and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}", str(v or "")):
                 raise ValueError("Docker 网络名称格式不正确")
             if k == "default_reverse_ws_token" and not re.fullmatch(r"[A-Za-z0-9._+=-]{4,128}", str(v or "")):
@@ -1716,6 +1725,35 @@ def system_metrics() -> dict:
     return {"load": load, "memory": {"total": total * 1024, "available": free * 1024, "used_percent": round((1 - free / total) * 100, 1) if total else 0}, "disk": {"total": du.total, "used": du.used, "free": du.free, "used_percent": round(du.used / du.total * 100, 1)}}
 
 
+def sample_metrics() -> None:
+    """Record one CPU-load / memory sample for the dashboard sparklines."""
+    try:
+        m = system_metrics()
+        with METRIC_LOCK:
+            METRIC_SAMPLES.append((time.time(), round(float(m["load"][0]), 2), float(m["memory"]["used_percent"])))
+    except Exception:
+        pass
+
+
+def metric_history() -> dict:
+    with METRIC_LOCK:
+        if not METRIC_SAMPLES or time.time() - METRIC_SAMPLES[-1][0] > METRIC_SAMPLE_SECONDS * 3:
+            stale = True
+        else:
+            stale = False
+    if stale:  # sampler thread not running (tests, one-off imports)
+        sample_metrics()
+    with METRIC_LOCK:
+        rows = list(METRIC_SAMPLES)
+    return {"interval": METRIC_SAMPLE_SECONDS, "cpu": [r[1] for r in rows], "mem": [r[2] for r in rows]}
+
+
+def metric_sampler_loop() -> None:
+    while True:
+        sample_metrics()
+        time.sleep(METRIC_SAMPLE_SECONDS)
+
+
 def parse_deploy_line(path: Path, key: str) -> str:
     if not path.exists():
         return ""
@@ -1733,7 +1771,7 @@ def dashboard_data(origin: str | None = None) -> dict:
     code, docker_ps = docker(["ps", "-a", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"], timeout=20)
     _, ports = run_process(["bash", "-lc", "ss -ltnp 2>/dev/null | head -n 80 || true"], timeout=20)
     recent = AUDIT_LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-20:] if AUDIT_LOG.exists() else []
-    return {"deployed": bool(astr.get("exists")), "public_ip": public_ip(), "private_ip": private_ip(), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署", "astrbot": astr, "napcats": parse_napcat_index(origin), "docker": {"ok": code == 0, "containers": docker_ps}, "system": system_metrics(), "ports": ports, "recent": recent, "network": st.get("NETWORK_NAME", "astrbot_network")}
+    return {"deployed": bool(astr.get("exists")), "public_ip": public_ip(), "private_ip": private_ip(), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署", "astrbot": astr, "napcats": parse_napcat_index(origin), "docker": {"ok": code == 0, "containers": docker_ps}, "system": system_metrics(), "ports": ports, "recent": recent, "network": st.get("NETWORK_NAME", "astrbot_network"), "history": metric_history()}
 
 
 def astrbot_data(origin: str | None = None) -> dict:
@@ -3774,6 +3812,7 @@ def main():
             traceback.print_exc()
 
     threading.Thread(target=run_migrations, daemon=True).start()
+    threading.Thread(target=metric_sampler_loop, daemon=True).start()
     PanelServer((args.host, args.port), Handler).serve_forever()
 
 

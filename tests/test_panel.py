@@ -161,6 +161,16 @@ class DefaultsTest(unittest.TestCase):
         self.assertFalse(app.Handler.remote_principal_ok(dummy, data, allow_public_login=True))
 
 
+class MetricHistoryTest(unittest.TestCase):
+    def test_history_samples_and_is_bounded(self):
+        hist = app.metric_history()
+        self.assertGreaterEqual(len(hist["cpu"]), 1)
+        self.assertEqual(len(hist["cpu"]), len(hist["mem"]))
+        for _ in range(app.METRIC_SAMPLES.maxlen + 5):
+            app.sample_metrics()
+        self.assertEqual(len(app.metric_history()["mem"]), app.METRIC_SAMPLES.maxlen)
+
+
 class PluginMigrationTest(unittest.TestCase):
     def test_legacy_plugin_replaced(self):
         root = Path(app.load_config()["astrbot_plugin_dir"])

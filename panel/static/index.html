@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>奶龙控制台</title>
   <link rel="icon" href="/assets/nailong-robot.svg" type="image/svg+xml">
-  <meta name="theme-color" content="#111111">
-  <link rel="stylesheet" href="/assets/style.css?v=20261016-nailong">
+  <meta name="theme-color" content="#f5f4f3">
+  <link rel="stylesheet" href="/assets/style.css?v=20261101-polish">
 </head>
 <body>
   <div id="login" class="login-screen">
@@ -14,9 +14,9 @@
       <div class="brand-mark logo-mark"><img src="/assets/nailong-robot.svg" alt="奶龙商标"></div>
       <h1>奶龙控制台</h1>
       <p>管理 AstrBot 与 NapCat 机器人，从这里开始。</p>
-      <label>账号<input id="loginUser" autocomplete="off" spellcheck="false" placeholder="请输入面板账号"></label>
-      <label>密码<input id="loginPass" type="password" autocomplete="off" placeholder="请输入面板密码"></label>
-      <button class="primary wide" onclick="login()">进入面板</button>
+      <label>账号<input id="loginUser" autocomplete="username" autocapitalize="off" spellcheck="false" enterkeyhint="next" placeholder="请输入面板账号"></label>
+      <label>密码<input id="loginPass" type="password" autocomplete="current-password" enterkeyhint="go" placeholder="请输入面板密码"></label>
+      <button id="loginBtn" class="primary wide" onclick="login()">进入面板</button>
       <div id="loginMsg" class="muted"></div>
     </div>
   </div>
@@ -27,21 +27,21 @@
       <nav id="nav"></nav>
     </aside>
     <header class="topbar">
-      <button class="icon-btn mobile-only" onclick="toggleDrawer()" aria-label="打开菜单">☰</button>
-      <div><h2 id="pageTitle">奶龙-仪表盘</h2><span id="pageSub">系统总览</span></div>
+      <button id="backBtn" class="icon-btn back-btn" onclick="go('more')" aria-label="返回"><svg class="adb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5.5M11 5.5 4.5 12l6.5 6.5"/></svg></button>
+      <div><h2 id="pageTitle">仪表盘</h2><span id="pageSub">系统总览</span></div>
       <div class="top-actions">
-        <span id="globalStatus" class="status-pill grey">检测中</span>
-        <button class="ghost" onclick="refresh(true,true)">刷新</button>
-        <button id="themeToggle" class="ghost theme-toggle" onclick="cycleThemeMode()" aria-label="&#x5207;&#x6362;&#x4e3b;&#x9898;">&#x2600;&#xfe0f;</button>
+        <button class="icon-btn refresh-btn" onclick="refresh(true,true)" title="刷新" aria-label="刷新"><svg class="adb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11.5A8 8 0 1 0 17.6 17"/><path d="M20 5v6.5h-6.5"/></svg></button>
+        <button id="themeToggle" class="theme-toggle" onclick="cycleThemeMode()" aria-label="切换主题"></button>
+        <button id="globalStatus" class="status-orb grey" onclick="go('astrbot')" title="检测中" aria-label="检测中"><svg class="adb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2.5-6 5 12 2.5-6H21"/></svg></button>
       </div>
     </header>
     <main id="content" class="content"></main>
-    <nav id="bottomNav" class="bottom-nav"></nav>
+    <nav id="bottomNav" role="tablist" aria-label="主导航"></nav>
   </div>
 
   <div id="themeMenu" class="theme-menu hidden" role="menu"></div>
   <div id="modal" class="modal hidden"><div class="modal-card"><div id="modalBody"></div><div class="modal-actions"><button onclick="closeModal()">&#x53d6;&#x6d88;</button><button id="modalOk" class="danger">&#x786e;&#x8ba4;</button></div></div></div>
-  <div id="toast" class="toast"></div>
-  <script src="/assets/app.js?v=20261016-nailong"></script>
+  <script src="/assets/motion.js?v=20261101-polish"></script>
+  <script src="/assets/app.js?v=20261101-polish"></script>
 </body>
 </html>
