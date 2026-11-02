@@ -7,13 +7,16 @@ for f in "${files[@]}"; do
   bash -n "$f"
   grep -q 'set -Eeuo pipefail' "$f"
 done
-python3 -m py_compile panel/backend/app.py plugins/astrbot_plugin_nailong_remote_admin/main.py
+python3 -m py_compile panel/backend/app.py panel/backend/nailong_ng/*.py plugins/astrbot_plugin_nailong_remote_admin/main.py
 python3 scripts/security-check.py
 python3 -m unittest discover -s tests
 grep -q 'install_nailong_remote_plugin' scripts/install-core.sh
 grep -q 'install_nailong_remote_plugin' panel/backend/app.py
 grep -q '/api/remote/astrbot/no-prefix' panel/backend/app.py
 grep -q 'CMD_NO_PREFIX_ALIASES' plugins/astrbot_plugin_nailong_remote_admin/main.py
+grep -q 'slot_protocol' scripts/napcat-watchdog.sh
+grep -q 'every_compose_file' lib/ops.sh
+grep -q '/api/ng/protocols/switch' panel/backend/app.py
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
   mkdir -p "$tmp/compose/astrbot" "$tmp/napcat/napcat01/config" "$tmp/data"

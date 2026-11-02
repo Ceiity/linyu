@@ -13,6 +13,7 @@ services:
       - STATE_FILE=/opt/astrbot/.env
       - PANEL_CONFIG=/opt/astrbot/panel_config.json
       - PANEL_AUDIT_LOG=/opt/astrbot/logs/panel-audit.log
+      - NAILONG_PANEL_IN_DOCKER=1
     volumes:
       - /opt/astrbot:/opt/astrbot
       - /var/run/docker.sock:/var/run/docker.sock

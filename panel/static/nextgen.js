@@ -187,7 +187,7 @@ function drawLogin(d, force){
     }
   } else if(!d.qr && (!d.task_id || d.terminal)){
     const tone = d.terminal && d.state!=="CANCELLED" && d.task_id ? "ng-idle bad" : "ng-idle";
-    stage.innerHTML = `<div class="${tone}">${window.scanHeroIcon?scanHeroIcon():""}<h3>${cur.online?"QQ 已在线":d.task_id?safeText(d.state_text):"准备登录"}</h3><p class="muted">${cur.online?`${safeText(cur.nickname||"")} ${safeText(cur.uin||"")}`:`点击「申请登录」获取 ${LABEL[proto]} 的二维码`}</p></div>`;
+    stage.innerHTML = `<div class="${tone}">${window.scanHeroIcon?scanHeroIcon():""}<h3>${cur.online?"QQ 已在线":d.task_id?safeText(d.state_text):"准备登录"}</h3><p class="muted">${cur.online?`${safeText(cur.nickname||"")} ${safeText(cur.uin||"")}`:(d.task_id?`查看右侧错误说明后点击「重新申请」`:`点击「申请登录」获取 ${LABEL[proto]} 的二维码`)}</p></div>`;
   } else if(!d.qr && !stage.querySelector(".ng-loading")){
     stage.innerHTML = `<div class="ng-idle ng-loading"><span class="spin big"></span><h3>${safeText(d.state_text||"正在申请登录")}</h3></div>`;
   }
@@ -203,7 +203,7 @@ function drawLogin(d, force){
   const checks = (d.checks||[]).length ? `<div class="ng-checks small">${checksHtml(d.checks)}</div>` : "";
   side.innerHTML = `<div class="ng-login-info">
       <div><span>QQ 账号</span><b>${acct}</b></div>
-      <div><span>账号状态</span>${cur.online||d.state==="SUCCESS"?pill("在线","green"):pill(d.task_id?d.state_text:phaseText(cur),STATE_TONE[d.state]||"grey")}</div>
+      <div><span>账号状态</span>${cur.online||d.state==="SUCCESS"?pill("在线","green"):pill(phaseText(cur),loginTone(cur))}</div>
       <div><span>协议端</span><b>${logo(proto)} ${LABEL[proto]}</b></div>
       <div><span>登录进度</span>${pill(d.state_text||"空闲",STATE_TONE[d.state]||"grey")}</div>
     </div>

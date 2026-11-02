@@ -47,6 +47,8 @@ PY
       python3 -m pip install --break-system-packages -r "$PROJECT_DIR/panel/requirements.txt" >/dev/null 2>&1 || python3 -m pip install -r "$PROJECT_DIR/panel/requirements.txt" >/dev/null 2>&1 || warn "Python 依赖安装失败：网页扫码不受影响，但群内发二维码图片需要 python3-qrcode。"
     fi
   fi
+  # SSH remote deployment (NG 2.0) needs paramiko; optional, the rest of the panel works without it.
+  python3 -c 'import paramiko' >/dev/null 2>&1 || apt-get install -y python3-paramiko >/dev/null 2>&1 || python3 -m pip install --break-system-packages 'paramiko>=3.4.0' >/dev/null 2>&1 || warn "paramiko 未安装：SSH 远程部署不可用，其余功能不受影响。"
   if systemctl list-unit-files astrbot-deploy-web.service >/dev/null 2>&1; then
     systemctl disable --now astrbot-deploy-web.service >/dev/null 2>&1 || true
   fi
