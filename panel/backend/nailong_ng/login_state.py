@@ -260,7 +260,7 @@ class LoginManager:
     def _write_log(self, row: dict) -> None:
         try:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
-            line = self.redact(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), **{k: v for k, v in row.items() if k != "ts"}}, ensure_ascii=False))
+            line = self.redact(json.dumps({**{k: v for k, v in row.items() if k != "ts"}, "time": time.strftime("%Y-%m-%d %H:%M:%S")}, ensure_ascii=False))
             with self.log_path.open("a", encoding="utf-8") as f:
                 f.write(line + "\n")
         except OSError:

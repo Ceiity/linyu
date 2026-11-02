@@ -192,3 +192,8 @@
 @media (prefers-reduced-motion: reduce) {
   .ng-active-badge, .ng-switch-arrow, .ng-timeline li.current i, .ng-slot.is-switching .ng-proto { animation: none; }
 }
+.ng-log-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.ng-log-toolbar .log-filters { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 520px; min-width: 0; }
+.ng-log-toolbar .log-filters > * { flex: 1 1 140px; min-width: 120px; }
+.ng-log-toolbar #ngLogKey { flex: 2 1 220px; }
+.ng-log-toolbar .log-actions { display: flex; flex-wrap: wrap; gap: 8px; }

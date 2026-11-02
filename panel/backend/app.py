@@ -1008,6 +1008,8 @@ def redact_secret_text(text: str) -> str:
         (r"(临时密码[:：]\s*)\S+", r"\1***"),
         (r"(?i)(initial credentials:.*password=)\S+", r"\1***"),
         (r"(?i)(Initial password:\s*)\S+", r"\1***"),
+        (r"(?i)(WebUi Token:\s*)\S+", r"\1***"),
+        (r"(?i)(\btoken[\"']?\s*[:=]\s*[\"']?)[A-Za-z0-9._~+/-]{12,}", r"\1***"),
     ]
     for pat, repl in patterns:
         value = re.sub(pat, repl, value)
@@ -3343,6 +3345,12 @@ class Handler(BaseHTTPRequestHandler):
                 require_confirm(data, "SWITCH")
                 if not slot:
                     raise ValueError("缺少机器人")
+                if target not in ("napcat", "snowluma"):
+                    raise ValueError("目标协议端不支持")
+                if not mgr.adapter(target).installed(slot):
+                    raise ProtocolError("%s 尚未安装到 %s，请先安装" % ({"napcat": "NapCat", "snowluma": "SnowLuma"}[target], napcat_display_name(slot)))
+                if mgr.store.slot(slot).get("switching"):
+                    raise ProtocolError("%s 正在切换中" % napcat_display_name(slot))
                 t = create_task("切换协议端 %s → %s" % (slot, target), "protocol.switch", task_ng_switch, user, slot, target, user)
                 return self.send_api(api(True, t.to_dict()))
             if path == "/api/ng/snowluma/consent":
@@ -3364,6 +3372,8 @@ class Handler(BaseHTTPRequestHandler):
                     require_confirm(data, slot)
                     if not keep and not load_config()["allow_dangerous"]:
                         raise ValueError("删除 SnowLuma 数据需要先在系统设置里开启危险操作")
+                if op == "install" and not mgr.store.snowluma().get("consent"):
+                    raise ProtocolError("请先在协议端页面阅读并确认 SnowLuma LICENSE / EULA")
                 titles = {"install": "安装 SnowLuma", "update": "更新 SnowLuma", "repair": "修复 SnowLuma", "uninstall": "卸载 SnowLuma",
                           "repair_napcat": "修复 NapCat 连接", "update_napcat": "更新 NapCat"}
                 kind = ("snowluma." if "napcat" not in op else "protocol.") + op
@@ -3439,7 +3449,7 @@ class Handler(BaseHTTPRequestHandler):
         if ctype.startswith("text/") or ctype in {"application/javascript", "application/json"}:
             ctype += "; charset=utf-8"
         self.send_header("Content-Type", ctype)
-        if file.name in {"app.js", "style.css", "index.html"}:
+        if file.name in {"app.js", "style.css", "index.html", "nextgen.js", "nextgen.css"}:
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")

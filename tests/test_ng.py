@@ -226,6 +226,10 @@ class LoginStateTest(unittest.TestCase):
         task = m.request("napcat01")
         t = wait_terminal(m, "napcat01")
         self.assertEqual(t.state, "SUCCESS")
+        for _ in range(200):  # post-login checks run right after SUCCESS is published
+            if done:
+                break
+            time.sleep(0.01)
         self.assertEqual(done, [task.id])
         snap = t.to_dict()
         self.assertEqual([r["status"] for r in snap["timeline"]], ["done"] * 6)

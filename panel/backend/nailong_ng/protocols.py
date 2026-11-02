@@ -671,6 +671,27 @@ class NapCatAdapter(ProtocolAdapter):
         code, out = self.docker.stop(slot)
         return {"ok": code == 0, "output": out[-1000:]}
 
+    _version_cache: dict = {}
+
+    def get_version(self, slot: str) -> str:
+        st = self.docker.state(slot)
+        key = (slot, st.get("started_at", ""))
+        if key in self._version_cache:
+            return self._version_cache[key]
+        version = ""
+        if st.get("running"):
+            code, out = self.host.docker(["logs", "--tail", "4000", slot], timeout=20)
+            m = re.findall(r"NapCat\.Core Version:\s*([0-9][\w.+-]*)", out or "")
+            if m:
+                version = "v" + m[-1]
+        if not version:
+            version = super().get_version(slot)
+            if version in ("latest", "base", ""):
+                version = (st.get("image") or "").rsplit("/", 1)[-1]
+        if st.get("running") and version.startswith("v"):
+            self._version_cache[key] = version
+        return version
+
     def webui(self, slot: str, path: str, timeout: int = 8) -> dict:
         row = self.row(slot)
         if not row:
@@ -686,7 +707,8 @@ class NapCatAdapter(ProtocolAdapter):
             res = self.webui(slot, "/QQLogin/CheckLoginStatus", timeout=4)
         except Exception as e:
             return False, "NapCat WebUI 未就绪：%s" % e
-        return int(res.get("code", -1)) == 0, str(res.get("message") or "")
+        ok = int(res.get("code", -1)) == 0
+        return ok, "NapCat WebUI 正常" if ok else "NapCat WebUI 返回：%s" % (res.get("message") or "未知错误")
 
     def get_login_status(self, slot: str, quick: bool = False) -> dict:
         out = {"online": False, "uin": "", "nickname": "", "phase": "", "error": None, "source": "napcat_webui"}

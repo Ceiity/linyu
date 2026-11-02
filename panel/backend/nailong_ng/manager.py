@@ -444,9 +444,12 @@ class ProtocolManager:
             add("onebot_port", "3. OneBot / WebUI 端口是否监听", 6099 in listening if running else False,
                 "容器内监听端口：%s" % (", ".join(map(str, listening)) or "无"), "重启 NapCat")
         link = self.astrbot.link(slot, name)
-        add("ws_connected", "4. WebSocket 是否连接", bool(link.get("connected")),
-            "AstrBot:%s 的连接来源 %s；协议端 IP %s" % (link.get("port"), ", ".join(link.get("peers") or []) or "无", ", ".join(link.get("peer_ips") or []) or "无"),
-            "QQ 未登录时不会连接；已登录仍未连接请运行修复")
+        if not login.get("online") and not link.get("connected"):
+            add("ws_connected", "4. WebSocket 是否连接", None, "QQ 未登录，协议端尚未连接 AstrBot（登录后自动连接），当前跳过")
+        else:
+            add("ws_connected", "4. WebSocket 是否连接", bool(link.get("connected")),
+                "AstrBot:%s 的连接来源 %s；协议端 IP %s" % (link.get("port"), ", ".join(link.get("peers") or []) or "无", ", ".join(link.get("peer_ips") or []) or "无"),
+                "已登录仍未连接：在协议端页点击「修复」，或检查 Token 与 Docker 网络")
         ok, why = a.onebot_token_ok(slot)
         add("token", "5. Token 是否正确", ok, why, "在协议端页点击「修复」重写连接配置")
         problem = self.astrbot.platform_problem(slot)
