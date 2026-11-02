@@ -157,14 +157,14 @@ AstrBot、NapCat、SnowLuma 各自独立容器，通过 OneBot v11 反向 WebSoc
 * 二维码过期由协议端判定，不按固定周期刷新：NapCat 的 `onQRCodeSessionFailed(1, 3)` 会自行换新码，面板跟随新 URL 更新。
 * 已在线则直接返回「QQ 已在线，无需重复登录」。
 * 切换协议端、停止 / 重启协议端会取消该账号的登录任务。
-* 登录成功后：识别账号、记录登录时间、检查 OneBot 配置、AstrBot 监听与连接，更新面板状态；登录弹窗自动变为成功卡片。
+* 登录成功后：识别账号、记录登录时间；12 秒内未连上 AstrBot 则**自动双向配置**——AstrBot 侧（两端加入 Docker 网络、补齐 / 修正该账号的 aiocqhttp 平台），协议端侧（反向 WS 地址与 Token 写入全局与账号级配置；NapCat 通过 WebUI `OB11Config/SetConfig` 实时生效、不掉线；SnowLuma 无文件热加载，提示重启生效），再检查 OneBot 配置、AstrBot 监听与连接；登录弹窗自动变为成功卡片。切换协议端时同样会自动配置。一致性守护每 60 秒把 SnowLuma 的反向 WS 地址 / Token 与 AstrBot 对齐（只改文件，不重启）。
 * 所有事件写入 `/opt/astrbot/logs/login.log`（已脱敏），在日志中心「登录日志」查看。
 
 ### 5.2 NapCat 与 SnowLuma 的区别
 
 | | NapCat | SnowLuma |
 | --- | --- | --- |
-| 二维码来源 | WebUI 接口返回的二维码 URL，面板本地绘制 | 容器内 QQ 登录窗口的实时画面（x11vnc，面板直连，用户无需进入容器或打开 noVNC） |
+| 二维码来源 | WebUI 接口返回的二维码 URL，面板本地绘制 | 读取容器内 QQ 窗口画面（x11vnc），用定位图案算法（1:1:3:1:1 寻像图形 + 直角三点校验）精确抠出二维码，居中、放大到 360px 且保持锐利；识别不到时（已扫码 / 已失效 / QQ 启动中）显示整个登录窗口 |
 | 已扫码 / 等待确认 | `loginPhase=qrcode_scanned / initializing` | 无扫码事件；日志 `login identity discovered` → 等待确认 |
 | 成功判定 | `isLogin=true`（且 Core 在线） | OneBot `get_login_info` 返回 `user_id` |
 | 过期 / 拒绝 | 由 NapCat 回调和错误消息给出 | 只显示在 QQ 窗口里，SnowLuma 不回传；画面实时可见 |
@@ -262,10 +262,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Ceiity/linyu/main/install.sh
 
 ### 8.1 自动化测试（`python3 -m unittest discover -s tests`，`bash scripts/validate.sh`）
 
-60 项全部通过，含新增 34 项（`tests/test_ng.py`）：
+66 项全部通过，含新增 40 项（`tests/test_ng.py`）：
 
 * 错误码：NapCat 过期字符串、`登录失败: [...]` 保留 `serverErrorCode`、`140022008/010/011`、未知码保留原文、拒绝分类、`ErrType/ErrCode` 日志解析、SnowLuma 日志事件。
-* VNC：内置 RFB 3.8 + VNC 认证测试服务器——认证、整帧读取、窗口裁剪、点击坐标映射、错误密码。
+* VNC：内置 RFB 3.8 + VNC 认证测试服务器——认证、整帧读取、窗口裁剪（忽略工具栏）、二维码定位（误差 < 1.5px，含中心 Logo）、居中裁剪与点击映射、无二维码时回退、错误密码。
+* 自动配置：SnowLuma 全局 / 账号级配置恢复且不产生重复客户端、NapCat 实时 SetConfig、登录后未连接时自动配置。
 * 登录状态机：完整时间线、单任务 / 重新申请 generation、二维码 seq 与 unchanged、自动换码上限 → EXPIRED、拒绝、总超时与确认超时、预检失败、连续错误上限、旧任务操作被拒绝。
 * 协议端：SnowLuma OneBot 配置与 compose（仅 127.0.0.1、权限、`.env` 0600）、NapCat→SnowLuma→NapCat 双向切换（重启策略、AstrBot 未被重启 / 修改）、目标启动失败回滚、启动阶段异常回滚、就绪失败回滚、禁止启动非当前协议端、一致性守护、并发切换拒绝、关键任务阻止切换、`/proc/net/tcp` 连接识别、诊断报告。
 * SSH：密码加密 / 不落明文 / 文件权限、输入校验、环境评估。

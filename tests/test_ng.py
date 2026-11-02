@@ -79,9 +79,12 @@ class LoginCodesTest(unittest.TestCase):
 class FakeVNC(threading.Thread):
     """RFB 3.8 server with VNC auth; draws a 'window' on a flat desktop and records clicks."""
 
-    def __init__(self, password="s3cret", w=200, h=120):
+    def __init__(self, password="s3cret", w=200, h=120, image=None):
         super().__init__(daemon=True)
         self.password, self.w, self.h = password, w, h
+        self.image = image
+        if image is not None:
+            self.w, self.h = image.size
         self.sock = socket.socket()
         self.sock.bind(("127.0.0.1", 0))
         self.sock.listen(4)
@@ -135,6 +138,10 @@ class FakeVNC(threading.Thread):
                 self.recv(c, 4 * n)
             elif t == 3:
                 self.recv(c, 9)
+                if self.image is not None:
+                    fb = bytearray(self.image.convert("RGBX").tobytes("raw", "BGRX"))
+                    c.sendall(struct.pack(">BxH", 0, 1) + struct.pack(">HHHHi", 0, 0, self.w, self.h, 0) + bytes(fb))
+                    continue
                 fb = bytearray(b"\x40\x30\x20\x00" * (self.w * self.h))
                 for y in range(30, 90):
                     for x in range(60, 140):
@@ -166,6 +173,61 @@ class RFBTest(unittest.TestCase):
                 break
             time.sleep(0.02)
         self.assertEqual(srv.clicks[-1], (x0 + 10, y0 + 10))
+        srv.sock.close()
+
+    def _qq_screen(self, box_size=4, logo=True):
+        import qrcode
+        from PIL import Image, ImageDraw
+        q = qrcode.QRCode(box_size=box_size, border=0, error_correction=qrcode.constants.ERROR_CORRECT_H)
+        q.add_data("https://txz.qq.com/p?k=nailong-test-0123456789&f=716027609")
+        q.make()
+        qi = q.make_image().convert("RGB")
+        if logo:
+            c = qi.size[0] // 2
+            ImageDraw.Draw(qi).rounded_rectangle((c - 14, c - 14, c + 14, c + 14), 6, fill=(18, 183, 245))
+        scr = Image.new("RGB", (640, 480), (45, 52, 64))
+        win = Image.new("RGB", (260, 360), "white")
+        d = ImageDraw.Draw(win)
+        for i in range(4):
+            d.text((20, 12 + i * 12), "QQ login %d" % i, fill="black")
+        win.paste(qi, (130 - qi.size[0] // 2, 190 - qi.size[1] // 2))
+        scr.paste(win, (190, 60))
+        ImageDraw.Draw(scr).rectangle((0, 460, 640, 480), fill=(20, 20, 20))  # toolbar
+        return scr, (190 + 130 - qi.size[0] // 2, 60 + 190 - qi.size[1] // 2, qi.size[0])
+
+    def test_find_qr_exact(self):
+        scr, (qx, qy, side) = self._qq_screen()
+        win_box = rfb.content_box(scr)
+        self.assertTrue(win_box[0] <= 190 and win_box[2] >= 450 and win_box[2] < 500, win_box)  # toolbar ignored
+        found = rfb.find_qr(scr.crop(win_box))
+        self.assertIsNotNone(found)
+        x0, y0, x1, y1, m = found
+        self.assertAlmostEqual(win_box[0] + x0, qx, delta=1.5)
+        self.assertAlmostEqual(win_box[1] + y0, qy, delta=1.5)
+        self.assertAlmostEqual(x1 - x0, side, delta=2)
+        self.assertAlmostEqual(m, 4, delta=0.5)
+
+    def test_find_qr_none_without_code(self):
+        from PIL import Image, ImageDraw
+        img = Image.new("RGB", (300, 300), "white")
+        ImageDraw.Draw(img).text((20, 20), "扫码成功 请在手机上确认", fill="black")
+        self.assertIsNone(rfb.find_qr(img))
+
+    def test_capture_centres_qr_and_clicks_map_back(self):
+        scr, (qx, qy, side) = self._qq_screen()
+        srv = FakeVNC(image=scr)
+        srv.start()
+        shot = rfb.capture("127.0.0.1", srv.port, "s3cret")
+        self.assertTrue(shot["qr_found"])
+        self.assertEqual(shot["image"]["width"], 360)
+        x0, y0, x1, y1 = shot["box"]
+        self.assertEqual(x1 - x0, y1 - y0)  # square
+        # QR centred inside the crop
+        self.assertAlmostEqual((x0 + x1) / 2, qx + side / 2, delta=2)
+        self.assertAlmostEqual((y0 + y1) / 2, qy + side / 2, delta=2)
+        sx, sy = rfb.map_click(180, 180, shot)  # click the middle of the shown code
+        self.assertAlmostEqual(sx, qx + side / 2, delta=3)
+        self.assertAlmostEqual(sy, qy + side / 2, delta=3)
         srv.sock.close()
 
     def test_wrong_password(self):
@@ -413,6 +475,53 @@ class ProtocolSwitchTest(unittest.TestCase):
         self.d.add("snowluma01", running=False, restart="unless-stopped")
         sl.ready = lambda slot: (True, "ok")
         self.m.adapters["napcat"].ready = lambda slot: (True, "ok")
+
+    def test_autoconfigure_restores_both_sides(self):
+        sl = self.m.adapters["snowluma"]
+        path = self.prefix / "snowluma" / "snowluma01" / "data" / "config" / "onebot.json"
+        cfg = json.loads(path.read_text())
+        cfg["networks"]["wsClients"] = []  # e.g. removed in the SnowLuma WebUI
+        path.write_text(json.dumps(cfg))
+        (self.prefix / "snowluma" / "snowluma01" / "data" / "config" / "onebot_10001.json").write_text(json.dumps(
+            {"mode": "snapshot", "networks": {"wsClients": [{"name": "x", "url": "ws://astrbot:6199/ws", "accessToken": "old"}]}}))
+        self.assertFalse(sl.onebot_token_ok("napcat01")[0])
+        out = self.m.autoconfigure("napcat01", "snowluma", logged_in=True)
+        self.assertTrue(out["files_changed"])
+        self.assertTrue(out["needs_restart"])
+        self.assertTrue(sl.onebot_token_ok("napcat01")[0])
+        per = json.loads((self.prefix / "snowluma" / "snowluma01" / "data" / "config" / "onebot_10001.json").read_text())
+        urls = [c["url"] for c in per["networks"]["wsClients"]]
+        self.assertEqual(urls.count("ws://astrbot:6199/ws"), 1)  # no duplicate client → no double events
+        self.assertEqual(per["mode"], "snapshot")
+
+    def test_autoconfigure_napcat_live(self):
+        calls = []
+
+        def webui(row, path, payload=None, timeout=10):
+            calls.append((path, payload))
+            if path == "/OB11Config/GetConfig":
+                return {"code": 0, "data": {"network": {"websocketClients": [], "httpServers": []}}}
+            return {"code": 0, "data": None}
+        self.host.napcat_webui_call = webui
+        out = self.m.autoconfigure("napcat01", "napcat", logged_in=True)
+        self.assertTrue(out["live"]["changed"])
+        sent = json.loads(calls[-1][1]["config"])
+        ws = sent["network"]["websocketClients"][0]
+        self.assertEqual((ws["url"], ws["token"], ws["enable"]), ("ws://astrbot:6199/ws", "tok", True))
+
+    def test_after_login_autoconfigures_when_not_connected(self):
+        from nailong_ng.login_state import LoginTask
+        hit = []
+        self.m.autoconfigure = lambda slot, proto, log=None, logged_in=True: hit.append((slot, proto)) or {
+            "network": True, "platform": "ok", "files_changed": True, "live": None, "needs_restart": False}
+        self.m._wait_link = lambda slot, c, seconds, task=None: {"port": 6199, "listening": True, "connected": bool(hit)}
+        t = LoginTask("napcat01", "napcat", 1)
+        t.account = {"uin": "10001", "nickname": "nl"}
+        self.m._after_login(t)
+        self.assertEqual(hit, [("napcat01", "napcat")])
+        ids = {c["id"]: c["ok"] for c in t.checks}
+        self.assertTrue(ids["autoconfig"] and ids["astrbot_link"])
+        self.assertEqual(self.m.store.slot("napcat01")["login"]["uin"], "10001")
 
     def test_container_name(self):
         self.assertEqual(snowluma_container_for("napcat01"), "snowluma01")

@@ -277,6 +277,10 @@ class ProtocolManager:
                     if link.get("connected"):
                         break
                     time.sleep(3)
+                if not link.get("connected"):
+                    log("⑧ 尚未连上 AstrBot，自动配置两端连接")
+                    self.autoconfigure(slot, target, log)
+                    link = self._wait_link(slot, dst.container(slot), 30)
                 if link.get("connected"):
                     log("⑧ AstrBot 已与 %s 建立连接（QQ %s）" % (LABELS[target], login.get("uin")))
                 else:
@@ -321,6 +325,16 @@ class ProtocolManager:
                     continue
                 self.store.update_slot(slot, switching=False, switch_target="")
             active = meta.get("active") if meta.get("active") in PROTOCOLS else NAPCAT
+            if slot in installed:
+                # Keep SnowLuma's reverse-WS address / token in step with AstrBot (e.g. after the
+                # deployment token was changed). Files only – never restarts anything here.
+                try:
+                    sl = self.adapters[SNOWLUMA]
+                    if sl.installed(slot) and not sl.onebot_token_ok(slot)[0]:
+                        if sl.apply_onebot(slot, self.astrbot.ws_url(slot), self.host.reverse_token):
+                            actions.append({"slot": slot, "synced": SNOWLUMA})
+                except Exception as e:
+                    actions.append({"slot": slot, "error": str(e)})
             if active == NAPCAT and slot not in installed:
                 continue  # legacy slot, SnowLuma never installed: nothing to enforce
             inactive = SNOWLUMA if active == NAPCAT else NAPCAT
@@ -375,9 +389,57 @@ class ProtocolManager:
     # ------------------------------------------------------------------
     # login hooks
     # ------------------------------------------------------------------
+    def autoconfigure(self, slot: str, proto: str, log=None, logged_in: bool = True) -> dict:
+        """Make AstrBot <-> protocol end match, in both directions.
+
+        AstrBot side: both containers on the bot network, aiocqhttp platform for
+        the slot present with the right port / token (idempotent legacy sync,
+        restarts AstrBot only when something really changed).
+        Protocol side: reverse-WS client → ws://<astrbot>:<port>/ws with the token,
+        written to the files (global + per-account) and, for NapCat, applied live.
+        """
+        a = self.adapters[proto]
+        log = log or (lambda s: None)
+        out = {"network": True, "platform": "ok", "files_changed": False, "live": None, "needs_restart": False}
+        for name in (self.host.astrbot_container, a.container(slot)):
+            if not self.docker.ensure_network(name):
+                out["network"] = False
+                log("容器 %s 未能加入 %s" % (name, self.host.network))
+        problem = self.astrbot.platform_problem(slot)
+        if problem:
+            log("AstrBot 平台配置：%s，正在修正" % problem)
+            self.astrbot.ensure_platform(log)
+            problem = self.astrbot.platform_problem(slot)
+            out["platform"] = problem or "fixed"
+        url, token = self.astrbot.ws_url(slot), self.host.reverse_token
+        out["files_changed"] = a.apply_onebot(slot, url, token)
+        if out["files_changed"]:
+            log("%s OneBot 配置文件已修正（→ %s）" % (LABELS[proto], url))
+        if proto == NAPCAT and logged_in:
+            try:
+                out["live"] = a.apply_onebot_live(slot, url, token)
+                log(out["live"]["detail"])
+            except Exception as e:
+                out["live"] = {"ok": False, "changed": False, "detail": str(e)}
+        elif proto == SNOWLUMA and out["files_changed"] and logged_in:
+            # SnowLuma only reloads OneBot config via its WebUI (password-protected);
+            # file edits take effect after a container restart.
+            out["needs_restart"] = True
+        return out
+
+    def _wait_link(self, slot: str, container: str, seconds: int, task: LoginTask | None = None) -> dict:
+        link: dict = {}
+        deadline = time.time() + seconds
+        while True:
+            link = self.astrbot.link(slot, container)
+            if link.get("connected") or time.time() >= deadline:
+                return link
+            time.sleep(3)
+
     def _after_login(self, task: LoginTask) -> None:
         slot, proto = task.slot, task.protocol
         a = self.adapters[proto]
+        task.notes["post_checks"] = "running"
         if not task.account.get("uin") or not task.account.get("nickname"):
             st = a.get_login_status(slot)
             task.account.update({k: v for k, v in {"uin": st.get("uin"), "nickname": st.get("nickname")}.items() if v})
@@ -391,19 +453,26 @@ class ProtocolManager:
                 cb(slot, proto)
             except Exception:
                 pass
+        link = self._wait_link(slot, a.container(slot), 12)
+        auto = None
+        if not link.get("connected"):
+            task.event("尚未连上 AstrBot，正在自动配置 AstrBot 与 %s 的连接" % LABELS[proto])
+            auto = self.autoconfigure(slot, proto, task.event)
+            link = self._wait_link(slot, a.container(slot), 30)
         ok, why = a.onebot_token_ok(slot)
         task.checks.append({"id": "onebot", "title": "OneBot 配置", "ok": ok, "detail": why})
-        link = {}
-        for _ in range(10):
-            link = self.astrbot.link(slot, a.container(slot))
-            if link.get("connected"):
-                break
-            time.sleep(3)
+        if auto is not None:
+            detail = "已自动修正" if (auto["files_changed"] or (auto.get("live") or {}).get("changed") or auto["platform"] == "fixed") else "配置本已正确"
+            if auto["needs_restart"]:
+                detail += "；SnowLuma 需重启后生效（协议端页「重启」，QQ 可能需要重新扫码）"
+            task.checks.append({"id": "autoconfig", "title": "自动配置 AstrBot ⇄ %s" % LABELS[proto],
+                                "ok": auto["network"] and auto["platform"] in ("ok", "fixed") and not auto["needs_restart"], "detail": detail})
         task.checks.append({"id": "astrbot_listen", "title": "AstrBot 监听", "ok": bool(link.get("listening")),
                             "detail": "端口 %s %s" % (link.get("port"), "监听中" if link.get("listening") else "未监听")})
         task.checks.append({"id": "astrbot_link", "title": "AstrBot 连接", "ok": bool(link.get("connected")),
                             "detail": "已建立反向 WebSocket" if link.get("connected") else "暂未检测到连接（可在诊断页复查）"})
-        task.event("登录后检查完成")
+        task.notes["post_checks"] = "done"
+        task.event("登录后检查完成：%s" % ("AstrBot 已连接" if link.get("connected") else "AstrBot 未连接"))
 
     # ------------------------------------------------------------------
     # diagnostics

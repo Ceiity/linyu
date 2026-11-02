@@ -692,13 +692,38 @@ class NapCatAdapter(ProtocolAdapter):
             self._version_cache[key] = version  # cache misses too: one log scan per container start
         return version
 
-    def webui(self, slot: str, path: str, timeout: int = 8) -> dict:
+    def webui(self, slot: str, path: str, timeout: int = 8, payload: dict | None = None) -> dict:
         row = self.row(slot)
         if not row:
             raise ProtocolError("NapCat 实例不存在：%s" % slot)
         if not self.host.napcat_webui_call:
             raise ProtocolError("NapCat WebUI 调用不可用")
-        return self.host.napcat_webui_call(row, path, None, timeout)
+        return self.host.napcat_webui_call(row, path, payload, timeout)
+
+    def apply_onebot_live(self, slot: str, ws_url: str, token: str) -> dict:
+        """After login NapCat exposes OB11Config Get/SetConfig, which applies the
+        OneBot network config immediately (no restart, QQ stays logged in)."""
+        res = self.webui(slot, "/OB11Config/GetConfig", timeout=8)
+        if int(res.get("code", -1)) != 0:
+            return {"ok": False, "changed": False, "detail": str(res.get("message") or "GetConfig 失败")}
+        cfg = res.get("data") or {}
+        net = cfg.setdefault("network", {})
+        clients = net.get("websocketClients") if isinstance(net.get("websocketClients"), list) else []
+        before = json.dumps(clients, sort_keys=True)
+        ours = [c for c in clients if isinstance(c, dict) and c.get("url") == ws_url]
+        if not ours:
+            clients.append({"name": "AstrBotReverseWs", "enable": True, "url": ws_url, "messagePostFormat": "array",
+                            "reportSelfMessage": False, "reconnectInterval": 5000, "token": token, "debug": False,
+                            "heartInterval": 30000})
+        for c in ours:
+            c["enable"] = True
+            c["token"] = token
+        net["websocketClients"] = clients
+        if json.dumps(clients, sort_keys=True) == before:
+            return {"ok": True, "changed": False, "detail": "NapCat 当前 OneBot 配置已正确"}
+        res = self.webui(slot, "/OB11Config/SetConfig", timeout=10, payload={"config": json.dumps(cfg, ensure_ascii=False)})
+        ok = int(res.get("code", -1)) == 0
+        return {"ok": ok, "changed": ok, "detail": "已通过 NapCat WebUI 实时应用反向 WS 配置" if ok else "SetConfig 失败：%s" % res.get("message")}
 
     def ready(self, slot: str) -> tuple[bool, str]:
         if not self.docker.state(slot).get("running"):
@@ -833,7 +858,13 @@ class NapCatAdapter(ProtocolAdapter):
     def repair(self, slot: str, log) -> dict:
         self._require_installed(slot)
         changed = self.apply_onebot(slot, self.astrbot.ws_url(slot), self.host.reverse_token)
-        log("NapCat 反向 WS 配置%s" % ("已修正" if changed else "无需修改"))
+        log("NapCat 反向 WS 配置文件%s" % ("已修正" if changed else "无需修改"))
+        if self.get_login_status(slot, quick=True).get("online"):
+            try:
+                live = self.apply_onebot_live(slot, self.astrbot.ws_url(slot), self.host.reverse_token)
+                log(live["detail"])
+            except Exception as e:
+                log("实时应用失败：%s" % e)
         net = self.docker.ensure_network(slot)
         log("Docker 网络 %s：%s" % (self.host.network, "已连接" if net else "未连接（容器不存在？）"))
         return {"ok": True, "config_changed": changed, "network": net}
@@ -1368,10 +1399,15 @@ networks:
         changed = self.apply_onebot(slot, self.astrbot.ws_url(slot), self.host.reverse_token)
         log("OneBot 配置%s" % ("已修正" if changed else "无需修改"))
         active = self.store.active(slot) == SNOWLUMA
+        was_running = bool(self.docker.state(self.container(slot)).get("running"))
         code, out = self._compose(slot, "up -d" if active else "up --no-start")
         log(out[-1500:])
         if active:
             self.docker.ensure_network(self.container(slot))
+            if changed and was_running:
+                # SnowLuma has no file watcher: OneBot changes need a process restart.
+                log("OneBot 配置已变更，重启 SnowLuma 使其生效（QQ 登录态保存在数据目录，可能需要重新扫码）")
+                self.docker.restart(self.container(slot))
         info.update({"ports": ports, "updated_at": now_text()})
         self.store.set_snowluma_instance(slot, info)
         return {"ok": code == 0, "config_changed": changed, "running": active}

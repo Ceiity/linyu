@@ -228,11 +228,24 @@ def content_box(img, threshold: int = 28, bar_ratio: float = 0.85, pad: int = 14
     bg = max(colors, key=lambda c: c[0])[1]
     diff = ImageChops.difference(img, Image.new("RGB", img.size, bg)).convert("L")
     mask = diff.point(lambda v: 255 if v > threshold else 0)
+    bar_level = 255 * bar_ratio
+    from PIL import ImageDraw
+    # Blank out full-width / full-height bars (toolbars, panels) before measuring,
+    # otherwise a bottom toolbar makes every column look "used".
+    for _ in range(2):
+        rows = list(mask.resize((1, h), Image.BOX).tobytes())
+        cols = list(mask.resize((w, 1), Image.BOX).tobytes())
+        draw = ImageDraw.Draw(mask)
+        for i, v in enumerate(rows):
+            if v >= bar_level:
+                draw.line([(0, i), (w, i)], fill=0)
+        for i, v in enumerate(cols):
+            if v >= bar_level:
+                draw.line([(i, 0), (i, h)], fill=0)
     rows = list(mask.resize((1, h), Image.BOX).tobytes())
     cols = list(mask.resize((w, 1), Image.BOX).tobytes())
-    bar_level = 255 * bar_ratio
-    ys = [i for i, v in enumerate(rows) if 2 < v < bar_level]
-    xs = [i for i, v in enumerate(cols) if 2 < v < bar_level]
+    ys = [i for i, v in enumerate(rows) if v > 2]
+    xs = [i for i, v in enumerate(cols) if v > 2]
     if not ys or not xs:
         return None
     x0, x1, y0, y1 = min(xs), max(xs) + 1, min(ys), max(ys) + 1
@@ -241,22 +254,164 @@ def content_box(img, threshold: int = 28, bar_ratio: float = 0.85, pad: int = 14
     return (max(0, x0 - pad), max(0, y0 - pad), min(w, x1 + pad), min(h, y1 + pad))
 
 
-def capture(host: str, port: int, password: str, crop: bool = True, max_width: int = 960, timeout: float = 8.0) -> dict:
-    """Grab one frame and return a PNG (base64) plus the geometry needed to map clicks back."""
+# ---------------------------------------------------------------------------
+# QR locating: classic finder-pattern search (dark:light:dark:light:dark = 1:1:3:1:1)
+# on rows, confirmed on columns, then three finders forming a right angle give
+# the code's exact bounds.  Pure PIL / Python – no numpy / OpenCV / zbar needed.
+# ---------------------------------------------------------------------------
+
+def _ratio_ok(runs: list[int]) -> float:
+    total = sum(runs)
+    if total < 7:
+        return 0.0
+    m = total / 7.0
+    tol = m * 0.6
+    if (abs(runs[0] - m) < tol and abs(runs[1] - m) < tol and abs(runs[2] - 3 * m) < 3 * tol
+            and abs(runs[3] - m) < tol and abs(runs[4] - m) < tol):
+        return m
+    return 0.0
+
+
+def _runs(line: bytes) -> list[tuple[int, int, int]]:
+    """(dark?, start, length) runs of a thresholded line (0 = dark)."""
+    out = []
+    n = len(line)
+    i = 0
+    while i < n:
+        v = line[i]
+        j = i + 1
+        while j < n and line[j] == v:
+            j += 1
+        out.append((v == 0, i, j - i))
+        i = j
+    return out
+
+
+def _finder_candidates(bw: bytes, w: int, h: int, axis: str) -> list[tuple[float, float, float]]:
+    found = []
+    outer = h if axis == "row" else w
+    for k in range(outer):
+        line = bw[k * w:(k + 1) * w] if axis == "row" else bw[k::w]
+        runs = _runs(line)
+        for i in range(len(runs) - 4):
+            if not runs[i][0]:
+                continue
+            seg = runs[i:i + 5]
+            m = _ratio_ok([r[2] for r in seg])
+            if m:
+                c = seg[2][1] + seg[2][2] / 2.0
+                found.append((c, k, m) if axis == "row" else (k, c, m))
+    return found
+
+
+def _cluster(points: list[tuple[float, float, float]]) -> list[dict]:
+    clusters: list[dict] = []
+    for x, y, m in points:
+        for c in clusters:
+            if abs(c["x"] - x) <= max(2.0, c["m"] * 1.5) and abs(c["y"] - y) <= max(2.0, c["m"] * 1.5):
+                n = c["n"]
+                c["x"] = (c["x"] * n + x) / (n + 1)
+                c["y"] = (c["y"] * n + y) / (n + 1)
+                c["m"] = (c["m"] * n + m) / (n + 1)
+                c["n"] = n + 1
+                break
+        else:
+            clusters.append({"x": x, "y": y, "m": m, "n": 1})
+    return clusters
+
+
+def find_qr(img, threshold: int = 128):
+    """Return (x0, y0, x1, y1, module) of the QR code inside *img*, or None."""
+    gray = img.convert("L")
+    w, h = gray.size
+    if w < 40 or h < 40:
+        return None
+    bw = gray.point(lambda v: 255 if v >= threshold else 0).tobytes()
+    rows = _cluster(_finder_candidates(bw, w, h, "row"))
+    cols = _cluster(_finder_candidates(bw, w, h, "col"))
+    finders = []
+    for r in rows:
+        if r["n"] < 2:
+            continue
+        for c in cols:
+            if c["n"] >= 2 and abs(r["x"] - c["x"]) <= r["m"] * 1.5 and abs(r["y"] - c["y"]) <= r["m"] * 1.5 \
+                    and 0.6 < r["m"] / c["m"] < 1.6:
+                finders.append({"x": (r["x"] + c["x"]) / 2, "y": (r["y"] + c["y"]) / 2,
+                                "m": (r["m"] + c["m"]) / 2, "n": r["n"] + c["n"]})
+                break
+    finders.sort(key=lambda f: -f["n"])
+    finders = finders[:8]
+    best = None
+    for i in range(len(finders)):
+        for j in range(len(finders)):
+            for k in range(len(finders)):
+                if len({i, j, k}) < 3 or j > k:
+                    continue
+                a, b, c = finders[i], finders[j], finders[k]  # a = right-angle corner
+                ab = ((a["x"] - b["x"]) ** 2 + (a["y"] - b["y"]) ** 2) ** 0.5
+                ac = ((a["x"] - c["x"]) ** 2 + (a["y"] - c["y"]) ** 2) ** 0.5
+                bc = ((b["x"] - c["x"]) ** 2 + (b["y"] - c["y"]) ** 2) ** 0.5
+                m = (a["m"] + b["m"] + c["m"]) / 3
+                if min(ab, ac) < 10 * m or abs(ab - ac) > 0.12 * max(ab, ac) or abs(bc - (ab + ac) / 2 * 2 ** 0.5) > 0.12 * bc:
+                    continue
+                if max(f["m"] for f in (a, b, c)) > 1.5 * min(f["m"] for f in (a, b, c)):
+                    continue
+                score = a["n"] + b["n"] + c["n"]
+                if not best or score > best[0]:
+                    best = (score, a, b, c, m)
+    if not best:
+        return None
+    _, a, b, c, m = best
+    d = a.copy()  # fourth (bottom-right) corner by parallelogram
+    d["x"], d["y"] = b["x"] + c["x"] - a["x"], b["y"] + c["y"] - a["y"]
+    xs = [p["x"] for p in (a, b, c, d)]
+    ys = [p["y"] for p in (a, b, c, d)]
+    x0, x1 = min(xs) - 3.5 * m, max(xs) + 3.5 * m
+    y0, y1 = min(ys) - 3.5 * m, max(ys) + 3.5 * m
+    return (x0, y0, x1, y1, m)
+
+
+def qr_square(img, qr, quiet: float = 2.5):
+    """Square crop box around a located QR with a quiet zone, clamped to the image."""
+    x0, y0, x1, y1, m = qr
+    side = max(x1 - x0, y1 - y0) + 2 * quiet * m
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    w, h = img.size
+    side = min(side, w, h)
+    left = min(max(0, cx - side / 2), w - side)
+    top = min(max(0, cy - side / 2), h - side)
+    return (int(round(left)), int(round(top)), int(round(left + side)), int(round(top + side)))
+
+
+def capture(host: str, port: int, password: str, crop: bool = True, max_width: int = 960, timeout: float = 8.0,
+            qr_size: int = 360) -> dict:
+    """Grab one frame; return the QR code (centred, crisp) when it can be located,
+    otherwise the QQ window.  Includes the geometry needed to map clicks back."""
     from PIL import Image
 
     with RFBClient(host, port, password, timeout=timeout) as cli:
         raw = cli.framebuffer()
         width, height = cli.width, cli.height
-    img = Image.frombuffer("RGB", (width, height), raw, "raw", "BGRX", 0, 1)
-    box = content_box(img) if crop else None
+    full = Image.frombuffer("RGB", (width, height), raw, "raw", "BGRX", 0, 1)
+    box = content_box(full) if crop else None
     blank = box is None and crop
-    if box:
-        img = img.crop(box)
-    else:
+    if not box:
         box = (0, 0, width, height)
+    img = full.crop(box)
+    qr_found = False
+    if crop:
+        qr = find_qr(img)
+        if qr:
+            sq = qr_square(img, qr)
+            box = (box[0] + sq[0], box[1] + sq[1], box[0] + sq[2], box[1] + sq[3])
+            img = full.crop(box)
+            qr_found = True
     scale = 1.0
-    if img.size[0] > max_width:
+    if qr_found:
+        scale = qr_size / float(img.size[0])
+        # Nearest-neighbour keeps module edges sharp, like a rendered code.
+        img = img.resize((qr_size, max(1, int(round(img.size[1] * scale)))), Image.NEAREST)
+    elif img.size[0] > max_width:
         scale = max_width / float(img.size[0])
         img = img.resize((max_width, max(1, int(img.size[1] * scale))), Image.LANCZOS)
     buf = io.BytesIO()
@@ -270,6 +425,7 @@ def capture(host: str, port: int, password: str, crop: bool = True, max_width: i
         "scale": scale,
         "image": {"width": img.size[0], "height": img.size[1]},
         "blank": blank,
+        "qr_found": qr_found,
     }
 
 

@@ -646,8 +646,9 @@ class SnowLumaLoginDriver(LoginDriver):
         return {
             "kind": "image", "key": shot["sha"], "sha": shot["sha"], "png_base64": shot["png_base64"],
             "geometry": {"box": shot["box"], "scale": shot["scale"], "image": shot["image"], "screen": shot["screen"]},
-            "blank": shot.get("blank", False), "expires_hint": None,
-            "note": "SnowLuma 没有二维码接口：这是容器内 QQ 登录窗口的实时画面，二维码有效期与刷新由 QQ 客户端管理。",
+            "blank": shot.get("blank", False), "qr_found": bool(shot.get("qr_found")), "expires_hint": None,
+            "note": ("已从 QQ 登录窗口中定位并抠出二维码；有效期与刷新由 QQ 客户端管理。" if shot.get("qr_found") else
+                     "画面中暂未识别到二维码（可能已扫码、已失效或 QQ 仍在启动），显示的是 QQ 登录窗口实时画面。"),
         }
 
     def start(self, task: LoginTask) -> None:
@@ -658,7 +659,8 @@ class SnowLumaLoginDriver(LoginDriver):
             try:
                 frame = self._frame(task)
                 if frame:
-                    task.set_qr(frame, "QQ 登录窗口已显示，请用手机 QQ 扫描画面中的二维码")
+                    task.notes["qr_found"] = bool(frame.get("qr_found"))
+                    task.set_qr(frame, "二维码已就绪，请用手机 QQ 扫码" if frame.get("qr_found") else "QQ 登录窗口已显示，请扫描画面中的二维码")
                     if frame.get("blank"):
                         task.event("画面里还没有 QQ 窗口，QQ 客户端可能仍在启动", "warn")
                     return
@@ -717,12 +719,21 @@ class SnowLumaLoginDriver(LoginDriver):
                     return obs
             else:
                 self.qq_bad = 0
-        if task.state not in ("WAITING_CONFIRMATION",):
-            try:
-                frame = self._frame(task)
-                if frame and frame["key"] != task.qr_key:
-                    obs["qr"] = frame
-                    obs["qr_reason"] = "QQ 窗口画面已更新"
-            except Exception as e:
+        # Keep watching the window in every state: after a rejection on the phone
+        # QQ shows a QR code again and the user must be able to see it.
+        try:
+            frame = self._frame(task)
+            if frame and frame["key"] != task.qr_key:
+                had = bool(task.notes.get("qr_found"))
+                now_found = bool(frame.get("qr_found"))
+                task.notes["qr_found"] = now_found
+                obs["qr"] = frame
+                if had and not now_found:
+                    obs["qr_reason"] = "二维码已从 QQ 窗口消失：如已扫码请在手机上确认；如显示失效，点击画面刷新"
+                elif now_found and not had:
+                    obs["qr_reason"] = "已识别到二维码"
+                else:
+                    obs["qr_reason"] = "二维码已更新" if now_found else "QQ 窗口画面已更新"
+        except Exception as e:
                 obs.setdefault("warnings", []).append(make_error("PROTOCOL_UNREACHABLE", "snowluma", task.state, "vnc", str(e)))
         return obs

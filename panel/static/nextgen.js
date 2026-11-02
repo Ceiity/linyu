@@ -181,8 +181,10 @@ function drawLogin(d, force){
       NG.login.seq = d.qr.seq;
       if(d.qr.kind==="url"){
         stage.innerHTML = `<div class="ng-qr ng-pop"><div class="ng-qr-code">${qrSvgFor(d.qr.url)||`<p class="muted">无法绘制二维码</p>`}</div><p class="ng-qr-tip">用手机 QQ 扫码，并在手机上确认登录</p><p class="ng-qr-meta" id="ngQrMeta"></p></div>`;
+      } else if(d.qr.kind==="image" && d.qr.qr_found){
+        stage.innerHTML = `<div class="ng-qr ng-pop"><div class="ng-qr-code img"><img id="ngScreen" alt="QQ 登录二维码" src="data:image/png;base64,${d.qr.png_base64}" onclick="ngScreenClick(event)"></div><p class="ng-qr-tip">用手机 QQ 扫码，并在手机上确认登录</p><p class="ng-qr-meta" id="ngQrMeta"></p></div>`;
       } else if(d.qr.kind==="image"){
-        stage.innerHTML = `<div class="ng-qr ng-pop screen"><img id="ngScreen" alt="QQ 登录窗口实时画面" src="data:image/png;base64,${d.qr.png_base64}" onclick="ngScreenClick(event)"><p class="ng-qr-tip">这是 SnowLuma 容器内 QQ 登录窗口的实时画面：用手机 QQ 扫描其中的二维码。二维码失效时可直接点击画面中的二维码刷新。</p><p class="ng-qr-meta" id="ngQrMeta"></p></div>`;
+        stage.innerHTML = `<div class="ng-qr ng-pop screen"><img id="ngScreen" alt="QQ 登录窗口实时画面" src="data:image/png;base64,${d.qr.png_base64}" onclick="ngScreenClick(event)"><p class="ng-qr-tip">${safeText(d.qr.note||"QQ 登录窗口实时画面")}</p><p class="ng-qr-meta" id="ngQrMeta"></p></div>`;
       }
     }
   } else if(!d.qr && (!d.task_id || d.terminal)){

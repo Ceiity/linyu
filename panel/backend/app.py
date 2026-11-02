@@ -2591,8 +2591,22 @@ def task_apply_no_prefix(task: Task) -> dict:
 
 
 def task_repair_connection(task: Task) -> dict:
-    task.line("正在执行一键配置：同步 AstrBot、NapCat、Token 与 Docker 网络", 15)
-    return task_shell(task, "开始一键配置连接", "repair_astrbot_napcat_connection", 900)
+    task.line("正在执行一键配置：同步 AstrBot、NapCat、SnowLuma、Token 与 Docker 网络", 15)
+    res = task_shell(task, "开始一键配置连接", "repair_astrbot_napcat_connection", 900)
+    try:
+        mgr = ng()
+        for slot in mgr.slots():
+            proto = mgr.active(slot)
+            if proto == "snowluma" or ng_snowluma_installed(slot):
+                out = mgr.autoconfigure(slot, "snowluma", task.line, logged_in=(proto == "snowluma"))
+                if out.get("needs_restart"):
+                    task.line("%s 的 SnowLuma 配置已更新，需在协议端页重启后生效" % napcat_display_name(slot))
+            if proto == "napcat" and mgr.adapters["napcat"].get_login_status(slot, quick=True).get("online"):
+                live = mgr.adapters["napcat"].apply_onebot_live(slot, mgr.astrbot.ws_url(slot), shell_state().get("ASTRBOT_REVERSE_WS_TOKEN", ""))
+                task.line("%s：%s" % (napcat_display_name(slot), live.get("detail")))
+    except Exception as e:
+        task.line("协议端连接同步出错：%s" % e)
+    return res
 
 
 def delete_napcat(name: str, keep_data: bool) -> tuple[int, str]:
