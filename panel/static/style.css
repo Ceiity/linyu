@@ -108,6 +108,27 @@
 }
 
 /* ---------- base ---------- */
+/* Big desktop monitors: scale the whole UI up a step so text and
+   controls aren't tiny. Only for mouse-driven screens; phones and
+   tablets keep their native sizing. updateAppHeight() divides by this. */
+:root {
+  --ui-scale: 1;
+}
+@media (min-width: 1600px) and (hover: hover) and (pointer: fine) {
+  :root { --ui-scale: 1.08; }
+}
+@media (min-width: 1880px) and (hover: hover) and (pointer: fine) {
+  :root { --ui-scale: 1.15; }
+}
+@media (min-width: 2300px) and (hover: hover) and (pointer: fine) {
+  :root { --ui-scale: 1.25; }
+}
+@media (min-width: 3000px) and (hover: hover) and (pointer: fine) {
+  :root { --ui-scale: 1.4; }
+}
+html {
+  zoom: var(--ui-scale);
+}
 *,
 *::before,
 *::after {
