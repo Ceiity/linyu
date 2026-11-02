@@ -120,6 +120,21 @@ class ProtocolManager:
                         items.append({"slot": s, "display_name": display_name(s), "active": self.active(s), "error": str(e)})
         sl = self.store.snowluma()
         astr = self.docker.state(self.host.astrbot_container)
+        rows = self.docker.tcp_table(self.host.astrbot_container) if astr.get("running") else []
+        for item in items:
+            if "active" not in item or "error" in item:
+                continue
+            try:
+                port = self.astrbot.ws_port(item["slot"])
+                card = item[item["active"]]
+                ips = set()
+                st = self.docker.state(card["container"]) if card.get("running") else {}
+                ips = {ip for ip in (st.get("ips") or {}).values() if ip}
+                peers = {r["remote_ip"] for r in rows if r["local_port"] == port and r["state"] == "ESTABLISHED"}
+                item["onebot"] = {"port": port, "listening": any(r["local_port"] == port and r["state"] == "LISTEN" for r in rows),
+                                  "connected": bool(ips & peers)}
+            except Exception as e:
+                item["onebot"] = {"error": str(e)}
         return {
             "slots": items,
             "astrbot": {"container": self.host.astrbot_container, "running": bool(astr.get("running")), "status": astr.get("status")},
@@ -131,6 +146,7 @@ class ProtocolManager:
                 "snowluma": sum(1 for i in items if i.get("active") == SNOWLUMA),
                 "online": sum(1 for i in items if i.get("online")),
                 "conflicts": sum(1 for i in items if i.get("conflict")),
+                "connected": sum(1 for i in items if (i.get("onebot") or {}).get("connected")),
             },
             "generated_at": now_text(),
         }

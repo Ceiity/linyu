@@ -1,0 +1,194 @@
+/* 奶龙 NG 2.0 — extends the FlClash-style tokens from style.css */
+.ng-page { align-items: start; }
+.ng-head { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.ng-head h3 { margin: 0 0 4px; }
+.ng-head p { margin: 0; max-width: 760px; }
+.ng-head-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ng-head-actions select { min-height: 40px; border-radius: var(--r-pill); padding: 0 14px; }
+.ghost.pill-btn { background: transparent; border: 1px solid var(--line); color: var(--text-2); }
+.danger-text { color: var(--red) !important; }
+.pill-btn .adb-icon { width: 16px; height: 16px; margin-right: 4px; vertical-align: -3px; }
+
+/* stats strip */
+.ng-stats { display: flex; gap: 10px; flex-wrap: wrap; align-items: stretch; }
+.ng-stat { flex: 1 1 96px; min-width: 96px; padding: 14px 16px; border-radius: var(--r-tile); background: var(--tile); display: flex; flex-direction: column; gap: 2px; transition: transform .3s var(--ease); }
+.ng-stat b { font-size: 26px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ng-stat span { color: var(--muted); font-size: 13px; }
+.ng-stat.cat b { color: #f97316; } .ng-stat.snow b { color: #6366f1; } .ng-stat.ok b { color: var(--green); } .ng-stat.bad b { color: var(--red); }
+.ng-stat.wide { flex: 2 1 220px; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+
+/* slot card */
+.ng-slot { position: relative; overflow: hidden; }
+.ng-slot-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.ng-slot-title { display: flex; flex-direction: column; min-width: 120px; }
+.ng-slot-title h3 { margin: 0; }
+.ng-slot-pills { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+.ng-slot-actions { display: flex; gap: 8px; }
+.ng-proto-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.ng-proto { position: relative; border-radius: 24px; padding: 18px; background: color-mix(in srgb, var(--tile) 82%, transparent);
+  border: 1px solid var(--line); -webkit-backdrop-filter: saturate(160%) blur(18px); backdrop-filter: saturate(160%) blur(18px);
+  transition: transform .45s var(--ease), box-shadow .45s var(--ease), opacity .45s var(--ease), border-color .45s var(--ease); }
+.ng-proto.active { border-color: transparent; box-shadow: 0 0 0 2px rgba(var(--primary-rgb), .55), var(--shadow-card);
+  background: linear-gradient(160deg, rgba(var(--primary-rgb), .10), transparent 55%), var(--card); }
+.ng-proto.snowluma.active { box-shadow: 0 0 0 2px rgba(99, 102, 241, .6), var(--shadow-card); background: linear-gradient(160deg, rgba(99, 102, 241, .12), transparent 55%), var(--card); }
+.ng-proto.napcat.active { box-shadow: 0 0 0 2px rgba(249, 115, 22, .55), var(--shadow-card); background: linear-gradient(160deg, rgba(249, 115, 22, .10), transparent 55%), var(--card); }
+.ng-proto.inactive { opacity: .82; }
+.ng-proto.inactive:hover { opacity: 1; transform: translateY(-2px); }
+.ng-proto.missing { border-style: dashed; }
+.ng-active-badge { position: absolute; top: 14px; right: 14px; font-size: 12px; font-weight: 700; letter-spacing: .04em; padding: 4px 10px;
+  border-radius: var(--r-pill); color: #fff; background: linear-gradient(135deg, #34c759, #0a9b48); box-shadow: 0 4px 14px rgba(52, 199, 89, .35); animation: ngPulse 2.6s var(--ease) infinite; }
+@keyframes ngPulse { 0%, 100% { box-shadow: 0 4px 14px rgba(52, 199, 89, .35); } 50% { box-shadow: 0 4px 22px rgba(52, 199, 89, .6); } }
+.ng-proto-top { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+.ng-proto-top b { display: block; font-size: 17px; }
+.ng-proto-top small { color: var(--muted); word-break: break-all; }
+.ng-logo { display: inline-flex; width: 40px; height: 40px; flex: none; border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,.12); vertical-align: middle; }
+.ng-logo svg { width: 100%; height: 100%; }
+.ng-login-info .ng-logo { width: 22px; height: 22px; border-radius: 7px; box-shadow: none; }
+.ng-proto-rows { display: grid; gap: 8px; margin-bottom: 14px; }
+.ng-proto-rows > div { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
+.ng-proto-rows span { color: var(--muted); }
+.ng-proto-rows code { font-size: 12px; }
+.ng-proto-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ng-more { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.ng-more .pill-btn { min-height: 32px; padding: 0 12px; font-size: 13px; }
+.ng-note { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
+.ng-slot.is-switching .ng-proto { animation: ngSwap 1.2s var(--ease) infinite alternate; }
+@keyframes ngSwap { from { transform: translateX(0) scale(1); } to { transform: translateX(4px) scale(.985); filter: saturate(.7); } }
+
+/* switch confirm */
+.ng-switch-visual { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 6px 0 14px; }
+.ng-switch-visual .ng-logo { width: 54px; height: 54px; border-radius: 16px; }
+.ng-switch-arrow { color: var(--primary); animation: ngArrow 1.4s var(--ease) infinite; }
+@keyframes ngArrow { 0%, 100% { transform: translateX(-4px); } 50% { transform: translateX(4px); } }
+.ng-steps { margin: 10px 0; padding-left: 20px; display: grid; gap: 4px; color: var(--text-2); }
+.ng-switch-confirm h3 { text-align: center; }
+
+/* license */
+.ng-license-head { display: flex; gap: 12px; align-items: center; }
+.ng-license ul { padding-left: 18px; display: grid; gap: 8px; color: var(--text-2); }
+.ng-links { display: flex; gap: 12px; flex-wrap: wrap; }
+.ng-links a { color: var(--primary); }
+.ng-check { display: flex !important; gap: 8px; align-items: flex-start; font-size: 14px; margin: 10px 0; }
+.ng-check input { width: auto !important; min-height: auto !important; margin-top: 3px; }
+.ng-ok { color: var(--green); }
+
+/* checks */
+.ng-checks { display: grid; gap: 8px; margin: 10px 0; }
+.ng-check-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 16px; background: var(--tile); }
+.ng-check-row b { display: block; font-size: 14px; }
+.ng-check-row small, .ng-check-row em { display: block; color: var(--muted); font-size: 12.5px; font-style: normal; word-break: break-all; }
+.ng-check-row em { color: var(--orange); margin-top: 2px; }
+.ng-mark { width: 22px; height: 22px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; background: var(--green); }
+.ng-check-row.bad .ng-mark { background: var(--red); } .ng-check-row.warn .ng-mark { background: #f59e0b; } .ng-check-row.skip .ng-mark { background: var(--muted); }
+.ng-checks.small .ng-check-row { padding: 7px 10px; }
+.ng-cfg { padding: 10px 12px; border-radius: 16px; background: var(--tile); margin: 8px 0; display: grid; gap: 6px; }
+.ng-cfg > div { display: grid; grid-template-columns: 110px 1fr; gap: 8px; font-size: 13px; }
+.ng-cfg code { word-break: break-all; white-space: pre-wrap; }
+
+/* login center */
+.ng-chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 12px; }
+.ng-chips::-webkit-scrollbar { display: none; }
+.ng-chip { flex: none; display: inline-flex; gap: 6px; align-items: center; border-radius: var(--r-pill); padding: 8px 14px; background: var(--tile); border: 1px solid transparent; color: var(--text); transition: all .3s var(--ease); }
+.ng-chip small { color: var(--muted); }
+.ng-chip.on { background: var(--primary-soft); border-color: rgba(var(--primary-rgb), .45); color: var(--primary-ink); }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--muted); }
+.dot.g { background: #34c759; box-shadow: 0 0 0 3px rgba(52, 199, 89, .18); } .dot.o { background: #f59e0b; }
+.ng-login { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+.ng-login-stage { min-height: 360px; display: grid; place-items: center; border-radius: 28px; padding: 20px;
+  background: radial-gradient(120% 90% at 50% 0%, rgba(var(--primary-rgb), .10), transparent 60%), var(--tile); }
+.ng-qr { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; transition: opacity .4s var(--ease), filter .4s var(--ease); }
+.ng-qr.dim { opacity: .35; filter: grayscale(1) blur(1px); }
+.ng-qr-code { width: min(280px, 72vw); aspect-ratio: 1; background: #fff; border-radius: 24px; padding: 14px; box-shadow: var(--shadow-pop); }
+.ng-qr-code svg { width: 100%; height: 100%; display: block; }
+.ng-qr.screen img { max-width: 100%; max-height: 62vh; border-radius: 18px; box-shadow: var(--shadow-pop); cursor: crosshair; background: #fff; }
+.ng-qr-tip { margin: 0; color: var(--text-2); max-width: 420px; }
+.ng-qr-meta { margin: 0; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.ng-pop { animation: ngPop .5s var(--ease); }
+@keyframes ngPop { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
+.ng-idle, .ng-success { text-align: center; display: grid; justify-items: center; gap: 6px; }
+.ng-idle h3, .ng-success h3 { margin: 8px 0 0; }
+.ng-idle .scan-hero-icon { width: 72px; height: 72px; color: var(--primary); }
+.ng-idle.bad .scan-hero-icon { color: var(--red); }
+.ng-success .success-symbol { width: 84px; height: 84px; }
+.spin.big { width: 34px; height: 34px; border-width: 3px; }
+.ng-login-side { display: grid; gap: 14px; }
+.ng-login-info { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ng-login-info > div { padding: 12px 14px; border-radius: 18px; background: var(--tile); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ng-login-info span { color: var(--muted); font-size: 12.5px; }
+.ng-login-info b { font-size: 15px; overflow-wrap: anywhere; }
+.ng-timeline { list-style: none; margin: 0; padding: 4px 0 4px 6px; display: grid; gap: 0; }
+.ng-timeline li { position: relative; display: flex; gap: 12px; align-items: center; padding: 8px 0 8px 22px; color: var(--muted); }
+.ng-timeline li::before { content: ""; position: absolute; left: 5px; top: -50%; bottom: 50%; width: 2px; background: var(--line); }
+.ng-timeline li:first-child::before { display: none; }
+.ng-timeline li i { position: absolute; left: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--line); transition: all .35s var(--ease); }
+.ng-timeline li.done { color: var(--text); } .ng-timeline li.done i { background: #34c759; }
+.ng-timeline li.done::before { background: #34c759; }
+.ng-timeline li.current { color: var(--primary-ink); font-weight: 600; }
+.ng-timeline li.current i { background: var(--primary); box-shadow: 0 0 0 5px rgba(var(--primary-rgb), .2); animation: ngBeat 1.3s var(--ease) infinite; }
+.ng-timeline li.failed { color: var(--red); } .ng-timeline li.failed i { background: var(--red); }
+.ng-timeline li.skipped { opacity: .55; text-decoration: line-through; }
+.ng-timeline time { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+@keyframes ngBeat { 0%, 100% { box-shadow: 0 0 0 4px rgba(var(--primary-rgb), .22); } 50% { box-shadow: 0 0 0 8px rgba(var(--primary-rgb), .08); } }
+.ng-error { border-radius: 20px; padding: 14px 16px; background: var(--red-bg); color: var(--text); border: 1px solid color-mix(in srgb, var(--red) 30%, transparent); animation: ngPop .4s var(--ease); }
+.ng-error.expired { background: var(--orange-bg); border-color: color-mix(in srgb, var(--orange) 30%, transparent); }
+.ng-error-head { display: flex; justify-content: space-between; gap: 10px; }
+.ng-error-head b { color: var(--red); font-size: 16px; } .ng-error.expired .ng-error-head b { color: var(--orange); }
+.ng-error p { margin: 6px 0; } .ng-sugg { font-weight: 600; }
+.ng-error dl { display: grid; grid-template-columns: 72px 1fr; gap: 4px 8px; margin: 8px 0 0; font-size: 13px; }
+.ng-error dt { color: var(--muted); } .ng-error dd { margin: 0; overflow-wrap: anywhere; }
+.ng-warn { font-size: 13px; padding: 8px 12px; border-radius: 14px; background: var(--orange-bg); color: var(--orange); }
+.ng-login-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ng-events { display: grid; gap: 4px; max-height: 46vh; overflow: auto; }
+.ng-events > div { display: flex; gap: 10px; font-size: 13px; padding: 6px 10px; border-radius: 10px; background: var(--tile); }
+.ng-events .warn { color: var(--orange); }
+.ng-events time { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+.ng-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; max-height: 40vh; overflow: auto; }
+.ng-codes > div { padding: 10px 12px; border-radius: 14px; background: var(--tile); display: grid; gap: 2px; }
+.ng-codes p, .ng-codes small { margin: 0; color: var(--muted); font-size: 12.5px; }
+
+/* diagnose / docker / ssh */
+.ng-report-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ng-report-head h3 { margin: 0 auto 0 0; }
+.ng-report.bad { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--red) 40%, transparent), var(--shadow-card); }
+.ng-report-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.ng-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.ng-tile { border-radius: 20px; padding: 14px; background: var(--tile); display: grid; gap: 4px; }
+.ng-tile small { color: var(--muted); overflow-wrap: anywhere; }
+.ng-tile-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.ng-usage { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; color: var(--text-2); margin: 4px 0; }
+.ng-list { display: grid; gap: 6px; max-height: 360px; overflow: auto; }
+.ng-list > div { display: flex; justify-content: space-between; gap: 10px; padding: 8px 12px; border-radius: 14px; background: var(--tile); }
+.ng-list small { color: var(--muted); }
+.ng-server .ng-proto-actions { margin-top: 10px; }
+
+/* dashboard */
+.ng-dash { display: grid; gap: 14px; }
+.ng-dash-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.ng-kpi { padding: 12px 14px; border-radius: 18px; background: var(--tile); display: grid; gap: 6px; justify-items: start; }
+.ng-kpi span { color: var(--muted); font-size: 12.5px; }
+.ng-kpi b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.ng-dash-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.ng-dash-row { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 18px; background: var(--tile); cursor: pointer; transition: background .25s var(--ease); }
+.ng-dash-row:hover { background: var(--tile-hover); }
+.ng-dash-row > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ng-dash-row small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ng-dash-row .ng-logo { width: 32px; height: 32px; border-radius: 10px; }
+.ng-log-toolbar select, .ng-log-toolbar input { min-height: 40px; }
+
+@media (max-width: 980px) {
+  .ng-login { grid-template-columns: 1fr; }
+  .ng-dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .ng-proto-grid { grid-template-columns: 1fr; }
+  .ng-slot-actions { width: 100%; }
+  .ng-slot-actions .pill-btn { flex: 1; }
+  .ng-login-stage { min-height: 300px; border-radius: 22px; padding: 14px; }
+  .ng-login-info { grid-template-columns: 1fr 1fr; }
+  .ng-login-actions .pill-btn, .ng-proto-actions .pill-btn { flex: 1 1 auto; min-height: 44px; }
+  .ng-cfg > div { grid-template-columns: 1fr; }
+  .card.span6.ng-report, .card.span6.ng-server, .card.span6 { grid-column: span 12; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ng-active-badge, .ng-switch-arrow, .ng-timeline li.current i, .ng-slot.is-switching .ng-proto { animation: none; }
+}
