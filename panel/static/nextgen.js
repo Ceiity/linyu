@@ -144,10 +144,10 @@ async function login(page="login",seq=state.renderSeq){
     <div class="card span12 ng-chips" role="tablist">${slots.map(x=>`<button role="tab" class="ng-chip ${x.slot===NG.login.slot?"on":""}" onclick="ngPickSlot('${q(x.slot)}')"><i class="dot ${x.online?"g":"o"}"></i>${safeText(x.display_name)}<small>${LABEL[x.active]}</small></button>`).join("")}</div>
     <div class="card span12 ng-login" id="ngLogin"><div class="ng-login-stage" id="ngStage"></div><div class="ng-login-side" id="ngSide"></div></div>
   </section>`;
-  NG.login.taskId=""; NG.login.gen=0; NG.login.seq=0; NG.login.last=null;
+  NG.login.taskId=""; NG.login.gen=0; NG.login.started=0; NG.login.seq=0; NG.login.last=null;
   ngPoll(true);
 }
-window.ngPickSlot = slot => { if(slot===NG.login.slot) return; NG.login.slot=slot; NG.login.taskId=""; NG.login.gen=0; NG.login.seq=0; NG.login.last=null; document.querySelectorAll(".ng-chip").forEach(el=>el.classList.toggle("on",el.getAttribute("onclick").includes("'"+slot+"'"))); ngPoll(true); };
+window.ngPickSlot = slot => { if(slot===NG.login.slot) return; NG.login.slot=slot; NG.login.taskId=""; NG.login.gen=0; NG.login.started=0; NG.login.seq=0; NG.login.last=null; document.querySelectorAll(".ng-chip").forEach(el=>el.classList.toggle("on",el.getAttribute("onclick").includes("'"+slot+"'"))); ngPoll(true); };
 function stopPoll(){ clearTimeout(NG.login.timer); NG.login.timer=null; }
 async function ngPoll(force=false){
   stopPoll();
@@ -158,8 +158,8 @@ async function ngPoll(force=false){
   catch(e){ if(state.page==="login") NG.login.timer=setTimeout(ngPoll,4000); return; }
   if(state.page!=="login" || slot!==NG.login.slot) return;
   // Drop stale responses: an older task (generation) must never overwrite a newer one.
-  if(d.task_id && NG.login.taskId && d.task_id!==NG.login.taskId && (d.generation||0) < NG.login.gen) { NG.login.timer=setTimeout(ngPoll,800); return; }
-  if(d.task_id && d.task_id!==NG.login.taskId){ NG.login.taskId=d.task_id; NG.login.gen=d.generation||0; NG.login.seq=0; force=true; if(d.qr?.unchanged){ return ngPoll(true); } }
+  if(d.task_id && NG.login.taskId && d.task_id!==NG.login.taskId && (d.started_at||0) < (NG.login.started||0)) { NG.login.timer=setTimeout(ngPoll,800); return; }
+  if(d.task_id && d.task_id!==NG.login.taskId){ NG.login.taskId=d.task_id; NG.login.gen=d.generation||0; NG.login.started=d.started_at||0; NG.login.seq=0; force=true; if(d.qr?.unchanged){ return ngPoll(true); } }
   drawLogin(d, force);
   const live = d.task_id && !d.terminal;
   NG.login.timer = setTimeout(ngPoll, document.hidden?4000: live?1200:6000);
@@ -227,7 +227,7 @@ window.ngScreenClick = async ev => {
 window.ngLoginAct = action => withBusy("处理中", async()=>{
   const body = {slot:NG.login.slot, action, task_id:NG.login.taskId};
   const t = await req("/api/ng/login",{method:"POST",body:JSON.stringify(body)});
-  if(action==="request"||action==="restart"){ NG.login.taskId=t.task_id; NG.login.gen=t.generation; NG.login.seq=0; }
+  if(action==="request"||action==="restart"){ NG.login.taskId=t.task_id; NG.login.gen=t.generation; NG.login.started=t.started_at||0; NG.login.seq=0; }
   if(action==="cancel") toast("已取消登录申请");
   drawLogin(t, true); ngPoll(action!=="refresh");
 });
@@ -324,6 +324,7 @@ window.dashboard = async function(page="dashboard",seq=state.renderSeq){
   const sys = state.data?.system || {};
   const s = d.summary||{};
   const host = $("#content .grid") || $("#content");
+  document.querySelectorAll("#content .ng-dash").forEach(x=>x.remove());
   const el = document.createElement("div"); el.className="card span12 ng-dash";
   const rows = (d.slots||[]).slice(0,6).map(x=>`<div class="ng-dash-row" onclick="ngGoLogin('${q(x.slot)}')">${logo(x.active)}<div><b>${safeText(x.display_name)}</b><small>${x.online?`${safeText(x.nickname||"")} ${safeText(x.uin||"")}`:"未登录"}</small></div>${x.online?pill("在线","green"):pill("离线","grey")}${(x.onebot||{}).connected?pill("OneBot","green"):pill("OneBot","orange")}</div>`).join("");
   el.innerHTML = `<div class="ng-dash-grid">

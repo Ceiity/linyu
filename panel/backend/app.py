@@ -2686,7 +2686,7 @@ def ng_busy(slot: str) -> str:
         kind = str(t.kind)
         if kind.startswith(NG_CRITICAL_KINDS):
             return "%s（任务 %s）" % (t.title, t.id)
-        if kind.startswith(("protocol.", "snowluma.")) and slot in t.title and kind != "protocol.switch":
+        if kind.startswith(("protocol.", "snowluma.")) and kind != "protocol.switch" and re.search(r"(?<![0-9A-Za-z])%s(?![0-9A-Za-z])" % re.escape(slot), str(t.title)):
             return "%s（任务 %s）" % (t.title, t.id)
     return ""
 
@@ -3381,6 +3381,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_api(api(True, t.to_dict()))
             if path == "/api/ng/login":
                 action = str(data.get("action") or "request")
+                if slot not in mgr.slots():
+                    raise ValueError("机器人不存在：%s" % (slot or "未指定"))
                 task_id = str(data.get("task_id") or "")
                 if action in ("request", "restart"):
                     if mgr.store.slot(slot).get("switching"):

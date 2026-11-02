@@ -262,12 +262,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Ceiity/linyu/main/install.sh
 
 ### 8.1 自动化测试（`python3 -m unittest discover -s tests`，`bash scripts/validate.sh`）
 
-59 项全部通过，含新增 33 项（`tests/test_ng.py`）：
+60 项全部通过，含新增 34 项（`tests/test_ng.py`）：
 
 * 错误码：NapCat 过期字符串、`登录失败: [...]` 保留 `serverErrorCode`、`140022008/010/011`、未知码保留原文、拒绝分类、`ErrType/ErrCode` 日志解析、SnowLuma 日志事件。
 * VNC：内置 RFB 3.8 + VNC 认证测试服务器——认证、整帧读取、窗口裁剪、点击坐标映射、错误密码。
 * 登录状态机：完整时间线、单任务 / 重新申请 generation、二维码 seq 与 unchanged、自动换码上限 → EXPIRED、拒绝、总超时与确认超时、预检失败、连续错误上限、旧任务操作被拒绝。
-* 协议端：SnowLuma OneBot 配置与 compose（仅 127.0.0.1、权限、`.env` 0600）、NapCat→SnowLuma→NapCat 双向切换（重启策略、AstrBot 未被重启 / 修改）、目标启动失败回滚、就绪失败回滚、禁止启动非当前协议端、一致性守护、并发切换拒绝、关键任务阻止切换、`/proc/net/tcp` 连接识别、诊断报告。
+* 协议端：SnowLuma OneBot 配置与 compose（仅 127.0.0.1、权限、`.env` 0600）、NapCat→SnowLuma→NapCat 双向切换（重启策略、AstrBot 未被重启 / 修改）、目标启动失败回滚、启动阶段异常回滚、就绪失败回滚、禁止启动非当前协议端、一致性守护、并发切换拒绝、关键任务阻止切换、`/proc/net/tcp` 连接识别、诊断报告。
 * SSH：密码加密 / 不落明文 / 文件权限、输入校验、环境评估。
 * `shellcheck -S error`、`pyflakes`、`node --check`、`docker compose config` 通过。
 

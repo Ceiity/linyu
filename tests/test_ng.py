@@ -468,6 +468,17 @@ class ProtocolSwitchTest(unittest.TestCase):
         self.assertFalse(self.d.c["snowluma01"]["running"])
         self.assertFalse(self.m.store.slot("napcat01").get("switching"))
 
+    def test_protocol_error_after_stop_rolls_back(self):
+        def boom(slot):
+            raise ProtocolError("目标端异常")
+        self.m.adapters["snowluma"].activate = boom
+        res = self.m.switch("napcat01", "snowluma", log=lambda s: None)
+        self.assertFalse(res["ok"])
+        self.assertTrue(res["rolled_back"])
+        self.assertTrue(self.d.c["napcat01"]["running"])
+        self.assertEqual(self.d.c["napcat01"]["restart"], "always")
+        self.assertEqual(self.m.active("napcat01"), "napcat")
+
     def test_not_ready_rolls_back(self):
         self.m.adapters["snowluma"].ready = lambda slot: (False, "QQ 未启动")
         import nailong_ng.manager as mm

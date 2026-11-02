@@ -688,8 +688,8 @@ class NapCatAdapter(ProtocolAdapter):
             version = super().get_version(slot)
             if version in ("latest", "base", ""):
                 version = (st.get("image") or "").rsplit("/", 1)[-1]
-        if st.get("running") and version.startswith("v"):
-            self._version_cache[key] = version
+        if st.get("running"):
+            self._version_cache[key] = version  # cache misses too: one log scan per container start
         return version
 
     def webui(self, slot: str, path: str, timeout: int = 8) -> dict:

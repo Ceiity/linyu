@@ -225,6 +225,7 @@ class ProtocolManager:
             log(msg)
             return {"ok": False, "slot": slot, "active": current, "rolled_back": restored, "message": msg, "reason": reason, "warnings": warnings}
 
+        src_stopped = False
         try:
             # ④ stop current – must be fully stopped before the target touches the account
             log("④ 停止 %s" % LABELS[current])
@@ -234,6 +235,7 @@ class ProtocolManager:
                 src.activate(slot)
                 self.store.update_slot(slot, switching=False, switch_target="")
                 raise ProtocolError("%s 无法停止，已放弃切换" % LABELS[current])
+            src_stopped = True
             # ⑦ connection config for the target (before it starts)
             ws_url, token = self.astrbot.ws_url(slot), self.host.reverse_token
             changed = dst.apply_onebot(slot, ws_url, token)
@@ -291,7 +293,9 @@ class ProtocolManager:
             log("⑨ 切换完成：%s 现在使用 %s" % (name, LABELS[target]))
             return {"ok": True, "slot": slot, "active": target, "changed": True, "needs_login": not login.get("online"),
                     "login": login, "link": link, "warnings": warnings, "snapshots": {k: str(v) for k, v in snaps.items() if v}}
-        except ProtocolError:
+        except ProtocolError as e:
+            if src_stopped:
+                return rollback(str(e))
             self.store.update_slot(slot, switching=False, switch_target="")
             raise
         except Exception as e:

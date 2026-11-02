@@ -147,6 +147,8 @@ class LoginTask:
             self.qr = {**qr, "seq": self.qr_seq, "task_id": self.id, "issued_at": self.qr_issued_at}
             if not first:
                 self.qr_refreshes += 1
+                if qr.get("kind") == "url":
+                    self.scanned_at = 0.0  # a new code restarts the scan → confirm window
             self.step("QR_FETCH")
         if first:
             self.event(reason or "二维码已就绪")
@@ -688,10 +690,10 @@ class SnowLumaLoginDriver(LoginDriver):
         st = self.adapter.get_login_status(slot, quick=True)
         if st.get("online"):
             return {"state": "SUCCESS", "state_text": "登录成功", "account": {"uin": st.get("uin", ""), "nickname": st.get("nickname", "")}}
-        logs = self.adapter.docker.logs(self.adapter.container(slot), 400, str(int(task.started) - 2))
-        seen = task.notes.setdefault("log_seen", 0)
-        events = parse_snowluma_log(logs, task.state)
-        for ev in events[seen:]:
+        logs = self.adapter.docker.logs(self.adapter.container(slot), 3000, str(int(task.started) - 2))
+        seen = set(task.notes.setdefault("log_seen", []))
+        events = [ev for ev in parse_snowluma_log(logs, task.state) if ev["line"] not in seen]
+        for ev in events:
             if ev["kind"] == "awaiting":
                 task.event("SnowLuma 已注入 QQ，等待扫码")
             elif ev["kind"] == "identity":
@@ -704,7 +706,7 @@ class SnowLumaLoginDriver(LoginDriver):
                 obs["account"] = {"uin": ev.get("uin", "")}
             elif ev.get("error"):
                 obs.setdefault("warnings", []).append(ev["error"])
-        task.notes["log_seen"] = len(events)
+        task.notes["log_seen"] = (task.notes["log_seen"] + [ev["line"] for ev in events])[-300:]
         if self.polls % 4 == 0:
             sv = self.adapter.supervisor(slot)
             qq = (sv.get("programs") or {}).get("qq")
