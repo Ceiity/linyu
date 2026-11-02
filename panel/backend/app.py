@@ -43,7 +43,7 @@ except Exception:
     hashes = serialization = padding = rsa = AESGCM = None
     LOGIN_CRYPTO_AVAILABLE = False
 
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.5.0"
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", "/opt/astrbot/AstrBot-Deploy"))
 INSTALL_PREFIX = Path(os.environ.get("INSTALL_PREFIX", "/opt/astrbot"))
 STATE_FILE = Path(os.environ.get("STATE_FILE", str(INSTALL_PREFIX / ".env")))
@@ -770,6 +770,7 @@ def ip_geo(ip: str) -> dict:
         if not data.get("err"):
             geo = {
                 "country": "中国",
+                "code": "CN",
                 "region": str(data.get("pro") or "").strip(),
                 "city": str(data.get("city") or "").strip(),
                 "isp": str(data.get("addr") or "").replace(str(data.get("pro") or ""), "").replace(str(data.get("city") or ""), "").strip(),
@@ -779,12 +780,13 @@ def ip_geo(ip: str) -> dict:
     except Exception:
         pass
     try:
-        url = "http://ip-api.com/json/%s?lang=zh-CN&fields=status,country,regionName,city,isp,query" % quote(ip)
+        url = "http://ip-api.com/json/%s?lang=zh-CN&fields=status,country,countryCode,regionName,city,isp,query" % quote(ip)
         with urlrequest.urlopen(url, timeout=3) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="replace"))
         if data.get("status") == "success":
             geo = {
                 "country": str(data.get("country") or ""),
+                "code": str(data.get("countryCode") or ""),
                 "region": str(data.get("regionName") or ""),
                 "city": str(data.get("city") or ""),
                 "isp": str(data.get("isp") or ""),
@@ -795,6 +797,42 @@ def ip_geo(ip: str) -> dict:
         pass
     remember_ip_geo(ip, {})
     return {}
+
+
+GEO_LOOKUPS: set[str] = set()
+GEO_LOOKUP_LOCK = threading.Lock()
+
+
+def cached_geo(ip: str) -> dict:
+    """Geo for the dashboard without blocking it: answer from cache and look
+    the address up in the background when the cache has nothing fresh."""
+    ip = str(ip or "").strip()
+    try:
+        if not ipaddress.ip_address(ip).is_global:
+            return {}
+    except ValueError:
+        return {}
+    hit = IP_GEO_CACHE.get(ip)
+    if hit:
+        age = time.time() - float(hit.get("ts", 0))
+        data = hit.get("data") or {}
+        # A failed lookup is retried after 10 minutes, a good one after a day.
+        if age < (86400 if data else 600):
+            return dict(data)
+    with GEO_LOOKUP_LOCK:
+        if ip in GEO_LOOKUPS:
+            return {"pending": True}
+        GEO_LOOKUPS.add(ip)
+
+    def lookup():
+        try:
+            ip_geo(ip)
+        finally:
+            with GEO_LOOKUP_LOCK:
+                GEO_LOOKUPS.discard(ip)
+
+    threading.Thread(target=lookup, daemon=True).start()
+    return {"pending": True}
 
 
 def format_login_location(ip: str, origin: str | None = None) -> str:
@@ -1771,7 +1809,7 @@ def dashboard_data(origin: str | None = None) -> dict:
     code, docker_ps = docker(["ps", "-a", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"], timeout=20)
     _, ports = run_process(["bash", "-lc", "ss -ltnp 2>/dev/null | head -n 80 || true"], timeout=20)
     recent = AUDIT_LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-20:] if AUDIT_LOG.exists() else []
-    return {"deployed": bool(astr.get("exists")), "public_ip": public_ip(), "private_ip": private_ip(), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署", "astrbot": astr, "napcats": parse_napcat_index(origin), "docker": {"ok": code == 0, "containers": docker_ps}, "system": system_metrics(), "ports": ports, "recent": recent, "network": st.get("NETWORK_NAME", "astrbot_network"), "history": metric_history()}
+    return {"deployed": bool(astr.get("exists")), "public_ip": public_ip(), "private_ip": private_ip(), "deploy_info": deploy.read_text(encoding="utf-8", errors="replace") if deploy.exists() else "尚未部署", "astrbot": astr, "napcats": parse_napcat_index(origin), "docker": {"ok": code == 0, "containers": docker_ps}, "system": system_metrics(), "ports": ports, "recent": recent, "network": st.get("NETWORK_NAME", "astrbot_network"), "history": metric_history(), "geo": cached_geo(public_ip())}
 
 
 def astrbot_data(origin: str | None = None) -> dict:
