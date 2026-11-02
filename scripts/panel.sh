@@ -38,9 +38,14 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 PY
   then
-    apt-get update -y >/dev/null
-    apt-get install -y python3-pip >/dev/null
-    python3 -m pip install --break-system-packages -r "$PROJECT_DIR/panel/requirements.txt" >/dev/null 2>&1 || python3 -m pip install -r "$PROJECT_DIR/panel/requirements.txt" >/dev/null
+    # Distro packages first: no PyPI needed and nothing to compile.
+    apt-get update -y >/dev/null 2>&1 || true
+    apt-get install -y python3-qrcode python3-pil python3-cryptography >/dev/null 2>&1 || true
+    if ! python3 -c 'import qrcode, PIL.Image, cryptography' >/dev/null 2>&1; then
+      apt-get install -y python3-pip >/dev/null 2>&1 || true
+      setup_pip_mirror || true
+      python3 -m pip install --break-system-packages -r "$PROJECT_DIR/panel/requirements.txt" >/dev/null 2>&1 || python3 -m pip install -r "$PROJECT_DIR/panel/requirements.txt" >/dev/null 2>&1 || warn "Python 依赖安装失败：网页扫码不受影响，但群内发二维码图片需要 python3-qrcode。"
+    fi
   fi
   if systemctl list-unit-files astrbot-deploy-web.service >/dev/null 2>&1; then
     systemctl disable --now astrbot-deploy-web.service >/dev/null 2>&1 || true

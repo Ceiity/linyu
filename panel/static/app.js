@@ -268,13 +268,17 @@ function napSheet(n,u){const item=(ic,label,js,cls="")=>`<button class="sheet-it
 /* QR login: one modal, one state machine.
    loading -> ready -> (expired | error) -> refresh -> ready ... -> success.
    Every async step checks its session id so a closed or reopened modal is never written to by a stale poll. */
-const QR_TTL=110000;
-function qrSet(st,text,sub){const m=$("#qrx");if(!m)return;m.dataset.state=st;const t=$("#qrxStatus");if(t&&text!=null)t.textContent=text;const s=$("#qrxSub");if(s&&sub!=null)s.textContent=sub;const step=st==="success"?3:st==="ready"?2:1;m.querySelectorAll(".qrx-step").forEach((el,i)=>{el.classList.toggle("done",i+1<step);el.classList.toggle("active",i+1===step)});const b=$("#qrxRefresh");if(b){b.disabled=st==="loading"||st==="refreshing"||st==="success";b.classList.toggle("attention",st==="expired"||st==="error")}}
+const QR_TTL=150000;
+function qrSet(st,text,sub,tone){const m=$("#qrx");if(!m)return;m.dataset.state=st;m.dataset.tone=tone||"";const t=$("#qrxStatus");if(t&&text!=null)t.textContent=text;const s=$("#qrxSub");if(s&&sub!=null)s.textContent=sub;const step=st==="success"?4:st==="initializing"?3:st==="scanned"?2:1;m.querySelectorAll(".qrx-step").forEach((el,i)=>{el.classList.toggle("done",i+1<step);el.classList.toggle("active",i+1===step)});const b=$("#qrxRefresh");if(b){b.disabled=["loading","refreshing","success","initializing"].includes(st);b.classList.toggle("attention",st==="expired"||st==="error")}}
+function qrVeil(text){const v=$(".qrx-veil-text");if(v)v.textContent=text}
+function qrSvgFor(url){try{if(!url||typeof qrcode!=="function")return "";const qr=qrcode(0,"M");qr.addData(String(url));qr.make();return qr.createSvgTag({cellSize:8,margin:2,scalable:true})}catch(e){console.debug(e);return ""}}
+function qrSetCode(svg,url){const box=$("#qrxCode");if(!box)return;const html=qrSvgFor(url)||svg;if(!html)return;box.innerHTML=html;state.qrUrl=url||"";state.qrLoadedAt=Date.now()}
+function qrErrText(err){if(!err)return "";const code=err.code?`（错误码 ${err.code}）`:"";return `${err.message||"登录失败"}${code}`}
 function qrAlive(sid){return state.qrSession===sid&&!!$("#qrx")&&!$("#modal")?.classList.contains("hidden")}
 function qrStop(){if(state.qrTimer){clearTimeout(state.qrTimer);clearInterval(state.qrTimer);state.qrTimer=null}}
 async function showQrLogin(name,url){
-  qrStop();const sid=state.qrSession=(state.qrSession||0)+1;
-  openModal(`<div id="qrx" class="qrx" data-state="loading" data-name="${q(name)}"><div class="qrx-head"><h3>${safeText(botName(name))} · 扫码登录</h3><p id="qrxSub" class="muted">打开手机 QQ，扫一扫下方二维码</p></div><ol class="qrx-steps"><li class="qrx-step active"><i>1</i><span>获取二维码</span></li><li class="qrx-step"><i>2</i><span>手机确认</span></li><li class="qrx-step"><i>3</i><span>登录成功</span></li></ol><div class="qrx-stage"><div class="qrx-skel"></div><div id="qrxCode" class="qrx-code"></div><div class="qrx-veil"><span class="spin"></span><b class="qrx-veil-text">二维码已失效</b></div><div class="qrx-done"><svg class="qrx-check" viewBox="0 0 120 120" aria-hidden="true"><circle class="qrx-ring" cx="60" cy="60" r="54"/><circle class="qrx-disc" cx="60" cy="60" r="46"/><path class="qrx-tick" d="M39 61.5 53.5 76 82 46"/></svg><b id="qrxDoneTitle">登录成功</b><small id="qrxNick"></small></div></div><div class="qrx-status"><i></i><span id="qrxStatus">正在获取二维码…</span></div><button id="qrxRefresh" class="primary qrx-refresh" disabled onclick="refreshNapQr('${q(name)}')">${icon("refresh")}刷新二维码</button></div>`,null);
+  qrStop();const sid=state.qrSession=(state.qrSession||0)+1;state.qrUrl="";state.qrScanned=false;state.qrLastErr="";
+  openModal(`<div id="qrx" class="qrx" data-state="loading" data-name="${q(name)}"><div class="qrx-head"><h3>${safeText(botName(name))} · 扫码登录</h3><p id="qrxSub" class="muted">打开手机 QQ，扫一扫下方二维码</p></div><ol class="qrx-steps"><li class="qrx-step active"><i>1</i><span>扫码</span></li><li class="qrx-step"><i>2</i><span>手机确认</span></li><li class="qrx-step"><i>3</i><span>登录</span></li></ol><div class="qrx-stage"><div class="qrx-skel"></div><div id="qrxCode" class="qrx-code"></div><div class="qrx-scan"><span class="qrx-phone">${icon("check")}</span><b>已扫码</b><small>请在手机上确认登录</small></div><div class="qrx-veil"><span class="spin"></span><b class="qrx-veil-text">二维码已失效</b></div><div class="qrx-done"><svg class="qrx-check" viewBox="0 0 120 120" aria-hidden="true"><circle class="qrx-ring" cx="60" cy="60" r="54"/><circle class="qrx-disc" cx="60" cy="60" r="46"/><path class="qrx-tick" d="M39 61.5 53.5 76 82 46"/></svg><b id="qrxDoneTitle">登录成功</b><small id="qrxNick"></small></div></div><div class="qrx-status"><i></i><span id="qrxStatus">正在获取二维码…</span></div><button id="qrxRefresh" class="primary qrx-refresh" disabled onclick="refreshNapQr('${q(name)}')">${icon("refresh")}刷新二维码</button></div>`,null);
   $("#modal .modal-card")?.classList.add("qr-mode");
   await loadNapQr(name,sid);
 }
@@ -285,30 +289,33 @@ function showAlreadyLogin(name, info={}){
   setTimeout(()=>{if(!$("#modal")?.classList.contains("hidden"))closeModal()},1600);
 }
 
-function qrSuccess(name,info,already,sid){if(!qrAlive(sid))return;qrStop();const nick=info?.nick||info?.nickname||"",uin=info?.uin||"";$("#qrxDoneTitle").textContent=already?"已经登录":"登录成功";$("#qrxNick").textContent=[nick,uin].filter(Boolean).join(" · ")||"QQ 已连接";qrSet("success",already?"这个机器人已在线，无需扫码":"已连接 QQ，窗口即将关闭",already?"无需重复扫码":"扫码完成");if(!already)toast(`${botName(name)} 登录成功`);invalidateCache("dashboard","napcat","pool");setTimeout(()=>{if(qrAlive(sid))closeModal();softRefreshPage()},already?1600:1900)}
+function qrSuccess(name,d,already,sid){if(!qrAlive(sid))return;qrStop();const info=d?.login_info||{},nick=info.nick||info.nickname||"",uin=info.uin||"";$("#qrxDoneTitle").textContent=already?"已经登录":"登录成功";$("#qrxNick").textContent=[nick,uin].filter(Boolean).join(" · ")||"QQ 已连接";qrSet("success",already?"这个机器人已在线，无需扫码":"已连接 QQ，窗口即将关闭",already?"无需重复扫码":"扫码完成");if(!already)toast(`${botName(name)} 登录成功`);invalidateCache("dashboard","napcat","pool");setTimeout(()=>{if(qrAlive(sid))closeModal();softRefreshPage()},already?1600:1900)}
 async function loadNapQr(name,sid=state.qrSession){
   try{
     const d=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"qrcode"})});
     if(!qrAlive(sid))return;
-    if(d.already_login)return qrSuccess(name,d.login_info||{},true,sid);
-    const box=$("#qrxCode");if(box)box.innerHTML=d.svg||"";
-    state.qrLoadedAt=Date.now();qrSet("ready","等待扫码…","打开手机 QQ，扫一扫下方二维码");
+    if(d.is_login||d.already_login)return qrSuccess(name,d,true,sid);
+    qrSetCode(d.svg,d.qrcode_url);qrSet("ready","等待扫码…","打开手机 QQ，扫一扫下方二维码");
     qrPoll(name,sid);
-  }catch(e){if(!qrAlive(sid))return;$(".qrx-veil-text").textContent="获取失败";qrSet("error",e.message||"获取二维码失败，点刷新再试")}
+  }catch(e){if(!qrAlive(sid))return;qrVeil("获取失败");qrSet("error",e.message||"获取二维码失败，点刷新再试",null,"bad")}
 }
-async function refreshNapQr(name){const sid=state.qrSession,b=$("#qrxRefresh");if(!qrAlive(sid)||b?.disabled)return;qrStop();qrSet($("#qrxCode")?.innerHTML?"refreshing":"loading","正在刷新二维码…");const t0=Date.now();await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"refresh"})}).catch(()=>{});await new Promise(r=>setTimeout(r,Math.max(0,700-(Date.now()-t0))));if(qrAlive(sid))await loadNapQr(name,sid)}
+async function refreshNapQr(name){const sid=state.qrSession,b=$("#qrxRefresh");if(!qrAlive(sid)||b?.disabled)return;qrStop();state.qrScanned=false;state.qrLastErr="";qrVeil("");qrSet($("#qrxCode")?.innerHTML?"refreshing":"loading","正在刷新二维码…");try{const d=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"refresh"})});if(!qrAlive(sid))return;if(d.is_login)return qrSuccess(name,d,true,sid);if(d.restarting){qrVeil("正在重连");qrSet("refreshing","NapCat 正在重新连接 QQ 登录服务…");return qrPoll(name,sid)}if(d.qrcode_url||d.svg){qrSetCode(d.svg,d.qrcode_url);qrSet("ready","已换新二维码，请扫码","打开手机 QQ，扫一扫下方二维码");return qrPoll(name,sid)}await loadNapQr(name,sid)}catch(e){if(!qrAlive(sid))return;qrVeil("刷新失败");qrSet("error",e.message||"刷新失败，稍后再试",null,"bad")}}
 function qrPoll(name,sid){qrStop();state.qrTimer=setTimeout(()=>pollNapQr(name,sid),2000)}
 async function pollNapQr(name,sid=state.qrSession){
   if(!qrAlive(sid)){qrStop();return}
   try{
-    const r=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"status"})});
+    const d=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"status",known_url:state.qrUrl||""})});
     if(!qrAlive(sid))return;
-    const data=r.data||{};
-    if(data.isLogin)return qrSuccess(name,data.loginInfo||{},false,sid);
-    const expired=data.isOffline||/过期|失效|expired|timeout/i.test(String(data.loginError||""))||Date.now()-(state.qrLoadedAt||0)>QR_TTL;
-    if(expired){$(".qrx-veil-text").textContent="二维码已失效";qrSet("expired",data.isOffline?"账号已离线，请刷新后重新扫码":"二维码已过期，点刷新换一张");return}
-    if(data.loginError)qrSet("ready",String(data.loginError));
-  }catch(e){}
+    if(d.is_login)return qrSuccess(name,d,false,sid);
+    const err=d.error||{},cur=$("#qrx")?.dataset.state;
+    if(d.qrcode_url||d.svg){const wasScanned=state.qrScanned;qrSetCode(d.svg,d.qrcode_url);state.qrScanned=false;if(wasScanned&&!d.scanned&&!d.initializing){qrSet("ready","手机上取消了登录，已换新二维码，请重新扫码",null,"warn")}else if(cur!=="ready"||!err.raw){qrSet("ready","等待扫码…","打开手机 QQ，扫一扫下方二维码")}}
+    if(d.initializing){qrVeil("正在登录");qrSet("initializing","手机已确认，正在启动 QQ…","马上就好");return qrPoll(name,sid)}
+    if(d.reconnecting){qrVeil("正在重连");qrSet("refreshing","NapCat 正在重新连接 QQ 登录服务…");return qrPoll(name,sid)}
+    if(d.scanned){state.qrScanned=true;if(cur!=="scanned")qrSet("scanned","已扫码，请在手机上点「确认登录」","等待手机确认");return qrPoll(name,sid)}
+    if(err.raw&&err.raw!==state.qrLastErr){state.qrLastErr=err.raw;if(err.expired){qrVeil("二维码已过期");qrSet("expired","二维码已过期，点刷新换一张",null,"bad");return}qrVeil(err.already?"账号已在别处登录":"登录失败");qrSet("error",qrErrText(err),"可以刷新二维码重新扫码","bad");return}
+    if(state.qrScanned&&!d.scanned&&!d.qrcode_url){state.qrScanned=false;qrSet("ready","手机上取消了登录，请重新扫码",null,"warn")}
+    if(!d.qrcode_url&&cur==="ready"&&Date.now()-(state.qrLoadedAt||0)>QR_TTL){qrVeil("二维码已过期");qrSet("expired","二维码已过期，点刷新换一张",null,"bad");return}
+  }catch(e){if(qrAlive(sid)){const t=$("#qrxStatus");if(t&&$("#qrx")?.dataset.state==="ready")t.textContent="网络波动，正在重试…"}}
   if(qrAlive(sid))qrPoll(name,sid);
 }
 async function napAdd(){const count=Number($("#napCount")?.value||1);if(!Number.isInteger(count)||count<1||count>999)return toast("数量必须是 1-999","error");return withBusy("正在提交",async()=>{const t=await req("/api/napcat/action",{method:"POST",body:JSON.stringify({action:"add",count})});state.napCreating[t.id]={count,progress:Number(t.progress||0),title:t.title};toast(`正在创建 ${count} 个机器人`,"loading");watchTask(t.id,{napcat:true,okText:`已创建 ${count} 个机器人`,failText:"创建机器人失败",onProgress:x=>{const c=state.napCreating[t.id];if(c){c.progress=Number(x.progress||0);updateCreatingCards()}},onDone:()=>{delete state.napCreating[t.id]}});loadTasks();await softRefreshPage()})}

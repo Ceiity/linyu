@@ -198,7 +198,7 @@ apply_astrbot_default_config(){
     src="${ASTRBOT_CONFIG_FILE}"
   elif [[ -n "${ASTRBOT_CONFIG_URL:-}" ]]; then
     src="${INSTALL_PREFIX}/cmd_config.downloaded.json"
-    curl -fsSL "${ASTRBOT_CONFIG_URL}" -o "$src"
+    curl -fsSL "$(gh_url "${ASTRBOT_CONFIG_URL}")" -o "$src"
   elif [[ -f "${PROJECT_DIR}/templates/astrbot/cmd_config.json" ]]; then
     src="${PROJECT_DIR}/templates/astrbot/cmd_config.json"
   fi

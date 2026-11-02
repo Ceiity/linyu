@@ -191,6 +191,38 @@ class GeoTest(unittest.TestCase):
         self.assertEqual(app.cached_geo(""), {})
 
 
+class QQLoginStateTest(unittest.TestCase):
+    def test_parses_tencent_error_code(self):
+        err = app.parse_qq_login_error('登录失败: [0,{"serverErrorCode":140022013,"message":"当前网络环境不安全"}]')
+        self.assertEqual(err["code"], "140022013")
+        self.assertEqual(err["message"], "当前网络环境不安全")
+        self.assertFalse(err["expired"])
+
+    def test_expired_and_plain_errors(self):
+        self.assertTrue(app.parse_qq_login_error("二维码已过期，请刷新")["expired"])
+        self.assertTrue(app.parse_qq_login_error("当前账号(123)已登录,无法重复登录")["already"])
+        self.assertEqual(app.parse_qq_login_error(""), {})
+        self.assertEqual(app.parse_qq_login_error("登录失败: not-json")["message"], "登录失败")
+
+    def test_phases(self):
+        st = app.qq_login_state({"loginPhase": "qrcode_scanned", "qrLoginAccepted": False})
+        self.assertTrue(st["scanned"]) ; self.assertFalse(st["initializing"])
+        st = app.qq_login_state({"loginPhase": "initializing", "qrLoginAccepted": True})
+        self.assertTrue(st["initializing"]) ; self.assertFalse(st["scanned"])
+        self.assertTrue(app.qq_login_state({"loginPhase": "reconnecting"})["reconnecting"])
+
+    def test_qr_svg_optional(self):
+        out = app.qr_svg_for_text("https://txz.qq.com/p?k=x")
+        self.assertIsInstance(out, str)
+
+    def test_unreachable_napcat_is_readable(self):
+        row = {"name": "napcat99", "webui_port": "1", "token": "t"}
+        app.NAPCAT_CREDENTIAL_CACHE.pop("napcat99", None)
+        with self.assertRaises(app.NapCatError) as ctx:
+            app.napcat_webui_call(row, "/QQLogin/CheckLoginStatus", timeout=1)
+        self.assertIn("NapCat", str(ctx.exception))
+
+
 class PluginMigrationTest(unittest.TestCase):
     def test_legacy_plugin_replaced(self):
         root = Path(app.load_config()["astrbot_plugin_dir"])
