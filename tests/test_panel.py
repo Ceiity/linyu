@@ -171,6 +171,26 @@ class MetricHistoryTest(unittest.TestCase):
         self.assertEqual(len(app.metric_history()["mem"]), app.METRIC_SAMPLES.maxlen)
 
 
+class GeoTest(unittest.TestCase):
+    def test_cached_geo_never_blocks(self):
+        app.IP_GEO_CACHE.pop("1.0.0.7", None)
+        original = app.ip_geo
+        app.ip_geo = lambda ip: app.remember_ip_geo(ip, {"country": "中国", "code": "CN", "region": "广东", "city": "广州", "isp": "电信"})
+        try:
+            self.assertTrue(app.cached_geo("1.0.0.7").get("pending"))
+            for _ in range(50):
+                if "1.0.0.7" in app.IP_GEO_CACHE:
+                    break
+                import time as _t; _t.sleep(0.02)
+            self.assertEqual(app.cached_geo("1.0.0.7")["city"], "广州")
+        finally:
+            app.ip_geo = original
+
+    def test_private_and_bad_ips_resolve_empty(self):
+        self.assertEqual(app.cached_geo("10.0.0.8"), {})
+        self.assertEqual(app.cached_geo(""), {})
+
+
 class PluginMigrationTest(unittest.TestCase):
     def test_legacy_plugin_replaced(self):
         root = Path(app.load_config()["astrbot_plugin_dir"])
