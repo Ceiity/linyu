@@ -727,8 +727,8 @@ label {
   }
 }
 
-/* Wide screens: content and the title bar share one centred column, so
-   nothing hugs the left edge with an empty band on the right. */
+/* Content fills the window at every width; the gutter grows a little on
+   big screens and each page's grid adds columns instead of stretching. */
 .content {
   grid-column: 2;
   min-width: 0;
@@ -736,8 +736,7 @@ label {
   padding: 10px var(--page-pad-r) 40px var(--page-pad-l);
 }
 .app {
-  --content-max: 1760px;
-  --page-pad-l: max(32px, calc((100vw - var(--rail-w) - var(--content-max)) / 2));
+  --page-pad-l: clamp(32px, 2.2vw, 56px);
   --page-pad-r: calc(var(--page-pad-l) + var(--safe-right));
 }
 
@@ -2773,6 +2772,13 @@ pre.code,
 /* ---------- settings list (FlClash list rows) ---------- */
 .settings-page {
   padding-bottom: 84px;
+}
+/* Wide windows: settings groups sit two per row so a label and its
+   field are never a whole screen apart. */
+@media (min-width: 1680px) {
+  .settings-page .set-group {
+    grid-column: span 6;
+  }
 }
 .set-card {
   padding: 4px 0 !important;
