@@ -2353,6 +2353,45 @@ pre.code,
   height: 18px;
 }
 
+/* creating placeholder, fresh rows, upload state */
+.bot-ghost {
+  border: 1.5px dashed rgba(var(--primary-rgb), 0.35);
+  box-shadow: none;
+  background: var(--primary-softer);
+}
+.bot-ghost .bot-avatar .mini-spin {
+  position: relative;
+  border-color: rgba(var(--primary-rgb), 0.25);
+  border-top-color: var(--primary);
+}
+.ghost-bar {
+  height: 8px;
+  border-radius: var(--r-pill);
+}
+.ghost-bar span {
+  border-radius: var(--r-pill);
+}
+.ghost-log {
+  min-height: 44px;
+  margin-top: auto;
+}
+.ghost-log svg {
+  width: 17px;
+  height: 17px;
+}
+@keyframes rowFlash {
+  from {
+    background-color: rgba(var(--primary-rgb), 0.16);
+  }
+}
+.file-row.just-added {
+  animation: rowFlash 1.6s var(--ease);
+}
+.drop.uploading {
+  pointer-events: none;
+  opacity: 0.85;
+}
+
 /* ---------- logs ---------- */
 .log-toolbar {
   display: flex;
@@ -2594,6 +2633,27 @@ pre.code,
 .file-glyph.archive { background: var(--orange-bg); color: var(--orange); }
 .file-row .actions {
   flex-wrap: nowrap;
+}
+.file-name-text {
+  display: grid;
+  min-width: 0;
+}
+.file-sub,
+.file-more {
+  display: none !important;
+}
+.file-sub {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.file-more {
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
 }
 .token-meta {
   display: flex;
@@ -4170,8 +4230,14 @@ html.scroll-locked {
   .log-viewer {
     height: 60vh;
   }
-  .file-row .actions button:not(:first-child) {
+  .file-row .actions button:not(.file-more) {
     display: none;
+  }
+  .file-row .file-sub {
+    display: block !important;
+  }
+  .file-row .file-more {
+    display: inline-flex !important;
   }
   .file-bulk {
     width: 100%;
