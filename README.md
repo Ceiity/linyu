@@ -2,7 +2,7 @@
 
 ## 项目简介
 
-奶龙（AstrBot-Deploy）是一个面向中文用户的 AstrBot + NapCat Docker 一键部署项目，自带「奶龙控制台」Web 面板。
+奶龙（AstrBot-Deploy）是一个面向中文用户的 AstrBot + NapCat / SnowLuma Docker 一键部署项目，自带「奶龙控制台」Web 面板。
 
 在一台全新的 Debian / Ubuntu 服务器上，用户只需要执行一条命令，就可以自动完成 Docker 安装、AstrBot 部署、NapCat 多实例部署、端口分配、Docker Network 配置、健康检查和登录信息保存。
 
@@ -276,6 +276,16 @@ MIT License
 ## 项目商标
 
 Web 控制台内置“奶龙” SVG 商标，文件位置：`panel/static/nailong-robot.svg`。它会自动用于登录页、侧边栏品牌区和浏览器图标，造型是一只圆滚滚的黄色小龙，深色圆角底，适合浅色/深色模式和手机端显示。
+
+## 3.0.0 · Next Generation 2.0（协议端统一管理）
+
+- **SnowLuma 协议端**：与 NapCat 并列，每个账号可单独选择；协议端页卡片显示版本、运行 / 登录状态、Active 标识，支持安装、更新、修复、卸载、日志。只拉取官方镜像 `motricseven7/snowluma`，首次使用需阅读并确认其 LICENSE / EULA（注意 EULA 第 5.4 条关于自动化部署的授权要求）。
+- **协议端切换**：NapCat ⇄ SnowLuma 双向切换，先停旧端再启新端，自动配置 OneBot 反向 WebSocket，校验 AstrBot 连接，失败自动回滚；AstrBot 数据、插件、模型、人格不受影响；后台一致性守护保证同一账号不会被两个协议端同时接管（含重启后）。
+- **登录中心**：统一扫码登录状态机（申请 / 重新申请 / 取消 / 刷新 / 详情 / 日志）、时间线、二维码防覆盖、有界重试与超时；错误码归一化（保留原始码、原文、阶段、时间）。SnowLuma 无二维码接口，面板直接显示容器内 QQ 登录窗口实时画面。
+- **一键诊断**、**Docker 总览**、**统一日志中心**（搜索 / 级别 / 时间筛选 / 实时 / 复制 / 下载）、**SSH 远程部署**（密码 AES-GCM 加密、主机指纹固定）。
+- Token 默认脱敏，日志统一脱敏。
+
+完整说明（架构分析、接口、错误码表、部署 / 升级 / 排障、测试结果）：[`docs/NEXTGEN.md`](docs/NEXTGEN.md)。
 
 ## v2.6.0 更新说明（扫码登录修复、安装加速）
 

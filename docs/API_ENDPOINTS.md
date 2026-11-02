@@ -222,3 +222,6 @@
 
 > 注：如果按“后端 HTTP 入口”而不是“API 接口”统计，再加上 `/`、`/assets/...`、`/files/...` 这 3 类非 API 入口，总入口类型是 67 类。
 
+## NG 2.0 接口（/api/ng/*）
+
+协议端、切换、统一登录、诊断、统一日志、Docker 总览、SSH 远程部署接口见 [`NEXTGEN.md` §9](NEXTGEN.md#9-接口apingng均需登录post-需同源)。
