@@ -43,7 +43,7 @@ except Exception:
     hashes = serialization = padding = rsa = AESGCM = None
     LOGIN_CRYPTO_AVAILABLE = False
 
-APP_VERSION = "2.5.1"
+APP_VERSION = "2.5.2"
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", "/opt/astrbot/AstrBot-Deploy"))
 INSTALL_PREFIX = Path(os.environ.get("INSTALL_PREFIX", "/opt/astrbot"))
 STATE_FILE = Path(os.environ.get("STATE_FILE", str(INSTALL_PREFIX / ".env")))
@@ -3293,7 +3293,8 @@ class Handler(BaseHTTPRequestHandler):
                 info = napcat_webui_call(row, "/QQLogin/GetQQLoginInfo")
                 if int(info.get("code", -1)) == 0:
                     res.setdefault("data", {})["loginInfo"] = info.get("data") or {}
-            audit(user, "napcat.qq.status", {"name": name}, int(res.get("code", -1)) == 0)
+            if (res.get("data") or {}).get("isLogin"):
+                audit(user, "napcat.qq.login_ok", {"name": name}, True)
             return self.send_api(api(int(res.get("code", -1)) == 0, res, res.get("message", "")))
         if action == "qrcode":
             status = napcat_webui_call(row, "/QQLogin/CheckLoginStatus")

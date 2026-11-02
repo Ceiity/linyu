@@ -4693,6 +4693,377 @@ html.scroll-locked {
     grid-column: span 12;
   }
 }
+/* ---------- QR login (state machine: loading / ready / refreshing / expired / error / success) ---------- */
+.modal-card.qr-mode .modal-actions {
+  display: none;
+}
+.qrx {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 2px 2px;
+  text-align: center;
+}
+.qrx-head h3 {
+  font-size: 18px;
+  font-weight: 650;
+}
+.qrx-head p {
+  margin-top: 4px;
+  font-size: 13px;
+}
+.qrx-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.qrx-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color 0.3s var(--ease);
+}
+.qrx-step + .qrx-step::before {
+  content: "";
+  width: 18px;
+  height: 2px;
+  margin-right: 2px;
+  border-radius: 2px;
+  background: var(--line);
+  transition: background-color 0.3s var(--ease);
+}
+.qrx-step i {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--grey-bg);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 750;
+  transition:
+    background-color 0.3s var(--ease),
+    color 0.3s var(--ease),
+    transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.qrx-step.active {
+  color: var(--text);
+}
+.qrx-step.active i {
+  background: var(--primary);
+  color: var(--on-primary);
+  transform: scale(1.12);
+}
+.qrx-step.done {
+  color: var(--text-2);
+}
+.qrx-step.done i {
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+.qrx-step.done + .qrx-step::before,
+.qrx-step.active:not(:first-child)::before {
+  background: var(--primary);
+}
+.qrx[data-state="success"] .qrx-step i {
+  background: #34c759;
+  color: #fff;
+}
+.qrx[data-state="success"] .qrx-step + .qrx-step::before {
+  background: #34c759;
+}
+
+.qrx-stage {
+  position: relative;
+  width: min(248px, 68vw);
+  aspect-ratio: 1;
+  border-radius: 28px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 10px 30px -10px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  transition:
+    background-color 0.35s var(--ease),
+    box-shadow 0.35s var(--ease);
+}
+.qrx-stage > * {
+  position: absolute;
+  inset: 0;
+}
+.qrx-skel {
+  margin: 18px;
+  border-radius: 16px;
+  background: linear-gradient(100deg, #eeeef0 30%, #f8f8fa 50%, #eeeef0 70%);
+  background-size: 300% 100%;
+  animation: qrxShimmer 1.3s linear infinite;
+  transition: opacity 0.25s var(--ease);
+}
+@keyframes qrxShimmer {
+  to {
+    background-position: -150% 0;
+  }
+}
+.qrx-code {
+  padding: 16px;
+  opacity: 0;
+  transform: scale(0.94);
+  transition:
+    opacity 0.3s var(--ease),
+    transform 0.45s cubic-bezier(0.34, 1.4, 0.64, 1),
+    filter 0.3s var(--ease);
+}
+.qrx-code svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.qrx-veil {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #1c1b1a;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s var(--ease);
+}
+.qrx-veil .spin {
+  width: 28px;
+  height: 28px;
+  border-color: rgba(0, 0, 0, 0.12);
+  border-top-color: var(--primary);
+}
+.qrx-veil-text {
+  display: none;
+  font-size: 15px;
+  font-weight: 650;
+}
+.qrx-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text);
+  opacity: 0;
+  pointer-events: none;
+}
+.qrx-check {
+  width: 112px;
+  height: 112px;
+  overflow: visible;
+}
+.qrx-disc {
+  fill: #34c759;
+  transform-origin: 60px 60px;
+  transform: scale(0);
+}
+.qrx-ring {
+  fill: none;
+  stroke: #34c759;
+  stroke-width: 3;
+  opacity: 0;
+  transform-origin: 60px 60px;
+}
+.qrx-tick {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 70;
+  stroke-dashoffset: 70;
+}
+.qrx-done b {
+  margin-top: 6px;
+  font-size: 18px;
+  font-weight: 700;
+  opacity: 0;
+  transform: translateY(6px);
+}
+.qrx-done small {
+  max-width: 90%;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+/* ready */
+.qrx:not([data-state="loading"]) .qrx-skel {
+  opacity: 0;
+  animation: none;
+}
+.qrx[data-state="ready"] .qrx-code,
+.qrx[data-state="refreshing"] .qrx-code,
+.qrx[data-state="expired"] .qrx-code,
+.qrx[data-state="error"] .qrx-code {
+  opacity: 1;
+  transform: none;
+}
+/* refreshing / expired / error: blur the old code, show the veil */
+.qrx[data-state="refreshing"] .qrx-code,
+.qrx[data-state="expired"] .qrx-code,
+.qrx[data-state="error"] .qrx-code {
+  filter: blur(5px);
+}
+.qrx[data-state="refreshing"] .qrx-veil,
+.qrx[data-state="expired"] .qrx-veil,
+.qrx[data-state="error"] .qrx-veil {
+  opacity: 1;
+}
+.qrx[data-state="expired"] .qrx-veil .spin,
+.qrx[data-state="error"] .qrx-veil .spin {
+  display: none;
+}
+.qrx[data-state="expired"] .qrx-veil-text,
+.qrx[data-state="error"] .qrx-veil-text {
+  display: block;
+}
+/* success: code shrinks away, disc springs in, tick draws, ring pulses, text rises */
+.qrx[data-state="success"] .qrx-stage {
+  background: var(--card);
+  box-shadow: 0 0 0 1px rgba(52, 199, 89, 0.28), 0 14px 36px -12px rgba(52, 199, 89, 0.45);
+}
+.qrx[data-state="success"] .qrx-code {
+  opacity: 0;
+  transform: scale(0.6);
+  filter: blur(6px);
+  transition-duration: 0.28s;
+}
+.qrx[data-state="success"] .qrx-done {
+  opacity: 1;
+  transition: opacity 0.2s var(--ease) 0.12s;
+}
+.qrx[data-state="success"] .qrx-disc {
+  animation: qrxDisc 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) 0.18s forwards;
+}
+.qrx[data-state="success"] .qrx-tick {
+  animation: qrxTick 0.38s cubic-bezier(0.65, 0, 0.35, 1) 0.48s forwards;
+}
+.qrx[data-state="success"] .qrx-ring {
+  animation: qrxRing 0.9s var(--ease) 0.5s forwards;
+}
+.qrx[data-state="success"] .qrx-done b,
+.qrx[data-state="success"] .qrx-done small {
+  animation: qrxRise 0.4s var(--ease) forwards;
+}
+.qrx[data-state="success"] .qrx-done b {
+  animation-delay: 0.62s;
+}
+.qrx[data-state="success"] .qrx-done small {
+  animation-delay: 0.72s;
+}
+@keyframes qrxDisc {
+  from {
+    transform: scale(0);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@keyframes qrxTick {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes qrxRing {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.85);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.25);
+  }
+}
+@keyframes qrxRise {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.qrx-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  color: var(--text-2);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.qrx-status i {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.qrx[data-state="ready"] .qrx-status i {
+  background: var(--primary);
+  animation: qrxBreath 1.6s ease-in-out infinite;
+}
+.qrx[data-state="expired"] .qrx-status i,
+.qrx[data-state="error"] .qrx-status i {
+  background: var(--red);
+}
+.qrx[data-state="success"] .qrx-status i {
+  background: #34c759;
+}
+@keyframes qrxBreath {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+}
+.qrx-refresh {
+  width: 100%;
+  min-height: 48px;
+  font-size: 15px;
+  transition:
+    opacity 0.25s var(--ease),
+    transform 0.25s var(--ease),
+    box-shadow 0.18s var(--ease);
+}
+.qrx-refresh svg {
+  width: 18px;
+  height: 18px;
+}
+.qrx-refresh.attention {
+  animation: qrxNudge 0.5s var(--ease) 2;
+}
+@keyframes qrxNudge {
+  50% {
+    transform: scale(1.03);
+  }
+}
+.qrx[data-state="refreshing"] .qrx-refresh svg,
+.qrx[data-state="loading"] .qrx-refresh svg {
+  animation: spin 0.8s linear infinite;
+}
+.qrx[data-state="success"] .qrx-refresh {
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

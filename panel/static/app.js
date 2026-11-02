@@ -265,12 +265,18 @@ function okIcon(){return `<svg class="success-symbol" viewBox="0 0 72 72" fill="
 function qrIcon(){return `<svg class="qr-mini" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.8A.8.8 0 0 1 4.8 4h4.4a.8.8 0 0 1 .8.8v4.4a.8.8 0 0 1-.8.8H4.8A.8.8 0 0 1 4 9.2V4.8Z"/><path d="M14 4.8a.8.8 0 0 1 .8-.8h4.4a.8.8 0 0 1 .8.8v4.4a.8.8 0 0 1-.8.8h-4.4a.8.8 0 0 1-.8-.8V4.8Z"/><path d="M4 14.8a.8.8 0 0 1 .8-.8h4.4a.8.8 0 0 1 .8.8v4.4a.8.8 0 0 1-.8.8H4.8a.8.8 0 0 1-.8-.8v-4.4Z"/><path d="M14 14h2.5M19.5 14h.5M14 17h1M18 17h2M14 20h6M7 7h.01M17 7h.01M7 17h.01"/></svg>`}
 function scanHeroIcon(){return `<svg class="scan-hero-icon" viewBox="0 0 64 64" fill="none" aria-hidden="true"><rect x="14" y="14" width="36" height="36" rx="12" stroke="currentColor" stroke-width="3" opacity=".16"/><path d="M18 27v-6a3 3 0 0 1 3-3h6M37 18h6a3 3 0 0 1 3 3v6M46 37v6a3 3 0 0 1-3 3h-6M27 46h-6a3 3 0 0 1-3-3v-6" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><path d="M22 32h20" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><path d="M27 27h10M27 37h10" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" opacity=".5"/></svg>`}
 function napSheet(n,u){const item=(ic,label,js,cls="")=>`<button class="sheet-item ${cls}" onclick="closeModal();setTimeout(()=>{${js}},180)">${icon(ic)}<span>${label}</span></button>`;openModal(`<div class="action-sheet"><div class="sheet-head"><b>${safeText(botName(n))}</b><small>${safeText(n)}</small></div><div class="sheet-list">${item("globe","\u6253\u5f00 WebUI",`window.open('${q(u)}','_blank','noopener')`)}${item("play","\u542f\u52a8",`napAct('start','${q(n)}')`)}${item("refresh","\u91cd\u542f",`confirmNapAction('restart','${q(n)}')`)}${item("pause","\u505c\u6b62",`confirmNapAction('stop','${q(n)}')`)}${item("logs","\u67e5\u770b\u65e5\u5fd7",`showLog('${q(n)}')`)}</div><div class="sheet-list">${item("trash","\u5220\u9664\u673a\u5668\u4eba",`confirmNapAction('delete','${q(n)}')`,"danger-item")}</div></div>`,null,{cancelText:"\u5173\u95ed"});$("#modal .modal-card")?.classList.add("sheet")}
+/* QR login: one modal, one state machine.
+   loading -> ready -> (expired | error) -> refresh -> ready ... -> success.
+   Every async step checks its session id so a closed or reopened modal is never written to by a stale poll. */
+const QR_TTL=110000;
+function qrSet(st,text,sub){const m=$("#qrx");if(!m)return;m.dataset.state=st;const t=$("#qrxStatus");if(t&&text!=null)t.textContent=text;const s=$("#qrxSub");if(s&&sub!=null)s.textContent=sub;const step=st==="success"?3:st==="ready"?2:1;m.querySelectorAll(".qrx-step").forEach((el,i)=>{el.classList.toggle("done",i+1<step);el.classList.toggle("active",i+1===step)});const b=$("#qrxRefresh");if(b){b.disabled=st==="loading"||st==="refreshing"||st==="success";b.classList.toggle("attention",st==="expired"||st==="error")}}
+function qrAlive(sid){return state.qrSession===sid&&!!$("#qrx")&&!$("#modal")?.classList.contains("hidden")}
+function qrStop(){if(state.qrTimer){clearTimeout(state.qrTimer);clearInterval(state.qrTimer);state.qrTimer=null}}
 async function showQrLogin(name,url){
-  if(state.qrTimer){clearInterval(state.qrTimer);state.qrTimer=null}
-  const title=`${botName(name)} 扫码登录`;
-  openModal(`<div class="qr-login"><button class="qr-close" onclick="closeModal()" aria-label="\u5173\u95ed">&times;</button><div class="qr-login-head"><div class="scan-title-icon">${scanHeroIcon()}</div><div><h3>${safeText(title)}</h3><p class="muted">\u6b63\u5728\u5411 NapCat \u83b7\u53d6 QQ \u767b\u5f55\u4e8c\u7ef4\u7801...</p></div></div><div id="qrLoginBody" class="qr-login-body"><div class="qr-skeleton"></div></div><div class="qr-status muted" id="qrLoginStatus">\u51c6\u5907\u4e2d</div><div class="toolbar scan-actions"><button class="primary" onclick="refreshNapQr('${q(name)}')">\u5237\u65b0\u4e8c\u7ef4\u7801</button><a class="link-pill" href="${safeHref(url)}" target="_blank" rel="noopener noreferrer">\u6253\u5f00 NapCat WebUI</a></div></div>`,null);
-  await loadNapQr(name);
-  state.qrTimer=setInterval(()=>pollNapQr(name),3000);
+  qrStop();const sid=state.qrSession=(state.qrSession||0)+1;
+  openModal(`<div id="qrx" class="qrx" data-state="loading" data-name="${q(name)}"><div class="qrx-head"><h3>${safeText(botName(name))} · 扫码登录</h3><p id="qrxSub" class="muted">打开手机 QQ，扫一扫下方二维码</p></div><ol class="qrx-steps"><li class="qrx-step active"><i>1</i><span>获取二维码</span></li><li class="qrx-step"><i>2</i><span>手机确认</span></li><li class="qrx-step"><i>3</i><span>登录成功</span></li></ol><div class="qrx-stage"><div class="qrx-skel"></div><div id="qrxCode" class="qrx-code"></div><div class="qrx-veil"><span class="spin"></span><b class="qrx-veil-text">二维码已失效</b></div><div class="qrx-done"><svg class="qrx-check" viewBox="0 0 120 120" aria-hidden="true"><circle class="qrx-ring" cx="60" cy="60" r="54"/><circle class="qrx-disc" cx="60" cy="60" r="46"/><path class="qrx-tick" d="M39 61.5 53.5 76 82 46"/></svg><b id="qrxDoneTitle">登录成功</b><small id="qrxNick"></small></div></div><div class="qrx-status"><i></i><span id="qrxStatus">正在获取二维码…</span></div><button id="qrxRefresh" class="primary qrx-refresh" disabled onclick="refreshNapQr('${q(name)}')">${icon("refresh")}刷新二维码</button></div>`,null);
+  $("#modal .modal-card")?.classList.add("qr-mode");
+  await loadNapQr(name,sid);
 }
 function showAlreadyLogin(name, info={}){
   const nick=info.nick||info.nickname||info.uin||"QQ 已登录";
@@ -279,46 +285,31 @@ function showAlreadyLogin(name, info={}){
   setTimeout(()=>{if(!$("#modal")?.classList.contains("hidden"))closeModal()},1600);
 }
 
-async function loadNapQr(name){
-  const box=$("#qrLoginBody"),st=$("#qrLoginStatus");
+function qrSuccess(name,info,already,sid){if(!qrAlive(sid))return;qrStop();const nick=info?.nick||info?.nickname||"",uin=info?.uin||"";$("#qrxDoneTitle").textContent=already?"已经登录":"登录成功";$("#qrxNick").textContent=[nick,uin].filter(Boolean).join(" · ")||"QQ 已连接";qrSet("success",already?"这个机器人已在线，无需扫码":"已连接 QQ，窗口即将关闭",already?"无需重复扫码":"扫码完成");if(!already)toast(`${botName(name)} 登录成功`);invalidateCache("dashboard","napcat","pool");setTimeout(()=>{if(qrAlive(sid))closeModal();softRefreshPage()},already?1600:1900)}
+async function loadNapQr(name,sid=state.qrSession){
   try{
     const d=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"qrcode"})});
-    if(d.already_login){
-      const info=d.login_info||{}, nick=info.nick||info.nickname||info.uin||"QQ 已登录";
-      if(box)box.innerHTML=`<div class="login-ok-card"><div class="ok-doodle">${okIcon()}</div><h3>已经登录</h3><p>${safeText(botName(name))} 当前已连接 QQ，无需再次扫码。</p><div class="compact-url">${safeText(nick)}</div></div>`;
-      if(st)st.textContent="机器人在线，可以直接使用，窗口即将关闭";
-      setTimeout(()=>closeModal(),1200);
-      return;
-    }
-    if(box)box.innerHTML=`<div class="qr-card"><div class="qr-svg">${d.svg}</div></div><div class="qr-help">请用手机 QQ 扫描二维码登录</div>`;
-    if(st)st.textContent="等待扫码确认";
-  }catch(e){
-    if(box)box.innerHTML=`<div class="qr-error">${safeText(e.message||e)}</div>`;
-    if(st)st.textContent="获取失败，可以点刷新二维码再试";
-  }
+    if(!qrAlive(sid))return;
+    if(d.already_login)return qrSuccess(name,d.login_info||{},true,sid);
+    const box=$("#qrxCode");if(box)box.innerHTML=d.svg||"";
+    state.qrLoadedAt=Date.now();qrSet("ready","等待扫码…","打开手机 QQ，扫一扫下方二维码");
+    qrPoll(name,sid);
+  }catch(e){if(!qrAlive(sid))return;$(".qrx-veil-text").textContent="获取失败";qrSet("error",e.message||"获取二维码失败，点刷新再试")}
 }
-async function refreshNapQr(name){
-  const st=$("#qrLoginStatus"); if(st)st.textContent="正在刷新二维码...";
-  await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"refresh"})}).catch(()=>{});
-  setTimeout(()=>loadNapQr(name),900);
-}
-async function pollNapQr(name){
-  if($("#modal")?.classList.contains("hidden")){clearInterval(state.qrTimer);state.qrTimer=null;return}
+async function refreshNapQr(name){const sid=state.qrSession,b=$("#qrxRefresh");if(!qrAlive(sid)||b?.disabled)return;qrStop();qrSet($("#qrxCode")?.innerHTML?"refreshing":"loading","正在刷新二维码…");const t0=Date.now();await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"refresh"})}).catch(()=>{});await new Promise(r=>setTimeout(r,Math.max(0,700-(Date.now()-t0))));if(qrAlive(sid))await loadNapQr(name,sid)}
+function qrPoll(name,sid){qrStop();state.qrTimer=setTimeout(()=>pollNapQr(name,sid),2000)}
+async function pollNapQr(name,sid=state.qrSession){
+  if(!qrAlive(sid)){qrStop();return}
   try{
     const r=await req("/api/napcat/qq-login",{method:"POST",body:JSON.stringify({name,action:"status"})});
-    const data=r.data||{}; const st=$("#qrLoginStatus");
-    if(data.isLogin){
-      const box=$("#qrLoginBody"),info=data.loginInfo||{},nick=info.nick||info.nickname||info.uin||"QQ 已登录";
-      if(box)box.innerHTML=`<div class="login-ok-card"><div class="ok-doodle">${okIcon()}</div><h3>登录成功</h3><p>${safeText(botName(name))} 已经连接 QQ。</p><div class="compact-url">${safeText(nick)}</div></div>`;
-      if(st)st.textContent="机器人在线，可以直接使用，窗口即将关闭";
-      toast("QQ 登录成功");
-      clearInterval(state.qrTimer);state.qrTimer=null;
-      invalidateCache("dashboard","napcat","pool");setTimeout(()=>{closeModal();refresh(true,true)},450);setTimeout(()=>{invalidateCache("dashboard","napcat","pool");refresh(state.page==="napcat"||state.page==="pool",true)},1800);
-      return
-    }
-    if(data.isOffline){if(st)st.textContent="账号离线，请重新扫码";return}
-    if(data.loginError){if(st)st.textContent=data.loginError}
+    if(!qrAlive(sid))return;
+    const data=r.data||{};
+    if(data.isLogin)return qrSuccess(name,data.loginInfo||{},false,sid);
+    const expired=data.isOffline||/过期|失效|expired|timeout/i.test(String(data.loginError||""))||Date.now()-(state.qrLoadedAt||0)>QR_TTL;
+    if(expired){$(".qrx-veil-text").textContent="二维码已失效";qrSet("expired",data.isOffline?"账号已离线，请刷新后重新扫码":"二维码已过期，点刷新换一张");return}
+    if(data.loginError)qrSet("ready",String(data.loginError));
   }catch(e){}
+  if(qrAlive(sid))qrPoll(name,sid);
 }
 async function napAdd(){const count=Number($("#napCount")?.value||1);if(!Number.isInteger(count)||count<1||count>999)return toast("数量必须是 1-999","error");return withBusy("正在提交",async()=>{const t=await req("/api/napcat/action",{method:"POST",body:JSON.stringify({action:"add",count})});state.napCreating[t.id]={count,progress:Number(t.progress||0),title:t.title};toast(`正在创建 ${count} 个机器人`,"loading");watchTask(t.id,{napcat:true,okText:`已创建 ${count} 个机器人`,failText:"创建机器人失败",onProgress:x=>{const c=state.napCreating[t.id];if(c){c.progress=Number(x.progress||0);updateCreatingCards()}},onDone:()=>{delete state.napCreating[t.id]}});loadTasks();await softRefreshPage()})}
 function confirmNapAction(action,name){const display=botName(name);const map={restart:["\u786e\u8ba4\u91cd\u542f\u5b9e\u4f8b\uff1f","\u91cd\u542f\u671f\u95f4\u673a\u5668\u4eba\u53ef\u80fd\u6682\u65f6\u79bb\u7ebf\u3002","\u786e\u8ba4\u91cd\u542f"],stop:["\u786e\u8ba4\u505c\u6b62\u5b9e\u4f8b\uff1f","\u505c\u6b62\u540e\u8be5\u673a\u5668\u4eba\u5c06\u4e0d\u518d\u54cd\u5e94\uff0c\u76f4\u5230\u91cd\u65b0\u542f\u52a8\u3002","\u786e\u8ba4\u505c\u6b62"],delete:["\u786e\u8ba4\u5220\u9664\u5b9e\u4f8b\uff1f","\u9ed8\u8ba4\u4fdd\u7559\u6570\u636e\u76ee\u5f55\uff0c\u53ea\u5220\u9664\u5bb9\u5668\u548c\u7d22\u5f15\u8bb0\u5f55\u3002","\u786e\u8ba4\u5220\u9664"]};const m=map[action]||["\u786e\u8ba4\u6267\u884c\u64cd\u4f5c\uff1f","\u8be5\u64cd\u4f5c\u4f1a\u63d0\u4ea4\u5230\u670d\u52a1\u5668\u6267\u884c\u3002","\u786e\u8ba4"];return confirmDanger({title:m[0],name:display,message:m[1],confirmText:m[2],onConfirm:()=>napAct(action,name,action==="delete"?{confirm:name,keep_data:true}:{})})}
@@ -439,9 +430,9 @@ async function softRefreshPage(){const p=state.page;try{refresh(false);if(p==="n
 function taskPanel(){return `<div class="card span12 task-card task-floating task-hidden"><div class="task-head"><div><h3>\u4efb\u52a1\u8fdb\u5ea6</h3><p class="muted">\u6b63\u5728\u5904\u7406\u7684\u4efb\u52a1\u4f1a\u56fa\u5b9a\u5728\u8fd9\u91cc\u3002</p></div></div><div id="tasks" class="file-cards task-list"></div></div>`}
 async function loadTasks(){try{state.tasks=await req("/api/tasks");const el=$("#tasks");if(!el)return;const rows=visibleTasks(),card=el.closest(".task-card"),sig=rows.map(t=>`${t.id}:${t.status}:${t.progress}`).join("|");card?.classList.toggle("task-hidden",!rows.length);if(el.dataset.renderSig===sig)return;state.tasksRenderSig=sig;el.dataset.renderSig=sig;el.innerHTML=rows.map(t=>`<div class="file-card task-item" data-task-id="${q(t.id)}"><div><b>${safeText(t.title)}</b><div class="muted">${taskStatusText(t.status)} / ${safeText(t.updated_at)}</div><div class="progress"><span style="width:${t.progress}%"></span></div></div><button class="tiny" onclick="showTask('${q(t.id)}')">查看</button></div>`).join("")}catch{}}
 async function showTask(id){state.taskModalId=id;watchTask(id);const draw=async()=>{const t=await req(`/api/tasks/${id}`);const html=`<div id="taskModalInner" class="task-modal"><h3 id="taskTitle">${safeText(t.title)}</h3><p id="taskMeta" class="muted">\u72b6\u6001: ${taskStatusText(t.status)} / \u8fdb\u5ea6: ${t.progress}%</p><div class="progress"><span id="taskProgress" style="width:${t.progress}%"></span></div><pre id="taskLog" class="code">${esc((t.logs||[]).join("\n"))}</pre></div>`;if($("#modal")?.classList.contains("hidden")||state.taskModalId!==id||!$("#taskModalInner")){openModal(html,()=>closeModal(),{confirmText:"\u786e\u5b9a",cancelText:"\u53d6\u6d88"})}else{$("#taskTitle").textContent=t.title;$("#taskMeta").textContent=`\u72b6\u6001: ${taskStatusText(t.status)} / \u8fdb\u5ea6: ${t.progress}%`;$("#taskProgress").style.width=t.progress+"%";$("#taskLog").textContent=(t.logs||[]).join("\n")}const done=t.status==="success"||t.status==="failed";const ok=$("#modalOk");if(ok&&$("#taskModalInner")){ok.style.display="";ok.textContent=done?"\u5b8c\u6210":"\u786e\u5b9a";ok.className="primary";ok.onclick=()=>closeModal()}const cancel=$("#modal .modal-actions button:first-child");if(cancel&&$("#taskModalInner"))cancel.textContent=done?"\u5173\u95ed":"\u53d6\u6d88";const box=$("#taskLog");if(box)box.scrollTop=box.scrollHeight;if(t.status==="success"||t.status==="failed"||t.status==="cancelled")return true;return false};if(await draw())return;const timer=setInterval(async()=>{try{if($("#modal")?.classList.contains("hidden")||state.taskModalId!==id){clearInterval(timer);return}if(await draw())clearInterval(timer)}catch{clearInterval(timer)}},1200)}
-function openModal(html,ok,options={}){$("#modalBody").innerHTML=html;const m=$("#modal");m.classList.remove("closing");{const card=m.querySelector(".modal-card");card?.classList.remove("sheet");card?.classList.toggle("alert",!!$("#modalBody .confirm-box"))}const okBtn=$("#modalOk"),cancel=$("#modal .modal-actions button:first-child");if(okBtn){okBtn.textContent=options.confirmText||"\u786e\u5b9a";okBtn.className=options.confirmClass||"primary";okBtn.disabled=false}if(cancel){cancel.textContent=options.cancelText||"\u53d6\u6d88";cancel.disabled=false}clearTimeout(closeModal._t);if(!state.modalLocked){state.modalLocked=true;lockScroll()}m.classList.remove("hidden");requestAnimationFrame(()=>m.classList.add("show"));okBtn.style.display=ok?"":"none";okBtn.onclick=ok?async()=>{if(okBtn.disabled)return;const old=okBtn.innerHTML;try{okBtn.disabled=true;if(cancel)cancel.disabled=true;okBtn.classList.add("is-busy");okBtn.innerHTML=`<span class="spin"></span>${options.loadingText||"\u5904\u7406\u4e2d"}`;await ok()}catch(e){toast(e.message||"\u64cd\u4f5c\u5931\u8d25");okBtn.disabled=false;if(cancel)cancel.disabled=false;okBtn.classList.remove("is-busy");okBtn.innerHTML=old}}:(()=>{})}
+function openModal(html,ok,options={}){$("#modalBody").innerHTML=html;const m=$("#modal");m.classList.remove("closing");{const card=m.querySelector(".modal-card");card?.classList.remove("sheet","qr-mode");card?.classList.toggle("alert",!!$("#modalBody .confirm-box"))}const okBtn=$("#modalOk"),cancel=$("#modal .modal-actions button:first-child");if(okBtn){okBtn.textContent=options.confirmText||"\u786e\u5b9a";okBtn.className=options.confirmClass||"primary";okBtn.disabled=false}if(cancel){cancel.textContent=options.cancelText||"\u53d6\u6d88";cancel.disabled=false}clearTimeout(closeModal._t);if(!state.modalLocked){state.modalLocked=true;lockScroll()}m.classList.remove("hidden");requestAnimationFrame(()=>m.classList.add("show"));okBtn.style.display=ok?"":"none";okBtn.onclick=ok?async()=>{if(okBtn.disabled)return;const old=okBtn.innerHTML;try{okBtn.disabled=true;if(cancel)cancel.disabled=true;okBtn.classList.add("is-busy");okBtn.innerHTML=`<span class="spin"></span>${options.loadingText||"\u5904\u7406\u4e2d"}`;await ok()}catch(e){toast(e.message||"\u64cd\u4f5c\u5931\u8d25");okBtn.disabled=false;if(cancel)cancel.disabled=false;okBtn.classList.remove("is-busy");okBtn.innerHTML=old}}:(()=>{})}
 
-function closeModal(){state.taskModalId=null;if(state.qrTimer){clearInterval(state.qrTimer);state.qrTimer=null}const m=$("#modal");m.classList.add("closing");m.classList.remove("show");clearTimeout(closeModal._t);closeModal._t=setTimeout(()=>{m.classList.add("hidden");m.classList.remove("closing")},220);if(state.modalLocked){state.modalLocked=false;unlockScroll()}}
+function closeModal(){state.taskModalId=null;if(state.qrTimer){clearTimeout(state.qrTimer);clearInterval(state.qrTimer);state.qrTimer=null}const m=$("#modal");m.classList.add("closing");m.classList.remove("show");clearTimeout(closeModal._t);closeModal._t=setTimeout(()=>{m.classList.add("hidden");m.classList.remove("closing")},220);if(state.modalLocked){state.modalLocked=false;unlockScroll()}}
 function confirmDanger({title="\u786e\u8ba4\u6267\u884c\u64cd\u4f5c\uff1f",name="",message="",confirmText="\u786e\u8ba4",cancelText="\u53d6\u6d88",onConfirm}){openModal(`<div class="confirm-box"><div class="confirm-icon">!</div><div><h3>${safeText(title)}</h3><p class="muted">${safeText(message)}</p>${name?`<div class="confirm-target"><span>\u5b9e\u4f8b\u540d\u79f0</span><b>${safeText(name)}</b></div>`:""}</div></div>`,async()=>{closeModal();await onConfirm?.()},{confirmText,cancelText,confirmClass:"danger"})}
 function confirmDo(msg,word,fn){openModal(`<div class="confirm-box"><div class="confirm-icon">!</div><div><h3>\u4e8c\u6b21\u786e\u8ba4</h3><p class="muted">${safeText(msg)}</p><input id="confirmInput" class="confirm-input" placeholder="${q(word)}"></div></div>`,async()=>{if($("#confirmInput").value!==word)return toast("\u786e\u8ba4\u6587\u5b57\u4e0d\u5339\u914d");closeModal();await fn()},{confirmClass:"danger"})}
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}
