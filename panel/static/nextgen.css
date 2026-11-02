@@ -199,3 +199,64 @@
 .ng-log-toolbar .log-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ng-qr-code.img { padding: 10px; display: grid; place-items: center; }
 .ng-qr-code.img img { width: 100%; height: 100%; display: block; border-radius: 10px; image-rendering: pixelated; cursor: pointer; }
+
+/* ---- login: signed-in view ---- */
+.ng-login.done { display: block; padding: 0; overflow: hidden; }
+.ng-done { --tint: 249, 115, 22; position: relative; padding: 28px; display: grid; gap: 18px;
+  background: radial-gradient(120% 80% at 0% 0%, rgba(var(--tint), .14), transparent 55%),
+              radial-gradient(90% 70% at 100% 0%, rgba(52, 199, 89, .10), transparent 60%); }
+.ng-done.snowluma { --tint: 99, 102, 241; }
+.ng-done-hero { display: flex; align-items: center; gap: 22px; }
+.ng-avatar { position: relative; width: 96px; height: 96px; flex: none; border-radius: 50%; padding: 4px;
+  background: conic-gradient(from 210deg, rgba(var(--tint), .95), #34c759, rgba(var(--tint), .95)); box-shadow: 0 14px 36px -10px rgba(var(--tint), .55); }
+.ng-avatar img, .ng-avatar-fallback { position: absolute; inset: 4px; width: calc(100% - 8px); height: calc(100% - 8px); border-radius: 50%; object-fit: cover; border: 3px solid var(--card); }
+.ng-avatar-fallback { display: grid; place-items: center; font-size: 36px; font-weight: 700; color: #fff; background: linear-gradient(135deg, rgba(var(--tint), 1), rgba(var(--tint), .6)); }
+.ng-online-dot { position: absolute; right: 6px; bottom: 6px; width: 20px; height: 20px; border-radius: 50%; background: #34c759; border: 3px solid var(--card); box-shadow: 0 0 0 0 rgba(52, 199, 89, .5); animation: ngDot 2.4s var(--ease) infinite; }
+@keyframes ngDot { 0% { box-shadow: 0 0 0 0 rgba(52,199,89,.45); } 70% { box-shadow: 0 0 0 10px rgba(52,199,89,0); } 100% { box-shadow: 0 0 0 0 rgba(52,199,89,0); } }
+.ng-done-id { min-width: 0; display: grid; gap: 6px; }
+.ng-done-id h2 { margin: 0; font-size: 28px; line-height: 1.15; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.ng-done-badge { justify-self: start; display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px 4px 5px; border-radius: var(--r-pill);
+  font-size: 13px; font-weight: 600; color: var(--green); background: var(--green-bg); }
+.ng-done-badge .success-symbol { width: 18px; height: 18px; }
+.ng-done-uin { margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 8px; }
+.ng-copy { border: 0; background: var(--tile); color: var(--text-2); font-size: 12px; padding: 3px 10px; border-radius: var(--r-pill); min-height: 0; cursor: pointer; }
+.ng-done-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
+.ng-done-meta > span { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--tile) 80%, transparent); }
+.ng-proto-chip { color: var(--text) !important; font-weight: 600; }
+.ng-proto-chip .ng-logo { width: 18px; height: 18px; border-radius: 6px; box-shadow: none; }
+.ng-done-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.ng-dtile { display: flex; gap: 12px; align-items: center; padding: 14px 16px; border-radius: 20px; min-width: 0;
+  background: color-mix(in srgb, var(--card) 70%, transparent); border: 1px solid var(--line);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); transition: border-color .3s var(--ease); }
+.ng-dtile > div { min-width: 0; display: grid; gap: 2px; }
+.ng-dtile b { font-size: 15px; } .ng-dtile small { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.ng-dtile-ic { width: 38px; height: 38px; flex: none; border-radius: 12px; display: grid; place-items: center; color: var(--green); background: var(--green-bg); }
+.ng-dtile-ic .adb-icon { width: 20px; height: 20px; }
+.ng-dtile.warn { border-color: color-mix(in srgb, var(--orange) 45%, transparent); }
+.ng-dtile.warn .ng-dtile-ic { color: var(--orange); background: var(--orange-bg); }
+.ng-dtile.wait .ng-dtile-ic { color: var(--primary); background: var(--primary-soft); }
+.ng-done-hint { font-size: 13.5px; padding: 10px 14px; border-radius: 14px; color: var(--orange); background: var(--orange-bg); }
+.ng-done-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ng-done-more summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; display: inline-flex; gap: 6px; align-items: center; }
+.ng-done-more summary::before { content: "›"; display: inline-block; transition: transform .25s var(--ease); }
+.ng-done-more[open] summary::before { transform: rotate(90deg); }
+.ng-hsteps { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 0; }
+.ng-hsteps li { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); padding-right: 22px; position: relative; }
+.ng-hsteps li:not(:last-child)::after { content: ""; position: absolute; right: 6px; top: 50%; width: 10px; height: 2px; background: #34c759; opacity: .5; }
+.ng-hsteps i { width: 8px; height: 8px; border-radius: 50%; background: #34c759; }
+.ng-hsteps li.skipped { opacity: .5; } .ng-hsteps time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ng-done.celebrate .ng-avatar { animation: ngPop .6s var(--ease); }
+.ng-done.celebrate .ng-dtile { animation: ngRise .5s var(--ease) both; }
+.ng-done.celebrate .ng-dtile:nth-child(2) { animation-delay: .08s; } .ng-done.celebrate .ng-dtile:nth-child(3) { animation-delay: .16s; }
+@keyframes ngRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.ng-login-info > div { align-items: flex-start; }
+@media (max-width: 860px) { .ng-done-tiles { grid-template-columns: 1fr; } }
+@media (max-width: 600px) {
+  .ng-done { padding: 22px 16px; }
+  .ng-done-hero { flex-direction: column; text-align: center; gap: 14px; }
+  .ng-done-id { justify-items: center; } .ng-done-badge { justify-self: center; }
+  .ng-done-meta, .ng-done-uin { justify-content: center; }
+  .ng-done-id h2 { font-size: 24px; }
+  .ng-done-actions .pill-btn { flex: 1 1 calc(50% - 8px); min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .ng-online-dot, .ng-done.celebrate .ng-avatar, .ng-done.celebrate .ng-dtile { animation: none; } }

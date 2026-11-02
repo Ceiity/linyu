@@ -169,6 +169,13 @@ function drawLogin(d, force){
   const slotInfo = (NG.proto?.slots||[]).find(x=>x.slot===NG.login.slot)||{};
   const proto = d.protocol || d.active_protocol || slotInfo.active || "napcat";
   const cur = d.current || {};
+  const box = $("#ngLogin"); if(!box) return;
+  const done = d.state==="SUCCESS" || (!(d.task_id && !d.terminal) && cur.online);
+  if(done){
+    if(d.state==="SUCCESS" && prev && prev.state!=="SUCCESS" && prev.task_id===d.task_id){ toast("登录成功"); invalidateCache("dashboard","napcat","pool"); NG.proto=null; box.dataset.celebrate="1"; }
+    renderDone(box,d,proto,cur,slotInfo); return;
+  }
+  if(box.classList.contains("done") || !$("#ngStage")){ box.classList.remove("done"); box.innerHTML=`<div class="ng-login-stage" id="ngStage"></div><div class="ng-login-side" id="ngSide"></div>`; force=true; }
   const stage = $("#ngStage"), side = $("#ngSide");
   if(!stage||!side) return;
   // ---- stage ----
@@ -216,6 +223,51 @@ function drawLogin(d, force){
       ${b("查看详情","ngLoginDetail()","ghost")}${b("登录日志","ngLogs('login')","ghost")}
     </div>`;
 }
+
+function fmtSince(at){ if(!at) return ""; const t=Date.parse(String(at).replace(" ","T")); if(!t) return ""; const m=Math.max(0,Math.round((Date.now()-t)/60000)); return m<1?"刚刚":m<60?m+" 分钟前":m<1440?Math.floor(m/60)+" 小时前":Math.floor(m/1440)+" 天前"; }
+function doneTile(state,title,detail,ic){ return `<div class="ng-dtile ${state}"><span class="ng-dtile-ic">${state==="wait"?`<span class="spin"></span>`:ic}</span><div><b>${safeText(title)}</b><small>${safeText(detail)}</small></div></div>`; }
+function renderDone(box,d,proto,cur,slotInfo){
+  const acc = {uin:d.account?.uin||cur.uin||slotInfo.uin||"", nickname:d.account?.nickname||cur.nickname||slotInfo.nickname||""};
+  const checks = Object.fromEntries((d.checks||[]).map(c=>[c.id,c]));
+  const checking = d.state==="SUCCESS" && (d.notes||{}).post_checks==="running";
+  const link = d.link||{};
+  const linkOk = checks.astrbot_link ? checks.astrbot_link.ok : !!link.connected;
+  const obOk = checks.onebot ? checks.onebot.ok : d.onebot_ok;
+  const listening = checks.astrbot_listen ? checks.astrbot_listen.ok : link.listening;
+  const tiles = [
+    doneTile("ok","QQ 在线",acc.uin?`账号 ${acc.uin}`:"已登录",ic("shield")),
+    doneTile(checking&&obOk==null?"wait":obOk===false?"warn":"ok","OneBot 配置",obOk===false?"地址或 Token 不一致，可点修复":"反向 WebSocket · Token 正确",ic("protocol")),
+    doneTile(checking&&!linkOk?"wait":linkOk?"ok":"warn","AstrBot 连接",checking&&!linkOk?"正在检查并自动配置…":linkOk?`已连接 · 端口 ${link.port||checks.astrbot_listen?.detail?.match(/\d+/)?.[0]||""}`:listening===false?"AstrBot 未监听该端口":"尚未连上，可运行诊断",ic("swap")),
+  ].join("");
+  const when = d.state==="SUCCESS" && !d.already ? `登录用时 ${d.elapsed||0}s` : (d.last_login?.at?`登录于 ${fmtSince(d.last_login.at)}`:"");
+  const avatar = acc.uin ? `<img src="https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(acc.uin)}&s=140" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
+  const initial = safeText((acc.nickname||"Q").trim().slice(0,1)||"Q");
+  const tl = (d.timeline||[]).filter(r=>r.status!=="todo").map(r=>`<li class="${r.status}"><i></i><span>${safeText(r.label)}</span>${r.at?`<time>${new Date(r.at*1000).toLocaleTimeString()}</time>`:""}</li>`).join("");
+  const warnLink = !checking && !linkOk;
+  const celebrate = box.dataset.celebrate==="1"; box.dataset.celebrate="";
+  const sig = JSON.stringify([acc,proto,checking,linkOk,obOk,listening,when,d.task_id,(d.checks||[]).length]);
+  if(box.classList.contains("done") && box.dataset.sig===sig) return;
+  box.dataset.sig = sig; box.classList.add("done");
+  box.innerHTML = `<div class="ng-done ${proto} ${celebrate?"celebrate":""}">
+    <div class="ng-done-hero">
+      <div class="ng-avatar"><span class="ng-avatar-fallback">${initial}</span>${avatar}<i class="ng-online-dot"></i></div>
+      <div class="ng-done-id">
+        <span class="ng-done-badge">${okIcon()}${d.already||d.state!=="SUCCESS"?"QQ 在线":"登录成功"}</span>
+        <h2>${safeText(acc.nickname||"QQ 用户")}</h2>
+        <p class="ng-done-uin">${acc.uin?`QQ ${safeText(acc.uin)}`:""}${acc.uin?`<button class="ng-copy" onclick="copyText('${q(acc.uin)}')" title="复制 QQ 号">复制</button>`:""}</p>
+        <div class="ng-done-meta"><span class="ng-proto-chip">${logo(proto)}${LABEL[proto]}</span>${when?`<span>${safeText(when)}</span>`:""}<span>${safeText(slotName(NG.login.slot))}</span></div>
+      </div>
+    </div>
+    <div class="ng-done-tiles">${tiles}</div>
+    ${warnLink?`<div class="ng-done-hint">AstrBot 还没有连上这个账号。点「修复连接」会自动配置两端；仍不行请运行诊断。</div>`:""}
+    <div class="ng-done-actions">
+      ${warnLink?b("修复连接",`ngRepair('${q(NG.login.slot)}','${proto}')`,"primary"):""}
+      ${b(ic("restart")+"刷新状态","ngPoll(true)",warnLink?"soft":"primary")}${b(ic("pulse")+"诊断",`ngGoDiag('${q(NG.login.slot)}')`,"soft")}${b(ic("swap")+"协议端","go('protocols')","soft")}${b(ic("log")+"登录日志","ngLogs('login')","ghost")}${d.task_id?b("详情","ngLoginDetail()","ghost"):""}
+    </div>
+    ${tl?`<details class="ng-done-more"><summary>登录过程</summary><ol class="ng-hsteps">${tl}</ol></details>`:""}
+  </div>`;
+}
+window.ngPoll = (...a)=>ngPoll(...a);
 function errorCard(e){
   return `<div class="ng-error ${e.state==="REJECTED"?"rejected":e.state==="EXPIRED"?"expired":""}"><div class="ng-error-head"><b>${safeText(e.title)}</b><span>${safeText(LABEL[e.protocol]||e.protocol||"")}</span></div>
     <p>${safeText(e.description)}</p><p class="ng-sugg">建议：${safeText(e.suggestion)}</p>

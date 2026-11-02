@@ -3294,8 +3294,16 @@ class Handler(BaseHTTPRequestHandler):
                 slot = safe_name(arg("slot"))
                 snap = mgr.logins.snapshot(slot, int(arg("since_seq", "0") or 0))
                 if snap.get("state") == "IDLE" or snap.get("terminal"):
-                    snap["current"] = mgr.adapters[mgr.active(slot)].get_login_status(slot, quick=True)
+                    a = mgr.adapters[mgr.active(slot)]
+                    snap["current"] = a.get_login_status(slot, quick=True)
+                    if snap["current"].get("online") or snap.get("state") == "SUCCESS":
+                        try:
+                            snap["link"] = mgr.astrbot.link(slot, a.container(slot))
+                            snap["onebot_ok"] = a.onebot_token_ok(slot)[0]
+                        except Exception:
+                            pass
                 snap["active_protocol"] = mgr.active(slot)
+                snap["last_login"] = mgr.store.slot(slot).get("login") or {}
                 return self.send_api(api(True, snap))
             if path == "/api/ng/login/codes":
                 return self.send_api(api(True, ng_codes_table()))
