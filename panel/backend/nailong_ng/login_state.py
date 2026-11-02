@@ -291,7 +291,6 @@ class LoginManager:
     def _cancel(self, task: LoginTask, reason: str) -> None:
         if task.terminal:
             return
-        task.error = make_error("UNKNOWN", task.protocol, task.state, "", reason) if False else None
         task.set_state("CANCELLED", reason)
 
     def cancel(self, slot: str, task_id: str = "", reason: str = "用户取消了登录申请") -> LoginTask | None:
