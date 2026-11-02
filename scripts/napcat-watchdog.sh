@@ -188,6 +188,10 @@ check_once(){
   [[ -f "$idx" ]] || { write_status; return 0; }
   while IFS=$'\t' read -r name webui ws http token; do
     [[ -n "${name:-}" && -n "${webui:-}" && -n "${token:-}" ]] || continue
+    if [[ "$(slot_protocol "$name")" != "napcat" ]]; then
+      set_bot_status "$name" "online" "served by SnowLuma; NapCat intentionally stopped" "skipped" 0 false
+      continue
+    fi
     check_one "$name" "$webui" "$ws" "$http" "$token" "$interval" "$threshold" "$max" "$window" "$wait_s" || true
   done < "$idx"
   write_status

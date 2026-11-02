@@ -39,3 +39,14 @@ ensure_reverse_ws_token(){
   save_state_var ASTRBOT_REVERSE_WS_TOKEN "$ASTRBOT_REVERSE_WS_TOKEN" 2>/dev/null || true
 }
 random_token(){ if have_cmd openssl; then openssl rand -hex 18; else tr -dc 'A-Za-z0-9' </dev/urandom | head -c 36; echo; fi; }
+# Active QQ protocol end of a bot slot (napcatNN). protocols.json is written by the
+# panel (Nailong NG 2.0); a missing file/entry means the legacy default, NapCat.
+slot_protocol(){
+  local slot="$1" file="${INSTALL_PREFIX}/protocols.json" v=""
+  if [[ -s "$file" ]] && have_cmd jq; then
+    v="$(jq -r --arg n "$slot" '.slots[$n].active // "napcat"' "$file" 2>/dev/null || true)"
+  fi
+  [[ "$v" == "snowluma" ]] && echo snowluma || echo napcat
+}
+# Slot a SnowLuma compose dir belongs to ($INSTALL_PREFIX/snowluma/snowlumaNN/slot).
+snowluma_dir_slot(){ local d="$1"; [[ -f "$d/slot" ]] && head -n1 "$d/slot" | tr -cd 'A-Za-z0-9_.-' || echo ""; }

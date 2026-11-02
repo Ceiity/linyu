@@ -58,7 +58,7 @@ port_state_init(){
 }
 port_state_values(){
   port_state_init
-  jq -r '.allocations // {} | to_entries[] | .value | [.webui,.ws,.http,.astrbot_ws] | .[]? | select(.!=null)' "$PORT_STATE_FILE" 2>/dev/null || true
+  jq -r '.allocations // {} | to_entries[] | .value | [.webui,.ws,.http,.astrbot_ws,.novnc,.vnc] | .[]? | select(.!=null)' "$PORT_STATE_FILE" 2>/dev/null || true
 }
 port_state_put(){
   local name="$1" webui="$2" ws="$3" http="$4" astrbot_ws="$5" tmp="${PORT_STATE_FILE}.tmp"
