@@ -98,6 +98,26 @@ class ClientIpTest(unittest.TestCase):
 
 
 class ConfigTest(unittest.TestCase):
+    def test_partial_remote_config_keeps_matching_initial_password(self):
+        cfg = {"remote_api_enabled": True, "remote_api_token": "existing-remote-token"}
+        self.assertTrue(app.migrate_config(cfg))
+        self.assertTrue(cfg.get("initial_password"))
+        self.assertTrue(app.verify_password(cfg["initial_password"], cfg["password_hash"]))
+        self.assertEqual(cfg["remote_api_token"], "existing-remote-token")
+        initial, hashed = cfg["initial_password"], cfg["password_hash"]
+        self.assertFalse(app.migrate_config(cfg))
+        self.assertEqual(cfg["initial_password"], initial)
+        self.assertEqual(cfg["password_hash"], hashed)
+
+    def test_existing_hash_without_initial_password_is_not_reset(self):
+        cfg = app.default_config()
+        hashed = cfg["password_hash"]
+        cfg.pop("initial_password")
+        cfg.pop("theme_color")
+        self.assertTrue(app.migrate_config(cfg))
+        self.assertNotIn("initial_password", cfg)
+        self.assertEqual(cfg["password_hash"], hashed)
+
     def test_cache_returns_copies_and_sees_writes(self):
         cfg = app.load_config()
         cfg["theme_color"] = "#000000"

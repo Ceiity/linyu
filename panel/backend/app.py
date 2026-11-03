@@ -282,6 +282,11 @@ def migrate_config(cfg: dict) -> bool:
         base = default_config()
         for key in missing:
             cfg[key] = base[key]
+        # Full-stack install may create remote_api_token before the panel starts.
+        # When we create the password hash, save its matching initial password
+        # as well. Never recreate it for an existing/changed password hash.
+        if "password_hash" in missing and not cfg.get("password_changed_at"):
+            cfg["initial_password"] = base["initial_password"]
         changed = True
     return changed
 
