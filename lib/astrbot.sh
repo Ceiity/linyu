@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/security.sh"
 generate_astrbot_compose(){
   local file="$COMPOSE_DIR/astrbot/docker-compose.yml"; mkdir -p "$(dirname "$file")" "$DATA_DIR"
   : "${ASTRBOT_WEB_PORT:=$(find_free_port 6185)}"; : "${ASTRBOT_WS_PORT:=$(find_free_port 6199)}"
@@ -15,6 +15,7 @@ services:
     ports:
       - "${ASTRBOT_WEB_PORT}:6185"
       - "${ASTRBOT_WS_PORT}:6199"
+      - "8686:8686"
     environment:
       - TZ=${DEFAULT_TIMEZONE}
     volumes:
@@ -29,7 +30,7 @@ networks:
 EOF
   save_state_var ASTRBOT_WEB_PORT "$ASTRBOT_WEB_PORT"; save_state_var ASTRBOT_WS_PORT "$ASTRBOT_WS_PORT"; save_state_var ASTRBOT_IMAGE "$ASTRBOT_IMAGE"; echo "$file"
 }
-deploy_astrbot(){ step "Deploying AstrBot with official image ${ASTRBOT_IMAGE}"; local file; file="$(generate_astrbot_compose)"; compose_pull "$file" || warn "Image pull failed; trying to start with local image/cache."; compose_up "$file"; wait_container "$ASTRBOT_CONTAINER" 180 || { docker logs "$ASTRBOT_CONTAINER" --tail 120 || true; fail "AstrBot container did not become running."; exit 1; }; wait_astrbot_web 180 || warn "AstrBot WebUI did not return HTTP success yet; container is running."; success "AstrBot started: http://$(private_ip):${ASTRBOT_WEB_PORT}"; }
+deploy_astrbot(){ step "Deploying AstrBot with official image ${ASTRBOT_IMAGE}"; local file; file="$(generate_astrbot_compose)"; compose_pull "$file" || warn "Image pull failed; trying to start with local image/cache."; configure_astrbot_firewall || warn "TCP 8686 firewall setup failed; inspect the firewall rules."; compose_up "$file"; wait_container "$ASTRBOT_CONTAINER" 180 || { docker logs "$ASTRBOT_CONTAINER" --tail 120 || true; fail "AstrBot container did not become running."; exit 1; }; wait_astrbot_web 180 || warn "AstrBot WebUI did not return HTTP success yet; container is running."; success "AstrBot started: http://$(private_ip):${ASTRBOT_WEB_PORT}"; }
 wait_astrbot_web(){
   local timeout="${1:-60}" i code web_port="${ASTRBOT_WEB_PORT:-6185}"
   # AstrBot 新版根路径可能返回 405/403，这代表 Web 服务已经启动。

@@ -2,6 +2,33 @@
 set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker.sh"
 
+# Add only the requested rule; never enable a disabled firewall or change SSH.
+configure_astrbot_firewall(){
+  local configured=0 failed=0
+  if have_cmd ufw; then
+    if ufw allow 8686/tcp; then
+      success "UFW: TCP 8686 allow rule configured (activation state unchanged)."
+      configured=1
+    else
+      warn "UFW: failed to allow TCP 8686."
+      failed=1
+    fi
+  fi
+  if have_cmd firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
+    if firewall-cmd --permanent --add-port=8686/tcp && firewall-cmd --add-port=8686/tcp; then
+      success "firewalld: TCP 8686 allowed in permanent and runtime rules."
+      configured=1
+    else
+      warn "firewalld: failed to allow TCP 8686."
+      failed=1
+    fi
+  fi
+  if (( configured == 0 && failed == 0 )); then
+    info "No UFW or running firewalld detected; no host firewall rule changed for TCP 8686."
+  fi
+  return "$failed"
+}
+
 install_fail2ban(){
   step "Installing and configuring Fail2Ban for SSH protection"
   export DEBIAN_FRONTEND=noninteractive

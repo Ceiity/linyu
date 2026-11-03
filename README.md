@@ -47,7 +47,8 @@ sudo bash install.sh
 - 自动安装 Docker 和 Docker Compose
 - 自动安装 Git、Curl、Wget 等依赖
 - 自动创建 Docker Network
-- 自动部署 AstrBot
+- 自动部署 AstrBot，并映射 `8686:8686`（TCP）
+- 部署 AstrBot 时自动为已有 UFW / 运行中的 firewalld 添加 TCP 8686 放行规则，不启用原本关闭的防火墙
 - 支持任意数量 NapCat 实例
 - 每个 NapCat 独立容器、独立配置、独立日志、独立数据
 - 自动分配可用端口，避免端口冲突
@@ -56,6 +57,18 @@ sudo bash install.sh
 - 自动生成部署信息文件
 - 支持备份、恢复、更新、卸载
 - 提供中文管理菜单
+
+## AstrBot TCP 8686
+
+终端全自动部署和网页「初始化部署」都会在生成的
+`/opt/astrbot/compose/astrbot/docker-compose.yml` 中加入 `"8686:8686"`，
+然后使用 Compose `up -d` 应用配置；原有 `/AstrBot/data` 挂载保持不变。
+已有 UFW 会执行 `ufw allow 8686/tcp`；运行中的 firewalld 会添加永久和运行时规则。
+重复部署不会重复添加端口映射，规则配置失败会在部署日志中明确提示。
+没有 UFW / 运行中的 firewalld 时只记录日志，不安装或启用新防火墙，也不改动其它防火墙规则。
+8686 是固定映射，不会自动换端口；容器内服务仍需实际监听 `0.0.0.0:8686`。
+云安全组不由本脚本修改；按本项目部署约定，雨云控制台的规则由用户自行管理。
+仅更新镜像不会重写旧 Compose；旧部署需要重新生成部署配置后才会增加此映射。
 
 ## 官方依据
 
