@@ -55,8 +55,11 @@ get_astrbot_password(){
   if [[ -z "$pass" ]]; then
     pass="$(printf '%s\n' "$logs" | sed -nE 's/.*(初始密码|随机初始密码)[^A-Za-z0-9._@#%+=:-]*([A-Za-z0-9._@#%+=:-]{6,}).*/\2/p' | tail -n1 || true)"
   fi
-  if [[ -z "$pass" ]]; then
-    pass="$(grep -RIEho '"?(password|passwd|initial_password)"?[[:space:]]*[:=][[:space:]]*"?[A-Za-z0-9._@#%+=:-]{6,}' "$DATA_DIR" 2>/dev/null | sed -nE 's/.*[:=][[:space:]]*"?([^"[:space:]]+).*/\1/p' | tail -n1 || true)"
+  # Recreated containers lose their old logs, not their mounted credentials.
+  # Reuse the saved initial password; never mistake an on-disk hash for it.
+  if [[ -z "$pass" && -f "$DEPLOY_INFO_FILE" ]]; then
+    pass="$(sed -n 's/^AstrBot initial random password: //p' "$DEPLOY_INFO_FILE" | tail -n1)"
+    [[ "$pass" =~ ^[A-Za-z0-9._@#%+=:-]{6,128}$ ]] || pass=""
   fi
   [[ -n "$pass" ]] && echo "$pass" || echo "Not parsed automatically; inspect docker logs ${ASTRBOT_CONTAINER}"
 }

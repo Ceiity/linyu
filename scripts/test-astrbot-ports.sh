@@ -55,4 +55,20 @@ wait_astrbot_web(){ return 0; }
 private_ip(){ echo 127.0.0.1; }
 deploy_astrbot
 [[ "$(cat "$events")" == $'firewall\nup' ]]
-echo 'AstrBot TCP 8686 tests passed'
+# Initial credentials survive container recreation even if its old logs do not.
+(
+  DEPLOY_INFO_FILE="$tmp/deploy_info.txt"
+  fixture_logs=""; changed=0
+  jq(){ [[ "$changed" == 1 ]]; }
+  docker(){ printf '%s\n' "$fixture_logs"; }
+  printf '{"dashboard":{"password":"0123456789abcdef0123456789abcdef"}}\n' > "$DATA_DIR/cmd_config.json"
+  printf 'AstrBot initial random password: SavedPass12345\n' > "$DEPLOY_INFO_FILE"
+  [[ "$(get_astrbot_password)" == SavedPass12345 ]]
+  fixture_logs='Initial password: NewPass12345'
+  [[ "$(get_astrbot_password)" == NewPass12345 ]]
+  fixture_logs=""; rm "$DEPLOY_INFO_FILE"
+  [[ "$(get_astrbot_password)" == 'Not parsed automatically;'* ]]
+  changed=1
+  [[ "$(get_astrbot_password)" == '初始密码已被更改' ]]
+)
+echo 'AstrBot TCP 8686 and credential recovery tests passed'
