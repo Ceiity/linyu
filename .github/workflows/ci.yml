@@ -20,7 +20,7 @@ jobs:
         run: python -m pip install -r panel/requirements.txt pyflakes shellcheck-py
       - name: Lint
         run: |
-          python -m pyflakes panel/backend/app.py plugins/astrbot_plugin_nailong_remote_admin/main.py scripts/security-check.py tests
+          python -m pyflakes panel/backend/app.py plugins/astrbot_plugin_nailong_remote_admin/main.py scripts/security-check.py scripts/mirror-catalog.py tests
           shellcheck -S error install.sh manager.sh update.sh backup.sh restore.sh uninstall.sh scripts/*.sh lib/*.sh
       - name: Validate
         run: bash scripts/validate.sh

@@ -22,7 +22,7 @@ if [[ ! -f "$SCRIPT_DIR/scripts/install-core.sh" ]]; then
   # a small request through each; NAILONG_MIRROR=off forces direct.
   fastest_repo(){
     local repo="$1" best="" best_t=999999 c t
-    [[ "${NAILONG_MIRROR:-auto}" == "off" ]] && { echo "$repo"; return; }
+    [[ "${NAILONG_MIRROR:-auto}" == "off" || -n "${GITHUB_TOKEN:-}" ]] && { echo "$repo"; return; }
     for c in "" https://ghfast.top/ https://gh-proxy.com/ https://ghproxy.net/; do
       t="$(curl -sS -o /dev/null --connect-timeout 3 --max-time 6 -w '%{http_code} %{time_total}' "${c}${repo%.git}/info/refs?service=git-upload-pack" 2>/dev/null || true)"
       [[ "${t%% *}" == "200" ]] || continue

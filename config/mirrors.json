@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "apt": [
+    "https://mirrors.aliyun.com",
+    "https://mirrors.tuna.tsinghua.edu.cn",
+    "https://mirrors.ustc.edu.cn",
+    "https://mirrors.cloud.tencent.com",
+    "https://repo.huaweicloud.com",
+    "https://mirrors.nju.edu.cn",
+    "https://mirrors.sjtug.sjtu.edu.cn",
+    "https://mirrors.bfsu.edu.cn"
+  ],
+  "pip": [
+    "https://pypi.org/simple",
+    "https://pypi.tuna.tsinghua.edu.cn/simple",
+    "https://mirrors.aliyun.com/pypi/simple",
+    "https://mirrors.cloud.tencent.com/pypi/simple",
+    "https://repo.huaweicloud.com/repository/pypi/simple",
+    "https://mirrors.bfsu.edu.cn/pypi/web/simple"
+  ],
+  "github": [
+    "https://ghfast.top/",
+    "https://gh-proxy.com/",
+    "https://ghproxy.net/"
+  ],
+  "docker": [
+    "https://docker.1ms.run",
+    "https://docker.m.daocloud.io",
+    "https://docker.xuanyuan.me",
+    "https://dockerproxy.net",
+    "https://dockerproxy.link",
+    "https://docker.1panel.live",
+    "https://docker.jiaxin.site",
+    "https://registry.cyou",
+    "https://free.hubfast.cn"
+  ]
+}

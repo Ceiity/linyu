@@ -58,6 +58,41 @@ sudo bash install.sh
 - 支持备份、恢复、更新、卸载
 - 提供中文管理菜单
 
+## 在线镜像源发现与自动优选
+
+一键安装自动加载项目维护的在线候选清单 `config/mirrors.json`（APT、PyPI、GitHub、Docker）；
+Docker 还会从 [dongyubin/DockerHub 的有效源表格](https://github.com/dongyubin/DockerHub)补充候选，忽略已失效段落及明确标注需登录、会员或仅内网的条目。
+不是扫描所有网站，也不保证任何公益源永久可用。下载清单失败自动保留缓存、本地清单和内置候选。
+
+- 从实际部署服务器发起响应耗时测试（不是持续下载带宽测试），官方源也参与选择。
+- 默认每类最多 32 个候选、8 个并发；单次测速 6 秒超时。在线清单最多 1 MiB，24 小时缓存。
+- Docker `/v2/` 除了检查 200 / 401，还要求 Registry V2 协议响应头，避免误选返回网页的失效代理。
+- 按响应耗时保留前三个 Docker 加速源；镜像名不改，由 Docker 自身处理镜像源与官方回退。接口探测成功不代表该源一定缓存了 AstrBot / NapCat，最终以实际拉取结果为准。
+- 配置相同时不重启 Docker；配置变化前生成带时间的备份，原子写入并回读验证；验证或重启失败时自动还原。JSON 已损坏时保留原文件，不覆盖。
+- 无论自动发现成功与否，都保留 `NAILONG_MIRROR=off` 和手动指定源的开关。
+- 首次引导克隆仍使用内置 GitHub 路由，下载完整项目后才运行在线清单发现；私有仓库引导不向公共代理发送 Token。
+
+可选环境变量（普通一键安装无需填写）：
+
+| 变量 | 默认值 / 用途 |
+| --- | --- |
+| `MIRROR_DISCOVERY` | `auto`；`off` 只使用本地和内置候选 |
+| `MIRROR_CATALOG_URLS` | 本仓库 main 的 `config/mirrors.json` Raw URL；可用空格/逗号指定最多 3 个兼容 HTTPS JSON 清单 |
+| `DOCKER_MIRROR_LIST_URL` | dongyubin/DockerHub main 的 README Raw URL；空值关闭此额外来源 |
+| `MIRROR_CACHE_TTL` | `86400` 秒 |
+| `MIRROR_DISCOVERY_TIMEOUT` | `4` 秒，限制在 1–15 秒 |
+| `MIRROR_MAX_CANDIDATES` | `32`，最多 64 |
+| `MIRROR_CONCURRENCY` | `8`，最多 16 |
+| `MIRROR_PROBE_TIMEOUT` | `6` 秒 |
+| `APT_MIRROR` / `PIP_INDEX_URL` / `GH_PROXY` / `DOCKER_MIRRORS` | 手动设置时优先，不自动替换所指定类别 |
+
+离线清单也在 `config/mirrors.json`，版本字段为 `"version": 1`，四类候选为 HTTPS URL 数组。
+自动下载的内容只解析为数据，不作为脚本执行。候选不接受账号密码、IP 字面量或内网域名。
+
+Docker 配置备份形如 `/etc/docker/daemon.json.nailong-日期时间-编号.bak`，部署日志记录本次备份路径。
+手动还原：`cp -a /日志中的具体备份路径 /etc/docker/daemon.json && systemctl restart docker`。
+若日志中 snapshot 为 `-`，表示原本没有该文件，撤回时删除此次新建的 `/etc/docker/daemon.json` 后重启 Docker。
+
 ## AstrBot TCP 8686
 
 终端全自动部署和网页「初始化部署」都会在生成的

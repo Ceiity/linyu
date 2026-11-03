@@ -10,6 +10,7 @@ done
 python3 -m py_compile panel/backend/app.py plugins/astrbot_plugin_nailong_remote_admin/main.py
 python3 scripts/security-check.py
 bash scripts/test-astrbot-ports.sh
+bash scripts/test-mirrors.sh
 python3 -m unittest discover -s tests
 grep -q 'install_nailong_remote_plugin' scripts/install-core.sh
 grep -q 'install_nailong_remote_plugin' panel/backend/app.py

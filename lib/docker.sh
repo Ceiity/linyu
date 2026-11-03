@@ -15,7 +15,7 @@ wait_apt_locks(){
   fail "apt/dpkg lock wait timeout"
   return 1
 }
-install_dependencies(){ export DEBIAN_FRONTEND=noninteractive; setup_mirrors_early; step "Installing system dependencies"; wait_apt_locks; apt-get update -y; wait_apt_locks; apt-get install -y ca-certificates curl wget git gnupg lsb-release jq tar gzip coreutils iproute2 procps openssl; }
+install_dependencies(){ export DEBIAN_FRONTEND=noninteractive; setup_mirrors_early; step "Installing system dependencies"; wait_apt_locks; apt-get update -y; wait_apt_locks; apt-get install -y ca-certificates curl wget git gnupg lsb-release jq tar gzip coreutils iproute2 procps openssl python3; }
 install_docker(){
   if have_cmd docker && docker version >/dev/null 2>&1; then success "Docker already installed: $(docker --version)"; else
     step "Installing Docker"; apt-get install -y docker.io || true; apt-get install -y docker-compose-plugin docker-compose || true; if ! have_cmd docker; then if [[ -n "${GH_PROXY:-}" ]]; then curl -fsSL https://get.docker.com | sh -s -- --mirror Aliyun; else curl -fsSL https://get.docker.com | sh; fi; fi

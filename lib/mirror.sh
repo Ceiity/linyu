@@ -18,28 +18,64 @@ set -Eeuo pipefail
 # when they answer the probe, and docker falls back to Docker Hub itself.
 
 MIRROR_PROBE_TIMEOUT="${MIRROR_PROBE_TIMEOUT:-6}"
+MIRROR_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+mirror_catalog_tool(){ echo "$MIRROR_LIB_DIR/../scripts/mirror-catalog.py"; }
+
+# Refresh bounded online catalogs, then merge with local and built-in fallbacks.
+mirror_candidates(){
+  local kind="$1"; shift
+  if have_cmd python3 && [[ -f "$(mirror_catalog_tool)" ]]; then
+    python3 "$(mirror_catalog_tool)" candidates "$kind" \
+      --cache-dir "${MIRROR_CACHE_DIR:-${INSTALL_PREFIX:-/opt/astrbot}/cache/mirrors}" \
+      --timeout "${MIRROR_DISCOVERY_TIMEOUT:-4}" --ttl "${MIRROR_CACHE_TTL:-86400}" || true
+  fi
+  if (( $# )); then printf '%s\n' "$@"; fi
+}
 
 mirror_enabled(){ [[ "${NAILONG_MIRROR:-auto}" != "off" ]] && have_cmd curl; }
 
 # mirror_probe URL [ok_codes] -> prints milliseconds, or nothing on failure.
 mirror_probe(){
-  local url="$1" codes="${2:-200}" out code t
-  out="$(curl -sS -o /dev/null -L --connect-timeout 3 --max-time "$MIRROR_PROBE_TIMEOUT" -w '%{http_code} %{time_total}' "$url" 2>/dev/null)" || return 1
+  local url="$1" codes="${2:-200}" out code t headers
+  headers="$(mktemp)"
+  if ! out="$(curl -sS -o /dev/null -D "$headers" -L --proto '=http,https' --proto-redir '=http,https' \
+      --connect-timeout 3 --max-time "$MIRROR_PROBE_TIMEOUT" -w '%{http_code} %{time_total}' "$url" 2>/dev/null)"; then
+    rm -f "$headers"; return 1
+  fi
   code="${out%% *}"; t="${out##* }"
-  [[ " $codes " == *" $code "* ]] || return 1
+  if [[ " $codes " != *" $code "* ]]; then rm -f "$headers"; return 1; fi
+  # A proxy homepage returning HTTP 200 is not a working registry.
+  if [[ "$url" == */v2/ ]] && ! grep -Eiq '^Docker-Distribution-Api-Version:[[:space:]]*registry/2[.]0' "$headers"; then
+    rm -f "$headers"; return 1
+  fi
+  rm -f "$headers"
   awk -v t="$t" 'BEGIN{printf "%d\n", t*1000}'
 }
 
-# mirror_race "label" "probe-suffix" "ok-codes" candidate... -> prints "ms candidate" lines, fastest first.
+# Bounded parallel probes; the measured value is response latency, not MB/s.
 mirror_race(){
   local label="$1" suffix="$2" codes="$3"; shift 3
-  local c ms tmp seen=" "; tmp="$(mktemp)"
+  local c ms tmp seen=" " count=0 pid jobs=() max="${MIRROR_MAX_CANDIDATES:-32}" workers="${MIRROR_CONCURRENCY:-8}"
+  [[ "$max" =~ ^[1-9][0-9]?$ ]] || max=32
+  [[ "$workers" =~ ^[1-9][0-9]?$ ]] || workers=8
+  (( max <= 64 )) || max=64
+  (( workers <= 16 )) || workers=16
+  tmp="$(mktemp -d)"
   for c in "$@"; do
-    [[ "$seen" == *" $c "* ]] && continue; seen+="$c "
-    ( ms="$(mirror_probe "${c}${suffix}" "$codes")" && echo "$ms $c" >> "$tmp" ) &
+    [[ -n "$c" && "$seen" != *" $c "* ]] || continue
+    seen+="$c "; count=$((count+1))
+    ( if ms="$(mirror_probe "${c}${suffix}" "$codes")"; then printf '%s %s\n' "$ms" "$c" > "$tmp/$count"; fi ) &
+    jobs+=("$!")
+    if (( ${#jobs[@]} >= workers )); then
+      for pid in "${jobs[@]}"; do wait "$pid" || true; done
+      jobs=()
+    fi
+    (( count < max )) || break
   done
-  wait
-  sort -n "$tmp"; rm -f "$tmp"
+  for pid in "${jobs[@]}"; do wait "$pid" || true; done
+  find "$tmp" -type f -exec cat {} + | sort -nk1,1 -k2,2
+  rm -rf -- "$tmp"
 }
 
 mirror_report(){
@@ -68,7 +104,7 @@ apt_source_files(){
 setup_apt_mirror(){
   mirror_enabled || return 0
   [[ -r /etc/os-release ]] || return 0
-  local id codename path arch current best results files f
+  local id codename path arch current best results files f candidates=()
   . /etc/os-release; id="${ID:-}"; codename="${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}"
   arch="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
   case "$id" in
@@ -83,7 +119,8 @@ setup_apt_mirror(){
   [[ "$path" == "ubuntu-ports" ]] && official="http://ports.ubuntu.com"
   if [[ -n "${APT_MIRROR:-}" ]]; then best="$APT_MIRROR"; else
     step "Testing apt mirrors"
-    results="$(mirror_race apt "/${path}/dists/${codename}/Release" "200" ${current:+"$current"} "$official" "${APT_CANDIDATES[@]}")"
+    mapfile -t candidates < <(mirror_candidates apt "${APT_CANDIDATES[@]}")
+    results="$(mirror_race apt "/${path}/dists/${codename}/Release" "200" ${current:+"$current"} "$official" "${candidates[@]}")"
     mirror_report "apt" "$results"
     best="$(head -n1 <<<"$results" | awk '{print $2}')"
     [[ -n "$best" ]] || { warn "apt mirror test failed; keeping current sources"; return 0; }
@@ -118,13 +155,13 @@ PIP_CANDIDATES=(
 setup_pip_mirror(){
   [[ -n "${PIP_INDEX_URL:-}" ]] && { export PIP_INDEX_URL; return 0; }
   mirror_enabled || return 0
-  local results best
-  results="$(mirror_race pip "/pip/" "200" "${PIP_CANDIDATES[@]}")"
+  local results best candidates=()
+  mapfile -t candidates < <(mirror_candidates pip "${PIP_CANDIDATES[@]}")
+  results="$(mirror_race pip "/pip/" "200" "${candidates[@]}")"
   mirror_report "PyPI" "$results"
   best="$(head -n1 <<<"$results" | awk '{print $2}')"
   [[ -n "$best" ]] || return 0
   export PIP_INDEX_URL="$best"
-  export PIP_TRUSTED_HOST="$(sed -E 's#https?://([^/]+).*#\1#' <<<"$best")"
   export PIP_DEFAULT_TIMEOUT=30
   success "PyPI: ${best}"
 }
@@ -141,11 +178,13 @@ setup_github_proxy(){
   [[ -n "${GH_PROXY+x}" ]] && return 0
   export GH_PROXY=""
   mirror_enabled || return 0
-  local probe="https://raw.githubusercontent.com/Ceiity/linyu/main/README.md" results tmp c ms
-  tmp="$(mktemp)"
-  ( ms="$(mirror_probe "$probe")" && echo "$ms direct" >> "$tmp" ) &
-  for c in "${GH_PROXY_CANDIDATES[@]}"; do ( ms="$(mirror_probe "${c}${probe}")" && echo "$ms $c" >> "$tmp" ) & done
-  wait; results="$(sort -n "$tmp")"; rm -f "$tmp"
+  local probe="https://raw.githubusercontent.com/Ceiity/linyu/main/README.md" results c candidates=()
+  mapfile -t candidates < <(mirror_candidates github "${GH_PROXY_CANDIDATES[@]}")
+  # Official direct route participates alongside discovered proxy routes.
+  local direct
+  direct="$(mirror_probe "$probe" || true)"
+  results="$(mirror_race github "$probe" "200" "${candidates[@]}")"
+  [[ -z "$direct" ]] || results="$(printf '%s\n%s direct\n' "$results" "$direct" | sed '/^$/d' | sort -nk1,1 -k2,2)"
   mirror_report "GitHub" "$results"
   c="$(head -n1 <<<"$results" | awk '{print $2}')"
   if [[ -n "$c" && "$c" != "direct" ]]; then GH_PROXY="$c"; fi
@@ -168,52 +207,68 @@ DOCKER_MIRROR_CANDIDATES=(
   https://docker.m.daocloud.io
   https://docker.xuanyuan.me
   https://dockerproxy.net
-  https://hub.rat.dev
+  https://dockerproxy.link
   https://docker.1panel.live
 )
+
+restart_docker_for_mirrors(){
+  local i
+  if ! systemctl restart docker; then service docker restart || return 1; fi
+  for ((i=0;i<15;i++)); do
+    docker version >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  return 1
+}
 
 setup_docker_mirrors(){
   mirror_enabled || return 0
   have_cmd docker || return 0
-  local results hub_ms list=() line
+  local results hub_ms list=() line candidates=() result action backup
+  local config="${DOCKER_DAEMON_CONFIG:-/etc/docker/daemon.json}" tool
+  tool="$(mirror_catalog_tool)"
   if [[ -n "${DOCKER_MIRRORS:-}" ]]; then
     read -r -a list <<<"${DOCKER_MIRRORS//,/ }"
   else
-    step "Testing Docker Hub and registry mirrors"
+    step "Discovering and testing Docker Hub registry mirrors"
     hub_ms="$(mirror_probe "https://registry-1.docker.io/v2/" "200 401" || true)"
-    if [[ -n "$hub_ms" ]] && (( hub_ms < 1500 )); then
-      success "Docker Hub reachable directly (${hub_ms} ms); no registry mirror needed"
-      return 0
-    fi
-    results="$(mirror_race docker "/v2/" "200 401" "${DOCKER_MIRROR_CANDIDATES[@]}")"
+    mapfile -t candidates < <(mirror_candidates docker "${DOCKER_MIRROR_CANDIDATES[@]}")
+    results="$(mirror_race docker "/v2/" "200 401" "${candidates[@]}")"
     mirror_report "Docker registry" "$results"
+    if [[ -n "$hub_ms" ]]; then
+      line="$(head -n1 <<<"$results" | awk '{print $1}')"
+      if [[ -z "$line" ]] || (( hub_ms <= line )); then
+        success "Docker Hub is the fastest reachable route (${hub_ms} ms); keeping Docker config unchanged"
+        return 0
+      fi
+    fi
     while read -r _ line; do [[ -n "$line" ]] && list+=("$line"); done <<<"$results"
     list=("${list[@]:0:3}")
   fi
-  (( ${#list[@]} )) || { warn "No Docker registry mirror answered; image pulls go to Docker Hub directly."; return 0; }
-  mkdir -p /etc/docker
-  python3 - "/etc/docker/daemon.json" "${list[@]}" <<'PY' || { warn "Could not update /etc/docker/daemon.json"; return 0; }
-import json, os, sys
-path, mirrors = sys.argv[1], sys.argv[2:]
-cfg = {}
-if os.path.exists(path):
-    try:
-        cfg = json.load(open(path, encoding="utf-8")) or {}
-    except Exception:
-        os.replace(path, path + ".broken")
-        cfg = {}
-if cfg.get("registry-mirrors") == mirrors:
-    sys.exit(0)
-if os.path.exists(path) and not os.path.exists(path + ".nailong.bak"):
-    import shutil; shutil.copy2(path, path + ".nailong.bak")
-cfg["registry-mirrors"] = mirrors
-tmp = path + ".tmp"
-json.dump(cfg, open(tmp, "w", encoding="utf-8"), indent=2)
-os.replace(tmp, path)
-PY
-  systemctl daemon-reload >/dev/null 2>&1 || true
-  systemctl restart docker >/dev/null 2>&1 || service docker restart >/dev/null 2>&1 || true
-  if docker version >/dev/null 2>&1; then success "Docker registry mirrors: ${list[*]}"; else warn "Docker did not come back after adding mirrors; check: journalctl -u docker"; fi
+  (( ${#list[@]} )) || { warn "No verified registry mirror answered; keeping Docker config unchanged (official fallback)."; return 0; }
+  if ! result="$(python3 "$tool" configure-docker "$config" "${list[@]}")"; then
+    warn "Could not update $config; original config unchanged"
+    return 1
+  fi
+  IFS=$'\t' read -r action backup <<<"$result"
+  if [[ "$action" == unchanged ]]; then
+    success "Docker registry mirrors already configured; no daemon restart needed"
+    return 0
+  fi
+  info "Docker config updated and read back; snapshot: ${backup} (- means config did not exist)"
+  if have_cmd dockerd && ! dockerd --validate --config-file "$config"; then
+    python3 "$tool" restore-docker "$config" "$backup" || return 1
+    warn "Docker config validation failed; restored previous config without restarting Docker"
+    return 1
+  fi
+  if restart_docker_for_mirrors; then
+    success "Docker registry mirrors: ${list[*]}"
+  else
+    warn "Docker restart failed; restoring the exact pre-change config"
+    python3 "$tool" restore-docker "$config" "$backup" || return 1
+    restart_docker_for_mirrors || warn "Docker recovery failed; inspect: journalctl -u docker"
+    return 1
+  fi
 }
 
 # Run all probes up front (they are independent and run in parallel internally).
