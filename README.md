@@ -44,7 +44,7 @@ sudo bash install.sh
 - 自动检测 Debian / Ubuntu 系统
 - 自动检测 CPU 架构
 - 自动检测网络
-- 自动安装 Docker 和 Docker Compose
+- 自动安装 Docker 和 Docker Compose；优先安装 v2（兼容 Docker CE 的 `docker-compose-plugin` 与 Ubuntu 的 `docker-compose-v2`），只有 v2 不可用时才回退独立版
 - 自动安装 Git、Curl、Wget 等依赖
 - 自动创建 Docker Network
 - 自动部署 AstrBot，并映射 `8686:8686`（TCP）

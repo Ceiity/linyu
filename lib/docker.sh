@@ -16,14 +16,36 @@ wait_apt_locks(){
   return 1
 }
 install_dependencies(){ export DEBIAN_FRONTEND=noninteractive; setup_mirrors_early; step "Installing system dependencies"; wait_apt_locks; apt-get update -y; wait_apt_locks; apt-get install -y ca-certificates curl wget git gnupg lsb-release jq tar gzip coreutils iproute2 procps openssl python3; }
+ensure_compose(){
+  docker compose version >/dev/null 2>&1 && return 0
+  local package
+  wait_apt_locks
+  # Docker CE and Ubuntu's docker.io use different Compose v2 package names.
+  for package in docker-compose-plugin docker-compose-v2; do
+    if apt-get install -y "$package" && docker compose version >/dev/null 2>&1; then
+      success "Docker Compose v2 installed: $package"
+      return 0
+    fi
+  done
+  if have_cmd docker-compose; then
+    warn "Compose v2 packages unavailable; keeping existing standalone Compose."
+    return 0
+  fi
+  if apt-get install -y docker-compose && have_cmd docker-compose; then
+    warn "Compose v2 packages unavailable; using standalone Compose fallback."
+    return 0
+  fi
+  fail "Docker Compose is not available."
+  return 1
+}
 install_docker(){
   if have_cmd docker && docker version >/dev/null 2>&1; then success "Docker already installed: $(docker --version)"; else
-    step "Installing Docker"; apt-get install -y docker.io || true; apt-get install -y docker-compose-plugin docker-compose || true; if ! have_cmd docker; then if [[ -n "${GH_PROXY:-}" ]]; then curl -fsSL https://get.docker.com | sh -s -- --mirror Aliyun; else curl -fsSL https://get.docker.com | sh; fi; fi
+    step "Installing Docker"; apt-get install -y docker.io || true; if ! have_cmd docker; then if [[ -n "${GH_PROXY:-}" ]]; then curl -fsSL https://get.docker.com | sh -s -- --mirror Aliyun; else curl -fsSL https://get.docker.com | sh; fi; fi
   fi
   systemctl enable docker >/dev/null 2>&1 || true; systemctl start docker >/dev/null 2>&1 || service docker start >/dev/null 2>&1 || true
   docker version >/dev/null 2>&1 || { fail "Docker failed to start. Inspect: journalctl -u docker"; exit 1; }
   setup_docker_mirrors || warn "Docker registry mirror setup failed; continuing with Docker Hub"
-  if ! docker compose version >/dev/null 2>&1 && ! have_cmd docker-compose; then apt-get install -y docker-compose-plugin || true; apt-get install -y docker-compose || true; fi
+  ensure_compose || exit 1
   compose_cmd >/dev/null || { fail "Docker Compose is not available."; exit 1; }
   success "Docker: $(docker --version)"; success "Compose: $($(compose_cmd) version 2>/dev/null | head -n1)"
 }
