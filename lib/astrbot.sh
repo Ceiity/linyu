@@ -13,7 +13,7 @@ services:
     security_opt:
       - no-new-privileges:true
     ports:
-      - "${ASTRBOT_WEB_PORT}:6185"
+      - "127.0.0.1:${ASTRBOT_WEB_PORT}:6185"
       - "${ASTRBOT_WS_PORT}:6199"
       - "8686:8686"
     environment:

@@ -18,11 +18,13 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Ceiity/linyu/main/install.sh
 
 1. 自动安装 Docker、Docker Compose、Git、Curl、Fail2Ban 等依赖。
 2. 自动创建安装目录和 Docker Network。
-3. 自动启动 Web 控制台。
+3. 自动启动 Web 控制台，并尝试为服务器公网 IP 开启 HTTPS。
 4. 用户打开网页，在仪表盘里填写 NapCat 数量和连接 Token。
 5. 点击“开始自动部署”，面板异步完成 AstrBot + NapCat 部署。
 
 这样小白用户不用在终端里回答一堆问题。
+
+安装程序默认自动识别公网 IPv4、申请 Let's Encrypt IP 证书、配置 Nginx、开放主机防火墙的 80/443，并安装每天两次的自动续期任务。云厂商安全组仍需提前放行 TCP 80/443。若暂时不需要 HTTPS，可在安装命令前设置 `NAILONG_AUTO_IP_HTTPS=0`。
 
 如果你仍然想使用旧版终端全自动部署，可以执行：
 
@@ -324,6 +326,24 @@ MIT License
 ## 项目商标
 
 Web 控制台内置“奶龙” SVG 商标，文件位置：`panel/static/nailong-robot.svg`。它会自动用于登录页、侧边栏品牌区和浏览器图标，造型是一只圆滚滚的黄色小龙，深色圆角底，适合浅色/深色模式和手机端显示。
+
+## v2.7.0 更新说明（公网 IP 一键 HTTPS）
+
+- 不再强制要求域名：安装时自动识别服务器公网 IPv4，并通过 Let's Encrypt `shortlived` 配置申请浏览器信任的 IP 证书。
+- 一键安装默认自动尝试 HTTPS；失败不会中断 AstrBot / NapCat 安装，会明确提示检查云安全组的 TCP 80/443。
+- Web 控制台「系统设置」新增「一键 IP HTTPS」，管理菜单新增同名入口；仍兼容原有域名证书模式。
+- 自动安装 Certbot 5.4+、生成 Nginx 反向代理、将 HTTP 重定向到 HTTPS，并把面板源服务收紧到 `127.0.0.1`。
+- 面板、AstrBot WebUI 与所有 NapCat WebUI 共用同一张 IP 证书；这些真实 HTTP 服务只绑定 `127.0.0.1`，Nginx 在原管理端口提供 HTTPS，内部 WebSocket/OneBot 协议不被错误套用 HTTPS。
+- 新增 systemd 续期定时器，每天检查两次短期 IP 证书并在续期后自动重载 Nginx。
+- 主机启用了 UFW 或 firewalld 时自动放行 80/443；云厂商安全组仍需用户在服务商控制台放行。
+
+手动执行：
+
+```bash
+sudo bash /opt/astrbot/AstrBot-Deploy/scripts/https.sh --ip
+```
+
+完成后统一从 `https://服务器公网IP/` 进入奶龙控制台；控制台里的 AstrBot / NapCat 链接也会自动保持 HTTPS。主机防火墙会自动放行所需 Web 端口，云厂商安全组仍需在服务商控制台放行对应端口。
 
 ## v2.6.0 更新说明（扫码登录修复、安装加速）
 

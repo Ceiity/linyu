@@ -44,7 +44,7 @@ except Exception:
     hashes = serialization = padding = rsa = AESGCM = None
     LOGIN_CRYPTO_AVAILABLE = False
 
-APP_VERSION = "2.6.0"
+APP_VERSION = "2.7.0"
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", "/opt/astrbot/AstrBot-Deploy"))
 INSTALL_PREFIX = Path(os.environ.get("INSTALL_PREFIX", "/opt/astrbot"))
 STATE_FILE = Path(os.environ.get("STATE_FILE", str(INSTALL_PREFIX / ".env")))
@@ -1954,16 +1954,19 @@ def backups_data() -> list[dict]:
 
 def https_status() -> dict:
     st = shell_state()
-    domain = st.get("HTTPS_DOMAIN", "")
-    url = st.get("HTTPS_PANEL_URL", "https://" + domain if domain else "")
-    cert_path = Path("/etc/letsencrypt/live") / domain / "fullchain.pem" if domain else Path("")
+    identifier = st.get("HTTPS_IDENTIFIER", "") or st.get("HTTPS_DOMAIN", "")
+    target_kind = st.get("HTTPS_TARGET_KIND", "domain" if identifier else "")
+    url = st.get("HTTPS_PANEL_URL", "https://" + identifier if identifier else "")
+    cert_path = Path("/etc/letsencrypt/live") / identifier / "fullchain.pem" if identifier else Path("")
     code, nginx = run_process(["bash", "-lc", "systemctl is-active nginx 2>/dev/null || true"], timeout=10)
     code2, certbot = run_process(["bash", "-lc", "command -v certbot >/dev/null 2>&1 && certbot --version || true"], timeout=10)
     return {
-        "enabled": bool(domain and cert_path.exists()),
-        "domain": domain,
+        "enabled": bool(identifier and cert_path.exists()),
+        "domain": identifier if target_kind == "domain" else "",
+        "identifier": identifier,
+        "target_kind": target_kind,
         "url": url,
-        "certificate": str(cert_path) if domain else "",
+        "certificate": str(cert_path) if identifier else "",
         "nginx": nginx.strip(),
         "certbot": certbot.strip(),
     }
@@ -3477,17 +3480,28 @@ class Handler(BaseHTTPRequestHandler):
         )
         if count > 0:
             script += "add_napcat_instances %d; " % count
-        script += "repair_astrbot_napcat_connection; write_deploy_info"
+        script += (
+            "repair_astrbot_napcat_connection; "
+            "if [[ -n \"${HTTPS_IDENTIFIER:-}\" ]]; then "
+            "HTTPS_TARGET=\"$HTTPS_IDENTIFIER\" HTTPS_TARGET_KIND=\"${HTTPS_TARGET_KIND:-auto}\" bash scripts/https.sh; "
+            "fi; write_deploy_info"
+        )
         t = create_task("初始化部署 AstrBot + NapCat", "deploy.start", task_shell, user, "开始初始化部署", script, 2400)
         self.send_api(api(True, t.to_dict()))
 
     def https_setup(self, user: str):
         data = self.read_json()
+        mode = str(data.get("mode", "domain")).strip().lower()
         domain = str(data.get("domain", "")).strip()
         email = str(data.get("email", "")).strip()
+        if mode == "ip":
+            script = "HTTPS_EMAIL=%s bash scripts/https.sh --ip" % sh_quote(email)
+            t = create_task("一键开启公网 IP HTTPS", "https.setup", task_shell, user, "自动识别公网 IP 并申请证书", script, 2400)
+            self.send_api(api(True, t.to_dict()))
+            return
         if not domain or "." not in domain or "/" in domain:
             raise ValueError("请输入正确域名，例如 panel.example.com")
-        script = "HTTPS_DOMAIN=%s HTTPS_EMAIL=%s bash scripts/https.sh" % (sh_quote(domain), sh_quote(email))
+        script = "HTTPS_EMAIL=%s bash scripts/https.sh --domain %s" % (sh_quote(email), sh_quote(domain))
         t = create_task("自动配置 HTTPS", "https.setup", task_shell, user, "开始安装 Nginx / Certbot 并申请证书", script, 2400)
         self.send_api(api(True, t.to_dict()))
 
