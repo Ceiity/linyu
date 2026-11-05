@@ -12,6 +12,7 @@ python3 scripts/security-check.py
 bash scripts/test-astrbot-ports.sh
 bash scripts/test-mirrors.sh
 bash scripts/test-docker-install.sh
+bash scripts/test-https.sh
 python3 -m unittest discover -s tests
 grep -q 'install_nailong_remote_plugin' scripts/install-core.sh
 grep -q 'install_nailong_remote_plugin' panel/backend/app.py
