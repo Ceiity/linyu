@@ -49,10 +49,7 @@ parse_args(){
         shift ;;
     esac
   done
-  if [[ "${HTTPS_IP:-0}" == "1" ]]; then
-    TARGET_KIND="ip"
-  fi
-  return 0
+  [[ "${HTTPS_IP:-0}" == "1" ]] && TARGET_KIND="ip"
 }
 
 valid_domain(){
