@@ -82,23 +82,16 @@ python3 panel/backend/app.py --host 0.0.0.0 --port 7070
 
 ## HTTPS
 
-Web 控制台内置 Let's Encrypt 自动配置入口。没有域名时，可以直接为服务器公网 IPv4 申请浏览器信任的短期证书：
+Web 控制台内置 Let's Encrypt 自动配置入口。
 
 要求：
 
+- 域名已经解析到服务器公网 IP。
 - 80/443 端口已在安全组开放。
-- 公网 IP 固定并实际指向当前服务器。
-- IP 证书有效期约 6 天，项目内置的 systemd 定时器每天检查两次并自动续期。
-- 面板、AstrBot WebUI 和 NapCat WebUI 会共用该证书；它们的 HTTP 源站端口只监听本机回环地址。
+- 使用 HTTP-01 校验，不能只用裸 IP 申请证书。
 
 命令行：
 
 ```bash
-# 无域名，自动识别公网 IP
-sudo bash scripts/https.sh --ip
-
-# 有域名时仍可使用传统模式
-sudo bash scripts/https.sh --domain panel.example.com --email admin@example.com
+HTTPS_DOMAIN=panel.example.com HTTPS_EMAIL=admin@example.com bash scripts/https.sh
 ```
-
-网页入口：系统设置 → HTTPS / Let's Encrypt → 一键 IP HTTPS。

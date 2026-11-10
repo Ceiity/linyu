@@ -107,7 +107,7 @@ services:
       - NAPCAT_GID=1000
       - TZ=${DEFAULT_TIMEZONE}
     ports:
-      - "127.0.0.1:${webui_port}:6099"
+      - "${webui_port}:6099"
       - "127.0.0.1:${ws_port}:3001"
       - "127.0.0.1:${http_port}:3000"
     volumes:
